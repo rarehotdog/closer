@@ -1,0 +1,12 @@
+# secrets: never commit
+.env
+.env.*
+!.env.example
+
+# local data (mock DB files, test DBs)
+.data/
+
+# tooling
+node_modules/
+*.log
+.DS_Store
