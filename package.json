@@ -9,7 +9,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node --disable-warning=ExperimentalWarning --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tests/reporter.mjs --test-reporter-destination=docs/at_results.json \"tests/**/*.test.ts\" && node scripts/at_report.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tests/reporter.mjs --test-reporter-destination=docs/at_results.json \"tests/**/*.test.ts\"; s=$?; node scripts/at_report.ts; exit $s",
     "ui": "node --disable-warning=ExperimentalWarning web/server.ts",
     "typecheck": "tsc -p tsconfig.json",
     "screens": "node scripts/screenshots.cjs"
