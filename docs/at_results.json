@@ -1,0 +1,334 @@
+{
+  "results": [
+    {
+      "name": "AT-01 [mock] photo registration — 4 cards, SAM ids {1,2,3,4}, ledger +0 before confirm, +4 and read-back match after",
+      "file": "tests/at_registration.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-01 [real] photo registration on the deployed build",
+      "file": "tests/at_registration.test.ts",
+      "status": "SKIP",
+      "reason": "needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–)"
+    },
+    {
+      "name": "AT-02 [mock] unknown question 1 — only the unknown that changes the result is asked (FX-E4)",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-03 [mock] exclusion ledger — LAUNDRY/REPAIR/STORED: 0 candidates, ≥1 reason code each",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-04 [mock] proposal and state are separate — PROPOSED ≤ 2, availability unchanged",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-05 bottleneck badge",
+      "file": "tests/at_plan.test.ts",
+      "status": "SKIP",
+      "reason": "archived (보관, number kept) — plan §4-4/§7"
+    },
+    {
+      "name": "AT-06 [mock] slot re-plan (FX-E1) — bottom only B3, J1/T1/S1 same, Spark calls 0",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-07 [mock] nothing saved before confirmation — LOCKED 0, ledger +0 right after proposal",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-08 [mock] model output check — unknown itemId, LAUNDRY item, J1 swap → INVALID_MODEL_OUTPUT, ledger +0, HOLD after one correction",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-09 [mock] failure honesty — 503 + Retry-After 60: wait, ≤ 2 retries, then HOLD META_API_UNAVAILABLE; 400: no retry; no LIVE on screen",
+      "file": "tests/at_ops.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-10 [mock] caps and kill switch — K1 on: new photo → META_DISABLED, button re-plan and read-back still work; session $0.25 → CALL_CAP_REACHED; TTL 10 min → off",
+      "file": "tests/at_ops.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-11 [mock] selection save then wear, each shown only after a matching fresh read",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-11 [real] selection save and wear on the deployed build",
+      "file": "tests/at_ledger.test.ts",
+      "status": "SKIP",
+      "reason": "needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–)"
+    },
+    {
+      "name": "AT-12 [mock] idempotency — same eventId twice → one record, second response = first",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-13 [mock] wear undo — one correctsEventId event, count −1, original event kept",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-14 [mock] save result unknown — SAVE_UNCONFIRMED → look up eventId → found: success / missing: resend same eventId; new eventId 0",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-15 [deploy] new-session persistence of /w/demo-rc1",
+      "file": "tests/at_ledger.test.ts",
+      "status": "SKIP",
+      "reason": "deploy-only, judged at RC2 (plan §4-4)"
+    },
+    {
+      "name": "AT-16 [real] real Meta path on the deployed hero",
+      "file": "tests/at_ledger.test.ts",
+      "status": "SKIP",
+      "reason": "needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–)"
+    },
+    {
+      "name": "AT-17 [static, repo scope] labels and banned words — no PASS/LIVE/ALL_GREEN outside result objects, banned words 0, on-screen score 0",
+      "file": "tests/at_static.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-18 [static, repo scope] privacy and secrets — key formats 0, company commit e-mail 0, EXIF 0, photo bytes 0, person names 0",
+      "file": "tests/at_static.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-19 [mock] intent kept (FX-H) — J1 kept, changes ⊆ {bottom, shoes}, A = 1, B ≤ 2, sums < O0",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-19 [real] intent kept on the deployed build",
+      "file": "tests/at_plan.test.ts",
+      "status": "SKIP",
+      "reason": "needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–)"
+    },
+    {
+      "name": "AT-20 [mock] zero-change trap — unchanged O0 from the model → NO_CHANGE; \"keep as is\" saves via its own button",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-21 [mock] pin vs hard rule (FX-E8) — 0 proposals, 1 question PIN_CONFLICT, J1 never swapped",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-22 [mock] same id, different content (FX-E6) — EVENT_CONFLICT, ledger hash unchanged",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-23 [mock] late response (FX-E7) — cancel during Spark 2 → STALE_RESPONSE, 0 candidates",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-24 whole-condition change",
+      "file": "tests/at_plan.test.ts",
+      "status": "SKIP",
+      "reason": "archived (보관, number kept) — sentence-change path is v1.1"
+    },
+    {
+      "name": "AT-25 [mock] past wear (FX-E5) — recorded; availability stays LAUNDRY",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-26 [mock] item with no record — \"no confirmed wear yet\", rank bonus 0",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-27 [mock] actor check — demo_script confirm/lock/wear → INVALID_TRANSITION in real·demo·visitor, hash unchanged",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-28 [mock] mutation — availability-rule mutant is caught by AT-03/06/19",
+      "file": "tests/at_mutation.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-28 [mock] mutation — pin-rule mutant is caught by AT-03/06/19",
+      "file": "tests/at_mutation.test.ts",
+      "status": "FAIL",
+      "reason": "pin mutant survived AT-03, AT-06 and AT-19 (in FX-H the pin item J1 is outside the offender slots, so OUTSIDE_OFFENDERS already blocks a J1 change)"
+    },
+    {
+      "name": "AT-29 [mock] ambiguous reference \"그거 말고 다른 거\" — AMBIGUOUS_REFERENCE, 1 question, 0 guesses",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-30 [mock] unrequested relaxation — option breaking an owner hard rule → UNREQUESTED_RELAXATION",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-31 [real] instruction text inside a photo",
+      "file": "tests/at_registration.test.ts",
+      "status": "SKIP",
+      "reason": "needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–); real-only (실제 1회)"
+    },
+    {
+      "name": "AT-32 [mock] NEEDS_REPLAN — locked plan B2 → LAUNDRY: plan NEEDS_REPLAN, new option PROPOSED, LOCKED 0 before the tap",
+      "file": "tests/at_ledger.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-33 [mock] record → next suggestion — yesterday T1 WORN: T1 ranks lower (not excluded), reason \"T1 worn {MM/DD} · your record\"",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-34 [mock] no substitute (FX-E2) — NO_VALID_COMBO + 1 relaxation question, no silent relaxation",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-35 [mock] no change outside offenders — offenders {B1, S1}, option changing T1 → OUTSIDE_OFFENDERS, ledger +0",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-36 [mock] mask color cross-check — Spark black vs mask navy → ATTR_UNKNOWN for that item only, registration +0 before confirm",
+      "file": "tests/at_registration.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-36 [real] mask color cross-check on real photos",
+      "file": "tests/at_registration.test.ts",
+      "status": "SKIP",
+      "reason": "needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–)"
+    },
+    {
+      "name": "canonical JSON: key order and NFC do not change the hash; non-integers rejected",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "caps: visitor cap is $0 from 2026-11-19 00:00 KST; kill TTL; free mock calls pass a $0 cap",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "every adapters/ file carries the unverified header",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "fixture colors map to their declared color family (12 named colors)",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "FX-H pre-registered answer (§4-5) — A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1",
+      "file": "tests/at_plan.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "live chip only for live + callId + 2xx",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "mode: mock is the default; real refuses without MODEL_API_KEY and in test processes; fetch is blocked here",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "read-only workspace (/w/demo-rc1): every write → SCOPE_DENIED",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "reason codes: 30 verbatim (13 + 10 + 7), unique, removed codes absent",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SAM box prompt matches the doc example token; Spark 0–1000 → pixels uses floor and stays inside",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SAM output parser reads the doc example records (box, frame size, mask H,W,encoding)",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "stale expectedRevision → STALE_STATE; item IDs use the lowest free number per slot",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "states (§4-1)",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "transition table rows 1–13 and illegal transitions are rejected with the right code",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    }
+  ]
+}
