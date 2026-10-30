@@ -1,0 +1,228 @@
+// Local server for the five screens (§3-7): / (Try), /app, /w/demo-rc1, /admin, /version.
+// Mock mode is the default. CLOSER_MODE=real refuses to start without MODEL_API_KEY.
+// Run: npm run ui   (http://localhost:8787)
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { join, dirname, extname } from 'node:path';
+import { SqliteLedger } from '../store/ledger.ts';
+import { CloserService } from '../engine/service.ts';
+import { createPortsFromEnv } from '../adapters/index.ts';
+import { RealModeRefused } from '../adapters/transport.ts';
+import { createPhotoLibrary, CHIPS, rolesOutside } from '../fixtures/photos.ts';
+import { FXH_ROLES, OUTSIDE_PHOTO_ROLES, seedItems } from '../fixtures/fxh.ts';
+import { KILL_TTL_MS, PROVISIONAL_CAPS, killActive, visitorDayCap } from '../engine/caps.ts';
+import { NAMED_RGB } from '../engine/color.ts';
+import { addDays, isIsoDate, kstDateOf } from '../shared/dates.ts';
+import { BUILD_CHIP, LABELS, livePerception, sampleWardrobe } from '../shared/labels.ts';
+import { EST_MICRO_USD } from '../adapters/responses.ts';
+import type { WorkspaceRow } from '../shared/ledger.ts';
+
+const ROOT = new URL('..', import.meta.url).pathname;
+const PUBLIC = join(ROOT, 'web', 'public');
+const env = process.env;
+const PORT = Number(env.CLOSER_PORT || 8787);
+const DB_PATH = env.CLOSER_DB_PATH || join(ROOT, '.data', 'closer.db');
+const STARTED_AT = new Date().toISOString();
+
+let SHA = 'unknown';
+try {
+  SHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+} catch {
+  // not a git checkout
+}
+
+const lib = createPhotoLibrary();
+let demoOffsetDays = 0;
+const clock = {
+  now: () => new Date(),
+  today: () => addDays(isIsoDate(env.CLOSER_TODAY) ? env.CLOSER_TODAY : kstDateOf(new Date()), demoOffsetDays),
+};
+
+let mode: 'mock' | 'real';
+let svc: CloserService;
+let ledger: SqliteLedger;
+try {
+  const p = createPortsFromEnv(env, lib, {
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    nowMs: () => performance.now(),
+    nowIso: () => new Date().toISOString(),
+  });
+  mode = p.mode;
+  mkdirSync(dirname(DB_PATH), { recursive: true });
+  ledger = new SqliteLedger(DB_PATH, { kill: { on: false, setAt: null, ttlMs: KILL_TTL_MS }, caps: PROVISIONAL_CAPS });
+  svc = new CloserService({ ledger, ports: p.ports, clock, photos: lib, mode });
+} catch (e) {
+  if (e instanceof RealModeRefused) {
+    console.error(`Refusing to start: ${e.message}`);
+    process.exit(2);
+  }
+  throw e;
+}
+
+function ensureWorkspace(id: string, kind: WorkspaceRow['kind'], publicReadOnly: boolean, roles: readonly string[]) {
+  if (ledger.getWorkspace(id)) return;
+  ledger.createWorkspace({ workspaceId: id, kind, publicReadOnly, seedRef: 'fx-h', createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() });
+}
+ensureWorkspace('owner', 'real', false, OUTSIDE_PHOTO_ROLES);
+ensureWorkspace('demo-rc1', 'demo', true, FXH_ROLES.map((r) => r.role));
+
+// ---------- helpers ----------
+type Json = Record<string, unknown>;
+function send(res: ServerResponse, status: number, body: unknown, type = 'application/json; charset=utf-8') {
+  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
+}
+async function readJson(req: IncomingMessage): Promise<Json> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > 64 * 1024) throw new Error('body too large');
+    chunks.push(c as Buffer);
+  }
+  return chunks.length ? (JSON.parse(Buffer.concat(chunks).toString('utf8')) as Json) : {};
+}
+function adminAllowed(req: IncomingMessage): boolean {
+  const token = env.CLOSER_ADMIN_TOKEN;
+  if (token) return req.headers['x-admin-token'] === token;
+  return mode === 'mock'; // local mock only; real mode needs CLOSER_ADMIN_TOKEN
+}
+
+function banner(ws: WorkspaceRow | null, sessionId: string | null) {
+  const flags = ledger.getFlags();
+  const now = clock.now();
+  const spend = ledger.spend({ sessionId, kstDate: kstDateOf(now) });
+  const caps = flags.caps;
+  const usd = (m: number) => `$${(m / 1_000_000).toFixed(2)}`;
+  const capLine = `Caps (provisional default): total ${usd(caps.appTotalMicroUsd)} · visitor/day ${usd(visitorDayCap(caps, now))} · session ${usd(caps.sessionMicroUsd)} · spent ${usd(spend.appTotal)}`;
+  const hero = EST_MICRO_USD.spark1 + EST_MICRO_USD.sam + EST_MICRO_USD.spark2;
+  let liveText: string;
+  if (ws?.kind === 'visitor') {
+    const left = Math.max(0, Math.floor((visitorDayCap(caps, now) - spend.visitorDay) / hero));
+    liveText = left > 0 ? livePerception(left) : LABELS.replayAndLedger;
+  } else {
+    liveText = livePerception(Math.max(0, Math.floor((caps.appTotalMicroUsd - spend.appTotal) / hero)));
+  }
+  if (killActive(flags.kill, now)) return { kind: 'kill', text: LABELS.killBanner, capLine, ifLive: mode === 'mock' ? `If live: ${liveText}` : liveText };
+  if (mode === 'mock') return { kind: 'mock', text: LABELS.mockBanner, capLine, ifLive: `If live: ${liveText}` };
+  return { kind: liveText === LABELS.replayAndLedger ? 'replay' : 'live', text: liveText, capLine, ifLive: '' };
+}
+
+function publicPhotos() {
+  return lib.list().map((p) => ({ photoId: p.photoId, title: p.title, url: p.url, w: p.w, h: p.h, count: p.garments.length }));
+}
+
+const sessions = new Map<string, string>(); // workspaceId → sessionId (visitor forks)
+
+// ---------- API ----------
+async function api(req: IncomingMessage, res: ServerResponse, path: string) {
+  const method = req.method ?? 'GET';
+  if (path === '/api/version') {
+    return send(res, 200, { sha: SHA, builtAt: STARTED_AT, mode, node: process.version, demoRc1StateHash: ledger.stateHash('demo-rc1'), buildChip: BUILD_CHIP });
+  }
+  if (path === '/api/photos') return send(res, 200, { photos: publicPhotos(), chips: CHIPS, palette: NAMED_RGB, labels: LABELS, buildChip: BUILD_CHIP });
+  if (path === '/api/try/start' && method === 'POST') {
+    const body = await readJson(req);
+    const photo = lib.get(String(body.photoId ?? ''));
+    if (!photo) return send(res, 400, { ok: false, code: 'UNSUPPORTED_IMAGE', detail: 'unknown sample photo' });
+    const wsId = `try-${randomUUID().slice(0, 8)}`;
+    const sessionId = `sess-${randomUUID().slice(0, 8)}`;
+    const roles = rolesOutside(photo.photoId);
+    ledger.createWorkspace({ workspaceId: wsId, kind: 'visitor', publicReadOnly: false, seedRef: `fx-h/${photo.photoId}`, createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() });
+    sessions.set(wsId, sessionId);
+    return send(res, 200, { workspaceId: wsId, sessionId, seededLabel: sampleWardrobe(roles.length) });
+  }
+  if (path === '/api/demo-clock' && method === 'POST') {
+    const body = await readJson(req);
+    demoOffsetDays = Math.max(0, Math.min(7, Number(body.days ?? 0)));
+    return send(res, 200, { today: clock.today(), offsetDays: demoOffsetDays, label: demoOffsetDays ? LABELS.demoClockPlusOne : null });
+  }
+  if (path === '/api/admin' && method === 'GET') {
+    if (!adminAllowed(req)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'admin token required' });
+    const flags = ledger.getFlags();
+    const now = clock.now();
+    return send(res, 200, {
+      mode, flags, killActive: killActive(flags.kill, now), killRemainingMs: flags.kill.on && flags.kill.setAt ? Math.max(0, new Date(flags.kill.setAt).getTime() + flags.kill.ttlMs - now.getTime()) : 0,
+      visitorCapNow: visitorDayCap(flags.caps, now), spend: ledger.spend({ sessionId: null, kstDate: kstDateOf(now) }), calls: ledger.listCalls(30),
+      workspaces: ledger.listWorkspaces().length, adminOpen: !env.CLOSER_ADMIN_TOKEN,
+    });
+  }
+  if (path === '/api/admin/kill' && method === 'POST') {
+    if (!adminAllowed(req)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'admin token required' });
+    const body = await readJson(req);
+    const on = body.on === true;
+    ledger.setFlag('kill', { on, setAt: on ? clock.now().toISOString() : null, ttlMs: KILL_TTL_MS });
+    return send(res, 200, { ok: true, kill: ledger.getFlags().kill });
+  }
+
+  const m = path.match(/^\/api\/ws\/([A-Za-z0-9_-]+)\/([a-z]+)(?:\/([A-Za-z0-9_.-]+))?$/);
+  if (!m) return send(res, 404, { ok: false, detail: 'not found' });
+  const [, wsId, action, arg] = m;
+  const ws = ledger.getWorkspace(wsId);
+  if (!ws) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'unknown workspace' });
+  const sessionId = sessions.get(wsId) ?? null;
+  if (method === 'GET' && action === 'view') return send(res, 200, { ...svc.view(wsId), banner: banner(ws, sessionId), sessionId });
+  if (method === 'GET' && action === 'event' && arg) {
+    const r = ledger.lookupEvent(wsId, arg);
+    return send(res, r ? 200 : 404, r ? r.response : { ok: false, detail: 'no such event' });
+  }
+  if (method !== 'POST') return send(res, 405, { ok: false });
+  const b = await readJson(req);
+  const who = { eventId: String(b.eventId ?? ''), actor: 'human' as const, expectedRevision: Number(b.expectedRevision ?? -1) };
+  switch (action) {
+    case 'photo': {
+      const chip = CHIPS.find((c) => c.chipId === b.chipId);
+      // Visitors: fixed sentence chips only, no free text (RT-13). Owner: chips in mock mode too.
+      if (!chip) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
+      return send(res, 200, await svc.startPhoto(wsId, { photoId: String(b.photoId ?? ''), sentence: chip.text, sessionId }));
+    }
+    case 'confirm':
+      return send(res, 200, svc.confirmCards(wsId, { operationId: String(b.operationId), eventIds: (b.eventIds as string[]) ?? [], actor: 'human', expectedRevision: who.expectedRevision, answers: b.answers as never }));
+    case 'propose':
+      return send(res, 200, await svc.propose(wsId, { operationId: String(b.operationId) }));
+    case 'answer':
+      return send(res, 200, svc.answer(wsId, { operationId: String(b.operationId), actor: 'human', formality: b.formality as never }));
+    case 'cancel':
+      return send(res, 200, svc.cancel(wsId, { operationId: String(b.operationId), actor: 'human' }));
+    case 'lock':
+      return send(res, 200, svc.lock(wsId, { ...who, operationId: String(b.operationId), optionIndex: Number(b.optionIndex) }));
+    case 'keep':
+      return send(res, 200, svc.keepAsIs(wsId, { ...who, operationId: String(b.operationId) }));
+    case 'availability':
+      return send(res, 200, svc.setAvailability(wsId, { ...who, itemId: String(b.itemId), state: b.state as never }));
+    case 'wear':
+      return send(res, 200, svc.wore(wsId, { ...who, planId: String(b.planId) }));
+    case 'undo':
+      return send(res, 200, svc.undoWear(wsId, { ...who, wearEventId: String(b.wearEventId) }));
+    case 'next':
+      return send(res, 200, await svc.startNext(wsId, { fromPlanId: String(b.fromPlanId), sessionId }));
+    default:
+      return send(res, 404, { ok: false, detail: 'unknown action' });
+  }
+}
+
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const PAGES = new Set(['/', '/app', '/w/demo-rc1', '/admin', '/version']);
+
+const server = createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const path = url.pathname;
+    if (path.startsWith('/api/')) return await api(req, res, path);
+    if (PAGES.has(path)) return send(res, 200, readFileSync(join(PUBLIC, 'index.html')), TYPES['.html']);
+    if (path.startsWith('/static/')) {
+      const file = join(PUBLIC, path.slice('/static/'.length));
+      if (!file.startsWith(PUBLIC) || !existsSync(file)) return send(res, 404, 'not found', 'text/plain');
+      return send(res, 200, readFileSync(file), TYPES[extname(file)] ?? 'application/octet-stream');
+    }
+    return send(res, 404, 'not found', 'text/plain');
+  } catch (e) {
+    send(res, 500, { ok: false, detail: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Closer (${mode} mode) on http://localhost:${PORT}  — screens: / · /app · /w/demo-rc1 · /admin · /version`);
+});
