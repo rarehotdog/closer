@@ -323,7 +323,6 @@ textarea.draft {
 button.card.look, .card.look { font: inherit; color: inherit; text-align: left; display: grid; gap: 8px; cursor: pointer; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
 button.card.look:hover, .card.look:hover { border-color: var(--accent); }
 .card.look > .row { padding: 6px 8px; background: var(--surface); border-radius: 8px; border: 1px solid var(--line); width: fit-content; }
-.card.look .look-select { font: inherit; color: inherit; text-align: left; background: transparent; border: 0; padding: 0; cursor: pointer; display: grid; gap: 6px; width: 100%; }
 button.card.look svg, .card.look svg { width: 22px; height: 30px; }
 button.chip { cursor: pointer; font: inherit; transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease; }
 button.chip:hover { border-color: var(--accent); color: var(--accent); }

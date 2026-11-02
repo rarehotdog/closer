@@ -7,8 +7,9 @@ EXPECTED_SHA="${2:-}"
 echo "[1/4] Checking /api/version at ${BASE_URL}..."
 VERSION_JSON="$(curl -fsSL "${BASE_URL}/api/version")"
 REMOTE_SHA="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(String(v.sha || ""));' "${VERSION_JSON}")"
+REMOTE_MODE="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(String(v.mode || ""));' "${VERSION_JSON}")"
 DEMO_HASH_1="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(String(v.demoRc1StateHash || ""));' "${VERSION_JSON}")"
-echo "  sha=${REMOTE_SHA} demoRc1StateHash=${DEMO_HASH_1}"
+echo "  sha=${REMOTE_SHA} mode=${REMOTE_MODE} demoRc1StateHash=${DEMO_HASH_1}"
 
 if [[ -n "${EXPECTED_SHA}" && "${REMOTE_SHA}" != "${EXPECTED_SHA}" ]]; then
   echo "FAIL: remote sha (${REMOTE_SHA}) != expected (${EXPECTED_SHA})" >&2
@@ -23,6 +24,15 @@ RO_CODE="$(node -e 'const r = JSON.parse(process.argv[1]); process.stdout.write(
 if [[ "${RO_CODE}" != "SCOPE_DENIED" ]]; then
   echo "FAIL: expected SCOPE_DENIED on demo-rc1 write, got ${RO_CODE}" >&2
   exit 1
+fi
+
+if [[ "${REMOTE_MODE}" == "real" ]]; then
+  echo "  Checking unauthenticated /api/ws/owner/view returns HTTP 403 in real mode..."
+  OWNER_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/api/ws/owner/view")"
+  if [[ "${OWNER_CODE}" != "403" ]]; then
+    echo "FAIL: expected HTTP 403 on unauthenticated /api/ws/owner/view in real mode, got ${OWNER_CODE}" >&2
+    exit 1
+  fi
 fi
 
 echo "[3/4] Checking /today, /closet, /discover, /w/demo-rc1 HTTP 200..."
