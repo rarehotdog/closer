@@ -751,7 +751,7 @@ async function closetScreen(view) {
     if (action === 'restyle') { location.href = `/today?lock=${itemId}`; return; }
     S.open = { itemId, action };
     S.draft = null;
-    if (action === 'sell_review') S.market = await getJson(`/api/ws/${id}/market/${itemId}`);
+    if (action === 'sell_review') { S.market = await getJson(`/api/ws/${id}/market/${itemId}`); S.calc = null; }
     if (action === 'donate_review') S.draft = await postJson(`/api/ws/${id}/draft`, { itemId, kind: 'DONATE' });
     await load();
   }
@@ -773,9 +773,56 @@ async function closetScreen(view) {
         : h('p', { class: 'muted' }, c.emptyLine),
       h('ul', { class: 'reasons muted' }, c.info.notes.map((n) => h('li', null, n))),
       h('button', { class: 'btn small ghost', type: 'button', onclick: async () => {
-        S.draft = await postJson(`/api/ws/${id}/draft`, { itemId: S.open.itemId, kind: 'SELL', platform: c.platform });
+        const price = S.calc && S.calc.platform === c.platform && S.calc.result && S.calc.result.ok !== false ? S.calc.result.price : null;
+        S.draft = await postJson(`/api/ws/${id}/draft`, { itemId: S.open.itemId, kind: 'SELL', platform: c.platform, price });
         render();
       } }, `Draft a ${c.info.name} listing`))));
+  }
+
+  // Fee line names to start from. Values stay blank (unknown) until the owner checks the platform's own page.
+  const FEE_START = {
+    KREAM: [['Sales fee', 'rate'], ['Inspection and shipping', 'fixed']],
+    KARROT: [['Delivery or meeting cost', 'fixed']],
+    POSHMARK: [['Platform fee', 'rate'], ['Shipping to the buyer', 'fixed']],
+  };
+  function calcPanel() {
+    if (!S.calc) S.calc = { platform: 'KARROT', price: '', fees: FEE_START.KARROT.map(([label, kind]) => ({ label, kind, value: '' })), result: null };
+    const C = S.calc;
+    const cur = C.platform === 'POSHMARK' ? 'USD' : 'KRW';
+    const card = S.market ? S.market.cards.find((c) => c.platform === C.platform) : null;
+    const plat = h('select', { id: 'calc-platform', 'aria-label': 'Platform', onchange: (e) => { C.platform = e.target.value; C.fees = FEE_START[C.platform].map(([label, kind]) => ({ label, kind, value: '' })); C.result = null; render(); } },
+      [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['POSHMARK', 'Poshmark (USD)']].map(([v, l]) => h('option', { value: v, selected: C.platform === v ? true : null }, l)));
+    const price = h('input', { id: 'calc-price', type: 'number', min: '1', step: 'any', inputmode: 'decimal', placeholder: `Price you would ask (${cur})`, 'aria-label': 'Price', value: C.price, oninput: (e) => { C.price = e.target.value; } });
+    const pick = card && card.entries.length ? h('div', { class: 'chip-row' }, h('span', { class: 'muted' }, 'Use a price you saw:'),
+      card.entries.slice(0, 4).map((e) => h('button', { type: 'button', class: 'chip', onclick: () => { C.price = String(e.amount); render(); } }, `${e.currency === 'KRW' ? '₩' + e.amount.toLocaleString('en-US') : '$' + e.amount} · ${e.priceType === 'ASK' ? 'asking' : 'traded'}${e.source === 'sample' ? ' · sample' : ''}`))) : null;
+    const rows = h('div', { class: 'feegrid' }, C.fees.map((f, i) => h('div', { class: 'feerow' },
+      h('input', { type: 'text', 'aria-label': `Fee ${i + 1} name`, value: f.label, maxlength: '40', oninput: (e) => { f.label = e.target.value; } }),
+      h('select', { 'aria-label': `Fee ${i + 1} kind`, onchange: (e) => { f.kind = e.target.value; render(); } }, h('option', { value: 'rate', selected: f.kind === 'rate' ? true : null }, '% of price'), h('option', { value: 'fixed', selected: f.kind === 'fixed' ? true : null }, `fixed ${cur}`)),
+      h('input', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', 'aria-label': `Fee ${i + 1} value`, placeholder: 'blank = not checked', value: f.value, oninput: (e) => { f.value = e.target.value; } }),
+      h('button', { type: 'button', class: 'btn small ghost', 'aria-label': `Remove fee ${i + 1}`, onclick: () => { C.fees.splice(i, 1); C.result = null; render(); } }, 'Remove'))));
+    const calc = async () => {
+      const fees = C.fees.map((f) => ({ label: f.label, kind: f.kind, value: f.value === '' ? null : f.kind === 'rate' ? Number(f.value) / 100 : Number(f.value) }));
+      C.result = await postJson('/api/net', { price: Number(C.price), platform: C.platform, fees });
+      render();
+    };
+    const R = C.result;
+    const money = (n) => (cur === 'KRW' ? `₩${Math.round(n).toLocaleString('en-US')}` : `$${Number(n).toFixed(2)}`);
+    const out = !R ? null : R.ok === false ? h('p', { class: 'question', role: 'status' }, R.detail)
+      : h('div', { class: 'netbox', role: 'status' },
+        h('dl', { class: 'kv' },
+          h('dt', null, 'Price'), h('dd', null, money(R.price)),
+          ...R.deductions.flatMap((d) => [h('dt', null, d.label), h('dd', null, `− ${money(d.amount)}`)]),
+          ...R.unknown.flatMap((u) => [h('dt', null, u), h('dd', null, h('span', { class: 'chip warn' }, 'not checked'))]),
+          h('dt', null, 'You would receive'), h('dd', null, R.net === null ? h('span', { class: 'chip warn' }, 'unknown') : h('b', null, money(R.net)))),
+        h('p', { class: 'muted' }, R.line),
+        R.net !== null ? h('p', { class: 'muted' }, `A draft for ${C.platform === 'KARROT' ? 'Karrot' : C.platform === 'KREAM' ? 'KREAM' : 'Poshmark'} will use this price.`) : null);
+    return h('div', { class: 'calc' }, h('h2', { style: 'margin-top:14px' }, 'What would I receive?'),
+      h('p', { class: 'muted' }, 'Fill in the fees from the platform\'s own page. A blank fee keeps the result unknown; type 0 only if you checked it is free.'),
+      h('div', { class: 'row' }, plat, price), pick, rows,
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { C.fees.push({ label: 'Other cost', kind: 'fixed', value: '' }); render(); } }, 'Add a fee'),
+        h('button', { type: 'button', class: 'btn small', id: 'calc-go', onclick: calc }, 'Calculate')),
+      out);
   }
 
   function evidenceForm() {
@@ -837,7 +884,7 @@ async function closetScreen(view) {
             x.lastChoice ? h('span', { class: 'chip' }, `Last choice: ${x.lastChoice.action.replace('_', ' ')}`) : null,
             h('div', { class: 'row' }, actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
     ];
-    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel' }, h('h2', null, `Price evidence for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), priceCards(), evidenceForm()));
+    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel' }, h('h2', null, `Price evidence for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), priceCards(), evidenceForm(), calcPanel()));
     if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
     parts.push(draftPanel());
     parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),

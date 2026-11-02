@@ -168,3 +168,8 @@ a.btn.small { padding: 5px 10px; font-size: 13px; }
 .evform select, .evform input { font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; }
 .ownerbar { margin: 6px 0 12px; }
 .ownerbar input.tok { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; width: 220px; max-width: 100%; }
+.feegrid { display: grid; gap: 6px; margin: 8px 0; }
+.feerow { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto; gap: 6px; align-items: center; }
+.feerow input, .feerow select, .calc select, .calc input { font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; }
+@media (max-width: 760px) { .feerow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.netbox { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }

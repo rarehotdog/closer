@@ -107,10 +107,25 @@ export class FeatureService {
     });
   }
 
-  net(price: number, platform: Platform, fees: FeeLine[]) {
+  /**
+   * Net amount for a price the owner picks. Fee lines come from the owner: a blank value means
+   * "not checked yet" and keeps the net unknown; 0 counts only when the owner typed 0.
+   */
+  net(price: number, platform: Platform, fees: unknown[]) {
     if (!PLATFORMS.includes(platform)) return fail('INVALID_TRANSITION', 'unknown platform');
-    if (!(price > 0)) return fail('INVALID_TRANSITION', 'price must be positive');
-    return netScenario(price, PLATFORM_INFO[platform].currency, fees);
+    if (!(typeof price === 'number' && Number.isFinite(price) && price > 0)) return fail('INVALID_TRANSITION', 'price must be a positive number');
+    if (!Array.isArray(fees) || fees.length > 10) return fail('INVALID_TRANSITION', 'up to 10 fee lines');
+    const lines: FeeLine[] = [];
+    for (const f of fees as Partial<FeeLine>[]) {
+      const label = String(f?.label ?? '').trim().slice(0, 40);
+      if (!label) return fail('INVALID_TRANSITION', 'every fee line needs a name');
+      if (f?.kind !== 'rate' && f?.kind !== 'fixed') return fail('INVALID_TRANSITION', `${label}: kind must be rate or fixed`);
+      const v = f.value;
+      if (v !== null && v !== undefined && !(typeof v === 'number' && Number.isFinite(v) && v >= 0)) return fail('INVALID_TRANSITION', `${label}: value must be 0 or more, or blank if unknown`);
+      if (f.kind === 'rate' && typeof v === 'number' && v > 1) return fail('INVALID_TRANSITION', `${label}: a rate is a share of the price (0–1, e.g. 0.1 for 10%)`);
+      lines.push({ label, kind: f.kind, value: typeof v === 'number' ? v : null });
+    }
+    return netScenario(price, PLATFORM_INFO[platform].currency, lines);
   }
 
   // ---------------- hand-off drafts ----------------

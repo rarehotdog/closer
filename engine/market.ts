@@ -106,7 +106,8 @@ export function netScenario(price: number, currency: 'KRW' | 'USD', fees: readon
     else deductions.push({ label: f.label, amount: f.kind === 'rate' ? Math.round(price * f.value * 100) / 100 : f.value });
   }
   const sum = deductions.reduce((s, d) => s + d.amount, 0);
-  const net = unknown.length > 0 ? null : Math.round((price - sum) * 100) / 100;
+  const raw = price - sum;
+  const net = unknown.length > 0 ? null : currency === 'KRW' ? Math.round(raw) : Math.round(raw * 100) / 100;
   const line = net === null
     ? `Net unknown until you check: ${unknown.join(', ')}`
     : `If it sells at ${fmt(price, currency)}, you would receive about ${fmt(net, currency)} after the fees you entered. Not a guarantee.`;

@@ -223,6 +223,31 @@ describe('F2 price cards and hand-off drafts', () => {
     assert.match(k.line, /Not a guarantee/);
   });
 
+  it('F2-16 net calculator: blank fees stay unknown, typed 0 counts, rates are shares of the price', () => {
+    const t = setup();
+    const r1 = t.feat.net(100000, 'KARROT', [{ label: 'Delivery', kind: 'fixed', value: null }]) as { net: number | null; unknown: string[] };
+    assert.equal(r1.net, null);
+    assert.deepEqual(r1.unknown, ['Delivery']);
+    const r2 = t.feat.net(100000, 'KARROT', [{ label: 'Delivery', kind: 'fixed', value: 0 }]) as { net: number | null };
+    assert.equal(r2.net, 100000);
+    const r3 = t.feat.net(80, 'POSHMARK', [{ label: 'Platform fee', kind: 'rate', value: 0.2 }, { label: 'Shipping', kind: 'fixed', value: 7.97 }]) as { net: number | null; currency: string };
+    assert.equal(r3.currency, 'USD');
+    assert.equal(r3.net, 56.03);
+    const r4 = t.feat.net(99999, 'KREAM', [{ label: 'Sales fee', kind: 'rate', value: 0.075 }]) as { net: number | null };
+    assert.equal(r4.net, 92499);
+  });
+
+  it('F2-17 net calculator refuses inputs it cannot read honestly', () => {
+    const t = setup();
+    const code = (x: unknown) => (x as { code?: string }).code;
+    assert.equal(code(t.feat.net(0, 'KARROT', [])), 'INVALID_TRANSITION');
+    assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: 'Fee', kind: 'rate', value: 15 }])), 'INVALID_TRANSITION');
+    assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: 'Fee', kind: 'fixed', value: -1 }])), 'INVALID_TRANSITION');
+    assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: '', kind: 'fixed', value: 1 }])), 'INVALID_TRANSITION');
+    assert.equal(code(t.feat.net(1000, 'EBAY' as never, [])), 'INVALID_TRANSITION');
+    assert.equal(code(t.feat.net(1000, 'KARROT', Array.from({ length: 11 }, () => ({ label: 'x', kind: 'fixed', value: 1 })))), 'INVALID_TRANSITION');
+  });
+
   it('F2-13 a sale draft keeps [확인] placeholders; it cannot be marked reviewed until they are filled', () => {
     const t = setup({ history: closetHistory(TODAY) });
     const d = t.feat.draft(t.ws, { itemId: 'J1', kind: 'SELL', platform: 'KARROT', facts: { size: 'M' } });

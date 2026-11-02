@@ -130,3 +130,12 @@ Each visitor gets a private copy of the sample closet: 12 sample items and a syn
 - **Banner wording.** The banner says "about N photo runs left in the cap" instead of "calls left today", because the cap is a total, not a daily limit.
 - **Checked.** 95 tests run: 85 pass, 1 fails (AT-28) and 9 are skipped. A real-mode server with a fake key returned 403 without the token and 200 with it, and refused visitor uploads. A synthetic photo uploaded at 1500×2000 was stored at 1200×1600, with no key in the logs.
 - **Not checked.** A live Spark and SAM run on a real photo, which needs the key.
+
+## Net amount calculator (My closet → Look at selling)
+
+- **Inputs.** The owner picks a platform and a price. They can type the price or tap a price they saw, which carries its asking, traded or sample label. They then fill in the fees from the platform's own page. Each fee is either a percentage of the price or a fixed amount.
+- **Unknown fees.** A blank fee means it has not been checked, and the result says "unknown". A fee counts as zero only if the owner typed 0.
+- **Fee names to start from.** The calculator offers fee names such as KREAM's sales fee and inspection, or Poshmark's platform fee and shipping. It never fills in their values.
+- **Result.** It shows the price, each deduction, the fees not yet checked, and the amount the owner would receive. The line "Not a guarantee" stays on.
+- **Use in drafts.** Once the net is known, a draft for the same platform uses that price.
+- **Checks.** The server rejects a missing name, a negative value, a rate above 100%, more than 10 lines and unknown platforms (tests F2-16 and F2-17).
