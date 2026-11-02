@@ -31,11 +31,15 @@ const PORT = Number(env.CLOSER_PORT || 8787);
 const DB_PATH = env.CLOSER_DB_PATH || join(ROOT, '.data', 'closer.db');
 const STARTED_AT = new Date().toISOString();
 
-let SHA = 'unknown';
-try {
-  SHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-} catch {
-  // not a git checkout
+// Release sha: a deploy writes BUILD_SHA next to the code (no .git on the server); locally, git.
+let SHA = (env.CLOSER_BUILD_SHA ?? '').trim() || 'unknown';
+if (SHA === 'unknown' && existsSync(join(ROOT, 'BUILD_SHA'))) SHA = readFileSync(join(ROOT, 'BUILD_SHA'), 'utf8').trim() || 'unknown';
+if (SHA === 'unknown') {
+  try {
+    SHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    // not a git checkout
+  }
 }
 
 const lib = createPhotoLibrary();
