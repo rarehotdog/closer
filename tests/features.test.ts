@@ -10,12 +10,14 @@ import { ExtrasStore } from '../store/extras.ts';
 import { CloserService, type Operation } from '../engine/service.ts';
 import { FeatureService } from '../engine/features.ts';
 import { createMockPorts } from '../adapters/index.ts';
+import { textResponse, type MockScript } from '../adapters/mock/transport.ts';
 import { createPhotoLibrary } from '../fixtures/photos.ts';
 import { closetHistory, closetItems, sampleEvidence } from '../fixtures/closet.ts';
 import { KILL_TTL_MS, PROVISIONAL_CAPS } from '../engine/caps.ts';
 import { addDays } from '../shared/dates.ts';
 import { netScenario, priceCards, validateEvidence, HANDOFF_STATES } from '../engine/market.ts';
 import { countOutfits } from '../engine/looks.ts';
+import { checkIntent, rulesIntent } from '../engine/intent.ts';
 import { factsFromState } from '../engine/rules.ts';
 import type { Item } from '../shared/wardrobe.ts';
 
@@ -24,7 +26,7 @@ let n = 0;
 const cleanups: (() => void)[] = [];
 after(() => cleanups.forEach((f) => f()));
 
-function setup(o: { createdOn?: string; history?: { occurredAt: string; itemIds: string[] }[]; kind?: 'real' | 'rehearsal' | 'demo'; publicReadOnly?: boolean; items?: Item[] } = {}) {
+function setup(o: { createdOn?: string; history?: { occurredAt: string; itemIds: string[] }[]; kind?: 'real' | 'rehearsal' | 'demo'; publicReadOnly?: boolean; items?: Item[]; script?: MockScript } = {}) {
   const dir = join(ROOT, '.data', 'test');
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `f-${process.pid}-${++n}.db`);
@@ -32,7 +34,7 @@ function setup(o: { createdOn?: string; history?: { occurredAt: string; itemIds:
   const extras = new ExtrasStore(path);
   const lib = createPhotoLibrary();
   const now = new Date(`${TODAY}T09:00:00+09:00`);
-  const { ports } = createMockPorts(lib, { sleep: async () => {}, nowMs: () => 0, nowIso: () => now.toISOString() }, {});
+  const { ports } = createMockPorts(lib, { sleep: async () => {}, nowMs: () => 0, nowIso: () => now.toISOString() }, o.script ?? {});
   const svc = new CloserService({ ledger, ports, photos: lib, mode: 'mock', clock: { now: () => now, today: () => TODAY } });
   const feat = new FeatureService({ ledger, extras, today: () => TODAY, now: () => now });
   const ws = 'ws-f';
@@ -74,6 +76,8 @@ describe('F1 anchor: keep what the owner chose, complete the rest', () => {
     const t = setup();
     ok(t.svc.setAvailability(t.ws, { eventId: 'e-l', actor: 'human', expectedRevision: t.rev(), itemId: 'B1', state: 'LAUNDRY' }));
     const op = asOp(t.svc.startAnchor(t.ws, { anchorItemIds: ['J1'] }));
+    assert.equal(op.state, 'PROPOSED');
+    assert.ok(op.options.length >= 1);
     for (const o of op.options) {
       assert.equal(o.outfit.outer, 'J1');
       assert.notEqual(o.outfit.bottom, 'B1');
@@ -119,7 +123,11 @@ describe('F1 anchor: keep what the owner chose, complete the rest', () => {
     const changed = plan.slots.bottom!;
     const r = t.svc.setAvailability(t.ws, { eventId: 'e-wash', actor: 'human', expectedRevision: t.rev(), itemId: changed, state: 'LAUNDRY' });
     ok(r);
-    for (const rp of r.replans ?? []) for (const o of rp.options) assert.equal(o.outfit.outer, 'J1');
+    assert.ok((r.replans ?? []).length >= 1, 'the locked plan using that item is re-planned');
+    for (const rp of r.replans ?? []) {
+      assert.ok(rp.options.length >= 1 || rp.state === 'HOLD');
+      for (const o of rp.options) assert.equal(o.outfit.outer, 'J1');
+    }
   });
 
   it('F1-07 two items in the same slot cannot both be locked', () => {
@@ -299,6 +307,83 @@ describe('F3 looks by occasion: rebuild with what you own first', () => {
     const anchors = Object.values(m.ownOutfit) as string[];
     const op = asOp(t.svc.startAnchor(t.ws, { anchorItemIds: anchors }));
     assert.equal(op.state, 'PROPOSED');
+    assert.ok(op.options.length >= 1);
     for (const id of anchors) assert.ok(Object.values(op.options[0].outfit).includes(id));
+  });
+});
+
+describe('F1 sentence path: Spark reads the words, code checks them', () => {
+  const items = closetItems().map((i) => ({ itemId: i.itemId, slot: i.slot, type: i.type, color: i.color }));
+
+  it('F1-10 Korean sentence → keep J1, more relaxed; options keep J1', async () => {
+    const t = setup();
+    const op = asOp(await t.svc.startAnchorFromSentence(t.ws, { sentence: '오늘은 이 네이비 재킷 입고 싶어. 나머지는 좀 편하게.' }));
+    assert.deepEqual(op.intent, { anchors: ['J1'], direction: 'less_formal', rain: false });
+    assert.equal(op.modelCalls, 1);
+    assert.equal(op.state, 'PROPOSED', JSON.stringify(op.questions));
+    assert.ok(op.options.length >= 1);
+    const facts = factsFromState(t.ledger.readState(t.ws));
+    assert.deepEqual(op.options.map((o) => o.label), ['A gentler step', 'Closer to what you said']);
+    for (const o of op.options) {
+      assert.equal(o.outfit.outer, 'J1');
+      // below an all-high outfit (jacket level × 4 pieces)
+      assert.ok(o.sum! < 3 * 4);
+    }
+    // the option closest to the words: no other piece is as formal as the jacket
+    const closest = op.options[1];
+    for (const s of ['top', 'bottom', 'shoes'] as const) assert.notEqual(facts.items.get(closest.outfit[s]!)!.formality, 'high');
+  });
+
+  it('F1-11 "the jacket" with two jackets is a question, not a guess', async () => {
+    const extra = { ...closetItems().find((i) => i.itemId === 'J1')!, itemId: 'J4', color: 'gray' as const };
+    const u = setup({ items: [...closetItems(), extra] });
+    const op = asOp(await u.svc.startAnchorFromSentence(u.ws, { sentence: 'Keep the jacket today' }));
+    assert.equal(op.state, 'HOLD');
+    assert.ok(op.reasonCodes.includes('AMBIGUOUS_REFERENCE'));
+    assert.deepEqual(op.questions[0].choices.sort(), ['J1', 'J4']);
+  });
+
+  it('F1-12 a model answer naming an item the owner does not have is rejected', () => {
+    const c = checkIntent({ keep: ['J9'], direction: 'none', rain: false, unclear: [] }, items);
+    assert.equal(c.ok, false);
+    assert.equal((c as { kind: string }).kind, 'invalid');
+  });
+
+  it('F1-13 two locks in one slot are sent back as a question', () => {
+    const c = checkIntent({ keep: ['J1', 'J2'], direction: 'none', rain: false, unclear: [] }, items);
+    assert.deepEqual(c, { ok: false, kind: 'unclear', phrase: 'two outer pieces', candidates: ['J1', 'J2'] });
+  });
+
+  it('F1-18 "white sneakers, something smart": the rest is dressier than the sneakers', async () => {
+    const t = setup();
+    const op = asOp(await t.svc.startAnchorFromSentence(t.ws, { sentence: 'I want to wear the white sneakers, something smart for dinner.' }));
+    assert.deepEqual(op.intent, { anchors: ['S2'], direction: 'more_formal', rain: false });
+    assert.equal(op.state, 'PROPOSED');
+    for (const o of op.options) assert.equal(o.outfit.shoes, 'S2');
+  });
+
+  it('F1-14 rain in the sentence reaches the rain rule (locked jacket is not waterproof → ask)', async () => {
+    const t = setup();
+    const op = asOp(await t.svc.startAnchorFromSentence(t.ws, { sentence: '네이비 재킷 입을래, 비 온대' }));
+    assert.equal(op.state, 'HOLD');
+    assert.ok(op.reasonCodes.includes('PIN_CONFLICT'));
+  });
+
+  it('F1-15 keyword baseline: explicit IDs win; "track jacket" is not "jacket"', () => {
+    assert.deepEqual(rulesIntent('keep T1 and S2', items).keep, ['T1', 'S2']);
+    assert.deepEqual(rulesIntent('black track jacket for a run', items).keep, ['J3']);
+  });
+
+  it('F1-16 a model output that breaks the schema is held, never applied', async () => {
+    const t = setup({ script: { intent: () => textResponse('muse-spark-1.3', JSON.stringify({ keep: 'J1', direction: 'very_formal' }), 'intent') } });
+    const op = asOp(await t.svc.startAnchorFromSentence(t.ws, { sentence: 'navy jacket' }));
+    assert.equal(op.state, 'HOLD');
+    assert.ok(op.reasonCodes.includes('INVALID_MODEL_OUTPUT'));
+    assert.equal(op.options.length, 0);
+  });
+
+  it('F1-17 keyword baseline does not read 네이비 as rain', () => {
+    assert.equal(rulesIntent('오늘은 네이비 재킷', items).rain, false);
+    assert.equal(rulesIntent('네이비 재킷, 비 온대', items).rain, true);
   });
 });

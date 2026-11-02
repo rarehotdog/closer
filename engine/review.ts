@@ -62,7 +62,7 @@ export function clampWindow(days: number | undefined): number {
 }
 
 /** Cold-weather pieces in the warm months may simply be out of season [가정: northern hemisphere]. */
-function seasonHintOf(item: Item, today: IsoDate): string | null {
+export function seasonHintOf(item: Pick<Item, 'type'>, today: IsoDate): string | null {
   const month = Number(today.slice(5, 7));
   if ((item.type === 'coat') && month >= 5 && month <= 9) return 'Coat in the warm months: it may be out of season';
   if ((item.type === 'shorts') && (month <= 3 || month >= 11)) return 'Shorts in the cold months: they may be out of season';

@@ -22,6 +22,7 @@ import { ExtrasStore } from '../store/extras.ts';
 import { FeatureService } from '../engine/features.ts';
 import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
 import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
+import { INTENT_CHIPS } from '../engine/intent.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
@@ -138,7 +139,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (path === '/api/version') {
     return send(res, 200, { sha: SHA, builtAt: STARTED_AT, mode, node: process.version, demoRc1StateHash: ledger.stateHash('demo-rc1'), buildChip: BUILD_CHIP });
   }
-  if (path === '/api/photos') return send(res, 200, { photos: publicPhotos(), chips: CHIPS, palette: NAMED_RGB, labels: LABELS, buildChip: BUILD_CHIP });
+  if (path === '/api/photos') return send(res, 200, { photos: publicPhotos(), chips: CHIPS, intentChips: INTENT_CHIPS, palette: NAMED_RGB, labels: LABELS, buildChip: BUILD_CHIP });
   if (path === '/api/try/start' && method === 'POST') {
     const body = await readJson(req);
     const photo = lib.get(String(body.photoId ?? ''));
@@ -242,6 +243,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       return send(res, 200, svc.undoWear(wsId, { ...who, wearEventId: String(b.wearEventId) }));
     case 'next':
       return send(res, 200, await svc.startNext(wsId, { fromPlanId: String(b.fromPlanId), sessionId }));
+    case 'say':
+      return send(res, 200, await svc.startAnchorFromSentence(wsId, { sentence: String(b.sentence ?? ''), sessionId }));
     case 'anchor':
       return send(res, 200, svc.startAnchor(wsId, { anchorItemIds: Array.isArray(b.anchorItemIds) ? (b.anchorItemIds as string[]) : [], direction: b.direction as never, rainPct: typeof b.rainPct === 'number' ? b.rainPct : null, sessionId }));
     case 'reviewchoice':

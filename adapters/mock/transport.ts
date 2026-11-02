@@ -9,6 +9,7 @@ import type { HttpResult } from '../../engine/retry.ts';
 import type { Transport, TransportRequest } from '../transport.ts';
 import { SAM_MODEL } from '../responses.ts';
 import type { Spark2Facts } from '../types.ts';
+import { rulesIntent, type IntentItem } from '../../engine/intent.ts';
 
 export type MockReply = { status: number; headers?: Record<string, string>; json?: unknown };
 type Reply = MockReply | null | Promise<MockReply | null>;
@@ -20,9 +21,11 @@ export type MockScript = {
   spark1?: (n: number) => Reply;
   sam?: (n: number) => Reply;
   spark2?: (n: number, facts: Spark2Facts & { correction: unknown }) => Reply;
+  /** Scripted reply for the n-th intent call; null → keyword baseline answer. */
+  intent?: (n: number, input: { sentence: string; items: IntentItem[] }) => Reply;
 };
 
-export type MockLogEntry = { kind: 'spark1' | 'sam' | 'spark2'; n: number; status: number };
+export type MockLogEntry = { kind: 'spark1' | 'sam' | 'spark2' | 'intent'; n: number; status: number };
 export type MockTransport = Transport & { log: MockLogEntry[] };
 
 let seq = 0;
@@ -130,18 +133,22 @@ function spark2Default(facts: Spark2Facts): MockReply {
 }
 
 export function createMockTransport(lib: PhotoLibrary, script: MockScript = {}): MockTransport {
-  const counts = { spark1: 0, sam: 0, spark2: 0 };
+  const counts = { spark1: 0, sam: 0, spark2: 0, intent: 0 };
   const log: MockLogEntry[] = [];
   const t = async (req: TransportRequest): Promise<HttpResult> => {
     const body = req.body;
     const { text, imageUrl } = userContent(body);
-    let kind: 'spark1' | 'sam' | 'spark2';
+    let kind: 'spark1' | 'sam' | 'spark2' | 'intent';
     if (body.model === SAM_MODEL) kind = 'sam';
+    else if ((body.text as { format?: { name?: string } } | undefined)?.format?.name === 'closer_intent') kind = 'intent';
     else if (Array.isArray(body.tools)) kind = 'spark2';
     else kind = 'spark1';
     const n = counts[kind]++;
     let reply: MockReply | null = null;
-    if (kind === 'spark1') {
+    if (kind === 'intent') {
+      const input = JSON.parse(text) as { sentence: string; items: IntentItem[] };
+      reply = (await script.intent?.(n, input)) ?? textResponse('muse-spark-1.3', JSON.stringify(rulesIntent(input.sentence, input.items)), 'intent');
+    } else if (kind === 'spark1') {
       reply = (await script.spark1?.(n)) ?? null;
       if (!reply) {
         const photo = imageUrl ? lib.byUrl(imageUrl) : null;

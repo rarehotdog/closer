@@ -67,10 +67,45 @@ One wardrobe and one ledger serve three screens. The tab bar shows on phones.
 - **SAM:** cuts each garment out of a photo for registration, as in the existing photo flow.
 - **Not the model's job:** prices, wear history, availability, the 60-day count, and anything outside the app.
 
+## Sentence path on Today (added 11/2 afternoon)
+
+The owner can type a sentence, for example "오늘 이 네이비 재킷 입을 건데 좀 편하게" or "Keep the navy jacket, more relaxed".
+
+**How a sentence is handled**
+1. **Spark reads it.** It returns `keep` (item IDs), `direction` and `rain`, using structured output. The schema only allows item IDs that code sent.
+2. **Code checks the answer.** It rejects any ID not in the wardrobe. If one phrase could match two items, it asks which one instead of guessing.
+3. **The same planner runs** as for tapped pieces.
+
+**Limits**
+- Mock mode reads the sentence with keyword rules and labels it "(mock)".
+- In real mode, public sample closets accept only the four example sentences. They are charged against the visitor cap.
+
+**Two options when there is no previous plan:**
+- "A gentler step": the smallest move in the asked direction.
+- "Closer to what you said": the strongest move.
+
+Pieces that are likely out of season rank lower.
+
+**Rules vs model.** `node scripts/intent_ablation.ts` runs 12 hand-checked sentences.
+- The keyword rules alone get 9 of 12. They misread "트랙 재킷이랑 반바지", miss "너무 꾸민 느낌은 싫어", and pick a jacket for "the jacket" instead of asking.
+- With `--live` and a key, the Spark arm runs on the same sentences.
+
+## First live run (owner's machine, owner's key)
+
+```
+node scripts/live_check.ts                    # dry run: shows the plan, sends nothing
+read -s MODEL_API_KEY && export MODEL_API_KEY # the key stays out of shell history
+node scripts/live_check.ts --live             # GET /models + one Spark intent call (≈ $0.004)
+node scripts/live_check.ts --live --image ./outfit.jpg   # also Spark photo + SAM (≈ $0.04, long side ≤ 1600 px)
+node scripts/intent_ablation.ts --live        # 12 Spark calls (≈ $0.05)
+```
+
+**What the scripts save.** Each one writes `.data/live_check.json` or `.data/intent_ablation.json`. These files hold only statuses, timings, counts and code-check results; there is no key and no raw model text. Share those files, not the terminal.
+
 ## Run
 
 ```
-npm test          # 79 tests: 69 pass, 1 fail (AT-28, plan gap), 9 skipped (need keys or a deploy)
+npm test          # 88 tests: 78 pass, 1 fail (AT-28, plan gap), 9 skipped (need keys or a deploy)
 npm run ui        # http://localhost:8787/today · /closet · /discover
 ```
 

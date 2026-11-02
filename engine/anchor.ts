@@ -3,6 +3,7 @@
 // the one with the fewest changes from the last plan, and the one that best fits the intent.
 import type { IsoDate } from '../shared/dates.ts';
 import type { ReasonCode } from '../shared/reasons.ts';
+import { seasonHintOf } from './review.ts';
 import { SLOTS, type DecisionContext, type Item, type Outfit, type Slot } from '../shared/wardrobe.ts';
 import {
   SOFT_RECENT_DAYS, changedSlots, directionMet, exclusionCodes, formalitySum, formalityValue, pinHardConflict, wornWithin,
@@ -14,7 +15,7 @@ export const REQUIRED_SLOTS: readonly Slot[] = ['top', 'bottom', 'shoes'];
 /** Enumeration guard; a wardrobe this size is far beyond the sample (9 items). */
 const MAX_COMBOS = 20000;
 
-export type AnchorOptionLabel = 'fewest_changes' | 'closest_to_intent';
+export type AnchorOptionLabel = 'fewest_changes' | 'closest_to_intent' | 'gentler_step';
 export type AnchorOption = {
   outfit: Outfit;
   /** Slots that differ from the last plan (empty list if there is no last plan). */
@@ -41,7 +42,7 @@ export type AnchorInput = {
   last: Outfit | null;
 };
 
-type Scored = { outfit: Outfit; sum: number; spread: number; recent: number; staleness: number; changed: Slot[] };
+type Scored = { outfit: Outfit; sum: number; spread: number; offSeason: number; recent: number; staleness: number; changed: Slot[] };
 
 /** Formality spread inside one outfit: 0 = all the same level. Lower reads as more coherent. */
 function spreadOf(outfit: Outfit, facts: WardrobeFacts): number {
@@ -113,7 +114,12 @@ export function planAnchor(input: AnchorInput, facts: WardrobeFacts, today: IsoD
     if (combos.length > MAX_COMBOS) return { kind: 'invalid', code: 'INVALID_TRANSITION', detail: `more than ${MAX_COMBOS} combinations; narrow the request` };
   }
 
-  const baselineSum = last ? formalitySum(last, facts) : formalitySum(Object.fromEntries([...anchorSlots]) as Outfit, facts);
+  // Direction reference: the last plan when there is one; otherwise an outfit whose every piece
+  // sits at the locked pieces' average formality ("the rest more relaxed than the jacket").
+  const lastSum = last ? formalitySum(last, facts) : null;
+  const anchorVals = anchors.map((id) => formalityValue(facts.items.get(id))).filter((v): v is number => v !== null);
+  const anchorAvg = anchorVals.length ? anchorVals.reduce((a, b) => a + b, 0) / anchorVals.length : null;
+  const baselineFor = (o: Outfit): number | null => (last ? lastSum : anchorAvg === null ? null : anchorAvg * SLOTS.filter((s) => o[s]).length);
   const scored: Scored[] = [];
   for (const outfit of combos) {
     const sum = formalitySum(outfit, facts);
@@ -123,34 +129,42 @@ export function planAnchor(input: AnchorInput, facts: WardrobeFacts, today: IsoD
       continue;
     }
     const recent = SLOTS.filter((s) => outfit[s] && !anchors.includes(outfit[s]!) && wornWithin(outfit[s]!, facts, today, SOFT_RECENT_DAYS)).length;
-    scored.push({ outfit, sum, spread: spreadOf(outfit, facts), recent, staleness: stalenessOf(outfit, anchors, facts, today), changed: last ? changedSlots(last, outfit) : [] });
+    const offSeason = SLOTS.filter((s) => outfit[s] && !anchors.includes(outfit[s]!) && seasonHintOf(facts.items.get(outfit[s]!)!, today) !== null).length;
+    scored.push({ outfit, sum, spread: spreadOf(outfit, facts), offSeason, recent, staleness: stalenessOf(outfit, anchors, facts, today), changed: last ? changedSlots(last, outfit) : [] });
   }
   // Owner-stated direction is compared with the last plan when there is one (the same rule as re-plans).
-  const directionOk = (s: Scored) => ctx.direction === 'none' || baselineSum === null || directionMet(ctx.direction, s.sum, baselineSum);
+  const directionOk = (s: Scored) => ctx.direction === 'none' || directionMet(ctx.direction, s.sum, baselineFor(s.outfit));
   const intentPool = scored.filter(directionOk);
   if (intentPool.length === 0) return { kind: 'gap', slots: [], excluded };
 
+  const tie = (a: Scored, b: Scored) => a.offSeason - b.offSeason || a.recent - b.recent || b.staleness - a.staleness || (key(a.outfit) < key(b.outfit) ? -1 : 1);
+  // Closest to the intent: the strongest move in the asked direction; with no direction, the most coherent.
   const byIntent = [...intentPool].sort((a, b) =>
-    a.spread - b.spread || a.recent - b.recent || b.staleness - a.staleness || (key(a.outfit) < key(b.outfit) ? -1 : 1));
+    ctx.direction === 'less_formal' ? a.offSeason - b.offSeason || a.sum - b.sum || a.spread - b.spread || tie(a, b)
+      : ctx.direction === 'more_formal' ? a.offSeason - b.offSeason || b.sum - a.sum || a.spread - b.spread || tie(a, b)
+        : a.spread - b.spread || tie(a, b));
   const intent = byIntent[0];
-  const options: Scored[] = [];
+  const options: { s: Scored; label: AnchorOptionLabel }[] = [];
   if (last) {
-    const byChanges = [...intentPool].sort((a, b) =>
-      a.changed.length - b.changed.length || a.spread - b.spread || a.recent - b.recent || (key(a.outfit) < key(b.outfit) ? -1 : 1));
-    options.push(byChanges[0]);
-    if (key(byChanges[0].outfit) !== key(intent.outfit)) options.push(intent);
-  } else {
-    options.push(intent);
+    const byChanges = [...intentPool].sort((a, b) => a.changed.length - b.changed.length || a.spread - b.spread || tie(a, b));
+    options.push({ s: byChanges[0], label: 'fewest_changes' });
+  } else if (ctx.direction === 'less_formal' || ctx.direction === 'more_formal') {
+    // No last plan: also offer the smallest step that still meets the direction.
+    const gentle = [...intentPool].sort((a, b) =>
+      (ctx.direction === 'less_formal' ? b.sum - a.sum : a.sum - b.sum) || a.spread - b.spread || tie(a, b))[0];
+    options.push({ s: gentle, label: 'gentler_step' });
   }
+  if (!options.some((o) => key(o.s.outfit) === key(intent.outfit))) options.push({ s: intent, label: 'closest_to_intent' });
+  options.sort((a, b) => (a.label === 'closest_to_intent' ? 1 : 0) - (b.label === 'closest_to_intent' ? 1 : 0));
 
   return {
     kind: 'options',
     excluded,
-    options: options.map((s, i) => ({
+    options: options.map(({ s, label }) => ({
       outfit: s.outfit,
       changedSlots: s.changed,
       sum: s.sum,
-      label: last && i === 0 ? 'fewest_changes' : 'closest_to_intent',
+      label,
       reasonLines: reasonLines(s, anchors, facts, today, ctx),
     })),
   };
@@ -168,6 +182,7 @@ function reasonLines(s: Scored, anchors: readonly string[], facts: WardrobeFacts
     out.push(last ? `${id}: last confirmed wear ${last}` : `${id}: no confirmed wear yet`);
   }
   if (!s.outfit.outer) out.push('No outer layer in this option');
+  if (s.offSeason > 0) out.push(`${s.offSeason} piece${s.offSeason > 1 ? 's' : ''} may be out of season`);
   if (s.recent > 0) out.push(`${s.recent} item${s.recent > 1 ? 's' : ''} worn in the last ${SOFT_RECENT_DAYS} day`);
   void today;
   return out;

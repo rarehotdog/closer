@@ -26,6 +26,7 @@ import { buildBoxPrompt, encodeMockRle, normToPixelBox, type PixelBox } from './
 import { maskColor, type PixelSource } from './color.ts';
 import { gateModelCall } from './caps.ts';
 import { planAnchor } from './anchor.ts';
+import { checkIntent, INTENT_CHIPS } from './intent.ts';
 
 export type Clock = { now(): Date; today(): IsoDate };
 
@@ -99,6 +100,8 @@ export type Operation = StoredOperation & {
   modelCalls: number;
   staleResponses: number;
   labels: string[];
+  /** Sentence path (feature 1): what code accepted from the intent reader. */
+  intent?: { anchors: string[]; direction: Direction; rain: boolean };
   detail: string;
   /** Owner answers to ATTR_UNKNOWN formality questions; applied to this decision only. */
   formalityAnswers: Record<string, Formality>;
@@ -746,7 +749,7 @@ export class CloserService {
    * The free sentence → locks/direction step is the model's job in real mode (Spark 1); here the
    * owner taps items and a direction chip.
    */
-  startAnchor(workspaceId: string, a: { anchorItemIds: string[]; direction?: Direction; rainPct?: number | null; sessionId?: string | null }): Operation | { ok: false; code: ReasonCode; detail: string } {
+  startAnchor(workspaceId: string, a: { anchorItemIds: string[]; direction?: Direction; rainPct?: number | null; sessionId?: string | null }, existing?: Operation): Operation | { ok: false; code: ReasonCode; detail: string } {
     const ws = this.ws(workspaceId);
     if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
     const state = this.ledger.readState(workspaceId, { fresh: false });
@@ -763,7 +766,9 @@ export class CloserService {
       hardRules: rain !== null ? [{ kind: 'waterproof_outer_if_rain', minRainPct: 60 }] : [],
       weather: rain !== null ? { rainPct: rain } : null,
     };
-    const op = this.newOp(ws, 'anchor', { sessionId: a.sessionId ?? null, context, weather: context.weather });
+    const op = existing ?? this.newOp(ws, 'anchor', { sessionId: a.sessionId ?? null });
+    op.context = context;
+    op.weather = context.weather;
     this.save(op);
     const today = this.clock.today();
     const r = planAnchor({ anchors, ctx: context, last: lastPlan?.slots ?? null }, facts, today, this.rules);
@@ -785,11 +790,46 @@ export class CloserService {
     op.exclusions = r.excluded;
     op.options = r.options.map((o, i) => ({
       index: i,
-      label: o.label === 'fewest_changes' ? 'Fewer changes' : 'Closer to what you said',
+      label: o.label === 'fewest_changes' ? 'Fewer changes' : o.label === 'gentler_step' ? 'A gentler step' : 'Closer to what you said',
       outfit: o.outfit, changedSlots: o.changedSlots, sum: o.sum, reasonFactIds: [], reasonLines: o.reasonLines, source: 'code' as const,
     }));
     op.labels.push(LABELS.reasonByCode);
     return this.propose_(op, ws.kind);
+  }
+
+  /**
+   * Sentence path for feature 1: Spark reads the owner's words into locks, direction and rain;
+   * code checks the answer (engine/intent.ts) and then runs the same anchor planner. Anything
+   * unclear becomes a question with the candidate IDs; nothing is guessed.
+   */
+  async startAnchorFromSentence(workspaceId: string, a: { sentence: string; sessionId?: string | null }): Promise<Operation | { ok: false; code: ReasonCode; detail: string }> {
+    const ws = this.ws(workspaceId);
+    if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
+    const sentence = String(a.sentence ?? '').trim().slice(0, 300);
+    if (!sentence) return { ok: false, code: 'INVALID_TRANSITION', detail: 'write what you want to wear' };
+    // Public sample closets behave like visitors: visitor money caps, and in real mode fixed sentences only.
+    const publicCopy = ws.kind === 'visitor' || ws.seedRef === 'sample-closet';
+    if (publicCopy && this.mode === 'real' && !INTENT_CHIPS.includes(sentence)) return { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the example sentences' };
+    const op = this.newOp(ws, 'anchor', { sessionId: a.sessionId ?? null, sentence });
+    this.save(op);
+    const g = this.gate(publicCopy ? { ...ws, kind: 'visitor' } : ws, op.sessionId, EST_MICRO_USD.intent);
+    if (!g.ok) return this.hold(op, ws.kind, [g.code], null, g.detail);
+    const state = this.ledger.readState(workspaceId, { fresh: false });
+    const facts = factsFromState(state);
+    const items = [...facts.items.values()].map((i) => ({ itemId: i.itemId, slot: i.slot, type: i.type, color: i.color }));
+    const r = await this.ports.intent.read(sentence, items);
+    this.recordCalls(op, r.calls);
+    this.save(op);
+    if (!r.ok) return this.hold(op, ws.kind, [r.code], null, r.detail);
+    const c = checkIntent(r.value, items);
+    op.labels.push(this.mode === 'mock' ? 'Sentence read by keyword rules (mock)' : 'Sentence read by Spark, checked by code');
+    if (!c.ok && c.kind === 'invalid') return this.hold(op, ws.kind, ['INVALID_MODEL_OUTPUT'], null, c.detail);
+    if (!c.ok) {
+      const text = c.candidates.length > 1 ? `Which one did you mean by "${c.phrase}": ${c.candidates.join(' or ')}?` : 'Which piece do you want to keep? Tap it.';
+      return this.hold(op, ws.kind, ['AMBIGUOUS_REFERENCE'], { code: 'AMBIGUOUS_REFERENCE', itemIds: c.candidates, cardId: null, attr: null, choices: c.candidates, text });
+    }
+    op.intent = { anchors: c.anchors, direction: c.direction, rain: c.rain };
+    return this.startAnchor(workspaceId, { anchorItemIds: c.anchors, direction: c.direction, rainPct: c.rain ? 80 : null, sessionId: op.sessionId }, op);
   }
 
   // ---------------- read model ----------------

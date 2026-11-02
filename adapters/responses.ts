@@ -11,7 +11,7 @@ export const SPARK_MODEL = 'muse-spark-1.3';
 export const SAM_MODEL = 'sam-3.1';
 
 /** Plan §3-4 per-call estimates (micro-USD), used for the "est. live" display and cap pre-checks. */
-export const EST_MICRO_USD = { spark1: 18_000, sam: 2_500, spark2: 15_000 } as const;
+export const EST_MICRO_USD = { spark1: 18_000, sam: 2_500, spark2: 15_000, intent: 4_000 } as const;
 
 /** Muse Spark Standard mode per 1M tokens: input $1.25, output (reasoning included) $4.25. SAM: $2.50 / 1,000 images. */
 /** Missing usage is charged at the estimate, never at zero, so the caps cannot fail open. */

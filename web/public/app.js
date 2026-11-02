@@ -567,6 +567,17 @@ async function todayScreen(view) {
     S.op = await postJson(`/api/ws/${id}/anchor`, { anchorItemIds: [...S.locks], direction: S.direction, rainPct: S.rain ? 80 : null });
     render();
   }
+  async function say(sentence) {
+    S.msg = null;
+    S.saved = null;
+    S.op = await postJson(`/api/ws/${id}/say`, { sentence });
+    if (S.op && S.op.intent) {
+      S.locks = new Set(S.op.intent.anchors);
+      S.direction = S.op.intent.direction;
+      S.rain = S.op.intent.rain;
+    }
+    render();
+  }
   async function pick(i) {
     const before = S.view.revision;
     const r = await saveFlow(id, 'lock', { eventId: uuid(), expectedRevision: before, operationId: S.op.operationId, optionIndex: i },
@@ -599,8 +610,15 @@ async function todayScreen(view) {
     const dir = h('div', { class: 'seg', role: 'group', 'aria-label': 'Direction' }, [['none', 'As it is'], ['less_formal', 'More relaxed'], ['more_formal', 'Dressier']].map(([k, l]) =>
       h('button', { type: 'button', 'aria-pressed': S.direction === k ? 'true' : 'false', onclick: () => { S.direction = k; render(); } }, l)));
     const rain = h('label', { class: 'row muted' }, h('input', { type: 'checkbox', id: 'rain', checked: S.rain ? true : null, onchange: (e) => { S.rain = e.target.checked; render(); } }), 'Rain likely today (you tell Closer; no weather service)');
+    const box = h('textarea', { id: 'say', rows: '2', class: 'draft', placeholder: '오늘 이 네이비 재킷 입을 건데 좀 편하게 / Keep the navy jacket, more relaxed' });
+    const sayPanel = h('section', { class: 'panel' }, h('h2', null, 'Say it'),
+      h('div', { class: 'chip-row' }, (META.intentChips || []).map((c) => h('button', { type: 'button', class: 'chip', onclick: () => say(c) }, c))),
+      box, h('button', { class: 'btn small', type: 'button', id: 'say-go', onclick: () => box.value.trim() && say(box.value) }, 'Read my sentence'),
+      S.op && S.op.intent ? h('div', { class: 'row' }, h('span', { class: 'chip accent' }, `Understood: keep ${S.op.intent.anchors.join(' + ')}${S.op.intent.direction !== 'none' ? ` · ${S.op.intent.direction.replace('_', ' ')}` : ''}${S.op.intent.rain ? ' · rain' : ''}`)) : null,
+      S.op && (S.op.labels || []).length ? h('p', { class: 'muted' }, S.op.labels.join(' · ')) : null);
     const parts = [
-      h('section', { class: 'panel' }, h('h2', null, 'Your closet'), grid),
+      sayPanel,
+      h('section', { class: 'panel' }, h('h2', null, 'Or tap what you want to keep'), grid),
       h('section', { class: 'panel' }, h('h2', null, 'Anything else?'), h('div', { class: 'row' }, dir), rain, h('div', { class: 'spacer' }),
         h('button', { class: 'btn', type: 'button', id: 'complete', disabled: S.locks.size === 0 ? true : null, onclick: run }, S.locks.size ? `Keep ${[...S.locks].join(' + ')} and complete the rest` : 'Tap a piece to keep first')),
     ];
@@ -610,7 +628,9 @@ async function todayScreen(view) {
       else if (op.state === 'HOLD') {
         const q = op.questions[0];
         parts.push(h('section', { class: 'panel' }, h('h2', null, 'Closer needs you'), h('p', { class: 'question' }, q ? q.text : op.detail),
-          h('div', { class: 'row' }, (q ? q.choices : []).map((c) => c === 'discover' ? h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover') : h('span', { class: 'chip' }, c)))));
+          h('div', { class: 'row' }, (q ? q.choices : []).map((c) => c === 'discover' ? h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover')
+            : items[c] ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => { S.locks = new Set([c]); run(); } }, `${c} · ${itemName(items[c])}`)
+            : h('span', { class: 'chip' }, c)))));
       } else {
         parts.push(h('section', { class: 'panel' }, h('h2', null, `${op.options.length === 1 ? 'One outfit' : 'Two outfits'} with what you kept`),
           h('div', { class: 'options' }, op.options.map((o, i) => h('div', { class: 'option' }, h('h3', null, o.label),
