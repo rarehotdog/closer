@@ -19,6 +19,7 @@ import { BUILD_CHIP, LABELS, livePerception, sampleWardrobe } from '../shared/la
 import { EST_MICRO_USD } from '../adapters/responses.ts';
 import type { WorkspaceRow } from '../shared/ledger.ts';
 import { ExtrasStore } from '../store/extras.ts';
+import { PhotoStore } from '../store/photos.ts';
 import { FeatureService } from '../engine/features.ts';
 import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
 import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
@@ -53,6 +54,7 @@ let mode: 'mock' | 'real';
 let svc: CloserService;
 let ledger: SqliteLedger;
 let feat: FeatureService;
+let uploads: PhotoStore;
 try {
   const p = createPortsFromEnv(env, lib, {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -62,7 +64,10 @@ try {
   mode = p.mode;
   mkdirSync(dirname(DB_PATH), { recursive: true });
   ledger = new SqliteLedger(DB_PATH, { kill: { on: false, setAt: null, ttlMs: KILL_TTL_MS }, caps: PROVISIONAL_CAPS });
-  svc = new CloserService({ ledger, ports: p.ports, clock, photos: lib, mode });
+  uploads = new PhotoStore(join(dirname(DB_PATH), 'photos'));
+  // Sample photos for everyone; uploaded photos only through routes that check their workspace.
+  const photoSource = { get: (id: string) => uploads.get(id) ?? lib.get(id) };
+  svc = new CloserService({ ledger, ports: p.ports, clock, photos: photoSource, mode });
   feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now });
 } catch (e) {
   if (e instanceof RealModeRefused) {
@@ -85,12 +90,12 @@ function send(res: ServerResponse, status: number, body: unknown, type = 'applic
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
-async function readJson(req: IncomingMessage): Promise<Json> {
+async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Json> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > 64 * 1024) throw new Error('body too large');
+    if (size > limit) throw new Error('body too large');
     chunks.push(c as Buffer);
   }
   return chunks.length ? (JSON.parse(Buffer.concat(chunks).toString('utf8')) as Json) : {};
@@ -212,21 +217,44 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (method === 'GET' && action === 'market' && arg) return send(res, 200, feat.market(wsId, arg, sample));
   if (method === 'GET' && action === 'drafts') return send(res, 200, { drafts: feat.drafts(wsId) });
   if (method === 'GET' && action === 'look' && arg) return send(res, 200, feat.matchLook(wsId, arg));
+  if (method === 'GET' && action === 'photos') return send(res, 200, { photos: uploads.list(wsId) });
+  if (method === 'GET' && action === 'photo' && arg) {
+    const own = uploads.list(wsId).some((p) => p.photoId === arg);
+    const bytes = own ? uploads.jpegBytes(arg) : null;
+    return bytes ? send(res, 200, bytes, 'image/jpeg') : send(res, 404, { ok: false, detail: 'no such photo' });
+  }
   if (method === 'GET' && action === 'view') return send(res, 200, { ...svc.view(wsId), banner: banner(ws, sessionId), sessionId });
   if (method === 'GET' && action === 'event' && arg) {
     const r = ledger.lookupEvent(wsId, arg);
     return send(res, r ? 200 : 404, r ? r.response : { ok: false, detail: 'no such event' });
   }
   if (method !== 'POST') return send(res, 405, { ok: false });
+  if (action === 'upload') {
+    // Owner wardrobes only (visitors use the sample photos). Two copies from one canvas: JPEG for the models, PNG for pixels.
+    if (ws.kind !== 'real') return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'uploads are for your own wardrobe' });
+    const u = await readJson(req, 12 * 1024 * 1024);
+    try {
+      const meta = uploads.save(wsId, Buffer.from(String(u.jpegBase64 ?? ''), 'base64'), Buffer.from(String(u.pngBase64 ?? ''), 'base64'), clock.now().toISOString());
+      return send(res, 200, { ok: true, ...meta });
+    } catch (e) {
+      return send(res, 400, { ok: false, code: 'UNSUPPORTED_IMAGE', detail: e instanceof Error ? e.message : String(e) });
+    }
+  }
   const b = await readJson(req);
   const who = { eventId: String(b.eventId ?? ''), actor: 'human' as const, expectedRevision: Number(b.expectedRevision ?? -1) };
   switch (action) {
     case 'photo': {
+      const photoId = String(b.photoId ?? '');
+      // An uploaded photo can be used only in the wardrobe it was uploaded to.
+      if (photoId.startsWith('up_') && !uploads.list(wsId).some((p) => p.photoId === photoId)) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'no such photo in this wardrobe' });
       const chip = CHIPS.find((c) => c.chipId === b.chipId);
-      // Visitors: fixed sentence chips only, no free text (RT-13). Owner: chips in mock mode too.
-      if (!chip) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
-      return send(res, 200, await svc.startPhoto(wsId, { photoId: String(b.photoId ?? ''), sentence: chip.text, sessionId }));
+      // Visitors: fixed sentence chips only, no free text (RT-13). The owner may write their own sentence.
+      const free = ws.kind === 'real' && typeof b.sentence === 'string' && b.sentence.trim() ? b.sentence.trim() : null;
+      if (!chip && !free) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
+      return send(res, 200, await svc.startPhoto(wsId, { photoId, sentence: free ?? chip!.text, sessionId }));
     }
+    case 'photodelete':
+      return send(res, 200, { ok: uploads.delete(wsId, String(b.photoId ?? '')) });
     case 'confirm':
       return send(res, 200, svc.confirmCards(wsId, { operationId: String(b.operationId), eventIds: (b.eventIds as string[]) ?? [], actor: 'human', expectedRevision: who.expectedRevision, answers: b.answers as never }));
     case 'propose':

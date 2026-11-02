@@ -118,3 +118,15 @@ Each visitor gets a private copy of the sample closet: 12 sample items and a syn
 - **Missing usage.** A model response with no usage is charged at the estimate, not zero, so the caps cannot fail open.
 - **Person-name list.** It is no longer stored in the repository, not even as hashes. Each machine keeps an untracked `.closer/deny-names.json`. Without it, the AT-18 name check prints a note that it did not run.
 - **History cleanup.** The earlier local history was rewritten to drop the hashes and two lines about owner-side approvals. The repository has never been pushed.
+
+## Real photo path (added 11/2 evening)
+
+- **Upload (owner only).** The upload button on /app opens the camera or the photo library. The browser draws the photo on a canvas and sends two copies: a JPEG with a long side of at most 1600 px, which goes to Spark and SAM, and a PNG of at most 800 px, which is used for pixel work. Re-encoding drops EXIF and location data.
+- **Storage.** The server keeps both copies next to the database (`photos/`). They never go in the repository. An uploaded photo can be used only in the wardrobe it was uploaded to, and the owner can delete it.
+- **SAM masks.** Masks are decoded with Meta's official client library (`@meta-sam/parser`). A test decodes the docs' own example mask. The SAM request asks for `one_bit` masks.
+- **Spark 2 cut-outs.** Spark 2 receives up to 8 mask cut-outs (long side 256 px, transparent outside the mask) for items registered from a photo, so the model sees the garment, not the room.
+- **Own sentence.** The owner can write their own sentence for a photo. Visitors still pick fixed sentences.
+- **Owner sign-in.** /app and /admin have a token field. The token stays in that browser tab and is sent as a header.
+- **Banner wording.** The banner says "about N photo runs left in the cap" instead of "calls left today", because the cap is a total, not a daily limit.
+- **Checked.** 95 tests run: 85 pass, 1 fails (AT-28) and 9 are skipped. A real-mode server with a fake key returned 403 without the token and 200 with it, and refused visitor uploads. A synthetic photo uploaded at 1500×2000 was stored at 1200×1600, with no key in the logs.
+- **Not checked.** A live Spark and SAM run on a real photo, which needs the key.

@@ -7,6 +7,7 @@ import { createSpark1Port } from './spark1.ts';
 import { createSamPort, type MaskDecoder } from './sam.ts';
 import { createSpark2Port } from './spark2.ts';
 import { createIntentPort } from './intent.ts';
+import { officialMaskDecoder } from './samDecoder.ts';
 import { createRealTransport, resolveMode, type Mode, type Transport } from './transport.ts';
 import { createMockTransport, type MockScript, type MockTransport } from './mock/transport.ts';
 import type { Ports } from './types.ts';
@@ -15,7 +16,7 @@ export type PortDeps = { sleep: (ms: number) => Promise<void>; nowMs: () => numb
 
 export function portsFromTransport(transport: Transport, source: 'live' | 'mock', deps: PortDeps): Ports {
   const d: CallDeps = { transport, source, sleep: deps.sleep, nowMs: deps.nowMs, nowIso: deps.nowIso };
-  return { spark1: createSpark1Port(d), sam: createSamPort({ ...d, decodeMask: deps.decodeMask }), spark2: createSpark2Port(d), intent: createIntentPort(d) };
+  return { spark1: createSpark1Port(d), sam: createSamPort({ ...d, decodeMask: deps.decodeMask ?? officialMaskDecoder }), spark2: createSpark2Port(d), intent: createIntentPort(d) };
 }
 
 export function createMockPorts(lib: PhotoLibrary, deps: PortDeps, script: MockScript = {}): { ports: Ports; transport: MockTransport } {

@@ -166,3 +166,5 @@ a.btn.small { padding: 5px 10px; font-size: 13px; }
 }
 .evform { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; }
 .evform select, .evform input { font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; }
+.ownerbar { margin: 6px 0 12px; }
+.ownerbar input.tok { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; width: 220px; max-width: 100%; }

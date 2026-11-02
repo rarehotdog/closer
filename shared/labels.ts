@@ -53,7 +53,7 @@ export function offendersChip(slots: readonly Slot[]): string {
   return `Spark: ${slots.join(', ')} feel off`;
 }
 export function livePerception(callsLeft: number): string {
-  return `Live perception: on, ${callsLeft} calls left today`;
+  return `Live perception: on, about ${callsLeft} photo runs left in the cap`;
 }
 export function callPanel(c: Pick<CallRow, 'callId' | 'latencyMs' | 'costMicroUsd' | 'estLiveCostMicroUsd' | 'source' | 'model' | 'http'>): string {
   const usd = (m: number) => `$${(m / 1_000_000).toFixed(4)}`;

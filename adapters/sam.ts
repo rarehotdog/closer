@@ -11,6 +11,8 @@ export function buildSamBody(req: SamRequest): Record<string, unknown> {
   return {
     model: SAM_MODEL,
     store: false,
+    // Box prompts always come back one_bit; asking for it keeps the request explicit (segmenting doc).
+    metadata: { mask_encoding: 'one_bit' },
     input: [
       {
         type: 'message',
@@ -25,8 +27,9 @@ export function buildSamBody(req: SamRequest): Record<string, unknown> {
 }
 
 /**
- * Decoder for the documented mask encodings ('~' lossless, '!' one_bit). The official client
- * library is not installed in this build; plug it in during the key window (docs/status.md).
+ * Decoder for the documented mask encodings ('~' lossless, '!' one_bit). Production uses the
+ * official client library (adapters/samDecoder.ts); the mock transport's own 'R' run-length
+ * encoding is decoded here.
  */
 export type MaskDecoder = (wire: SamMaskWire) => Uint8Array;
 
@@ -53,7 +56,7 @@ export function createSamPort(deps: CallDeps & { decodeMask?: MaskDecoder }): Sa
             let bits: Uint8Array;
             if (w.mask.enc === 'R') bits = decodeMockRle(w.mask.payload, size);
             else if (deps.decodeMask) bits = deps.decodeMask(w.mask);
-            else throw new Error(`mask encoding '${w.mask.enc}' needs the official decoder (not installed)`);
+            else throw new Error(`no decoder for mask encoding '${w.mask.enc}'`);
             raster = { x: w.box.x1, y: w.box.y1, w: w.mask.w, h: w.mask.h, bits };
           }
           records.push({ id: w.id, box: w.box, frameW: w.frameW, frameH: w.frameH, raster });

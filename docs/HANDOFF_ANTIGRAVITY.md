@@ -61,8 +61,8 @@ Read `docs/features_1102.md` first, then `docs/status.md`.
 |---|---|---|
 | P0-1 | Run `scripts/live_check.ts --live` on the Mac with the key, then fix the adapters to match the real responses (model IDs, `output` shape, `usage` field names) | `.data/live_check.json` all OK; tests still green |
 | P0-2 | Host with a persistent disk (SQLite). Set environment variables on the host only: `CLOSER_MODE=real`, `MODEL_API_KEY`, `CLOSER_ADMIN_TOKEN`, `CLOSER_DB_PATH` | Public URL; /version sha = the repo HEAD |
-| P0-3 | Real photo path: SAM mask decoder, JPEG/PNG decode for the mask colour re-measure, 256 px thumbnails for Spark 2 (gaps listed in status.md) | One real outfit photo goes through to cards, then a plan, then a saved wear |
-| P1-4 | Owner sign-in in the UI: a token field sends `x-admin-token`, so /app, /admin and K1 work in real mode | K1 can be switched from /admin in real mode |
+| P0-3 | Real photo path. Built 11/2, live run pending: official SAM decoder (`@meta-sam/parser`), browser upload (JPEG for the models plus a PNG copy for pixels, EXIF dropped), mask colour re-measure on the PNG copy, 256 px mask cut-outs sent to Spark 2. What remains is one live run with a real photo | One real outfit photo goes through to cards, then a plan, then a saved wear, in real mode |
+| P1-4 | Owner sign-in in the UI. Built 11/2: a token field on /app and /admin sends `x-admin-token`, and /app shows a private notice when signed out | Done in mock and real mode with a fake key; check again on the deployed URL |
 | P1-5 | Visual polish on phones (CSS and assets) | 390 px screenshots; no overflow |
 | P1-6 | `scripts/intent_ablation.ts --live` results in the README (rules vs Spark on 12 sentences) | Table with both columns |
 | P2-7 | Earlier review notes: keep focus after a re-render; build the "Checked by code" chip from the checks that actually ran; the README verify step compares HEAD, not the first commit; AT-28 target list (owner decision) | Each fix has a test or a screenshot |

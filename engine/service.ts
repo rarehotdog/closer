@@ -26,6 +26,7 @@ import { buildBoxPrompt, encodeMockRle, normToPixelBox, type PixelBox } from './
 import { maskColor, type PixelSource } from './color.ts';
 import { gateModelCall } from './caps.ts';
 import { planAnchor } from './anchor.ts';
+import { cutoutPng, MAX_THUMBNAILS } from './thumbs.ts';
 import { checkIntent, INTENT_CHIPS } from './intent.ts';
 
 export type Clock = { now(): Date; today(): IsoDate };
@@ -426,7 +427,7 @@ export class CloserService {
         offenders: ctx.offenders,
         direction: ctx.direction,
       },
-      thumbnails: [],
+      thumbnails: this.thumbnailsFor([...ctx.pinned, ...input.slots.flatMap((sl) => sl.ranked.map((r) => r.itemId))], state),
       correction: null,
     };
     const check = { ctx, facts, today, rules: this.rules, input, factIds };
@@ -481,6 +482,26 @@ export class CloserService {
     if (!t.ok) throw new Error(t.detail);
     op.state = 'PROPOSED';
     return this.save(op);
+  }
+
+  /**
+   * Mask cut-outs of items registered from a photo (cutoutRef = operationId#cardId). Items seeded
+   * without a photo have none. At most MAX_THUMBNAILS, pinned items first.
+   */
+  thumbnailsFor(itemIds: string[], state: LedgerState): { itemId: string; imageUrl: string }[] {
+    const out: { itemId: string; imageUrl: string }[] = [];
+    for (const id of [...new Set(itemIds)]) {
+      if (out.length >= MAX_THUMBNAILS) break;
+      const ref = state.items.find((i) => i.itemId === id)?.cutoutRef;
+      if (!ref) continue;
+      const [opId, cardId] = ref.split('#');
+      const src = this.getOperation(opId);
+      const card = src?.cards.find((c) => String(c.cardId) === cardId);
+      const photo = src?.photoId ? this.photos.get(src.photoId) : null;
+      if (!card?.mask || !photo) continue;
+      out.push({ itemId: id, imageUrl: `data:image/png;base64,${cutoutPng(photo.pixels, card.mask).toString('base64')}` });
+    }
+    return out;
   }
 
   private optionView(i: number, outfit: Outfit, changed: Slot[], sum: number | null, reasonFactIds: string[], all: ReturnType<typeof buildFacts>, source: 'model' | 'code'): OptionView {

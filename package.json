@@ -16,5 +16,8 @@
     "live:check": "bash scripts/with-key.sh node --disable-warning=ExperimentalWarning scripts/live_check.ts --live",
     "live:ablation": "bash scripts/with-key.sh node --disable-warning=ExperimentalWarning scripts/intent_ablation.ts --live",
     "live:ui": "CLOSER_MODE=real bash scripts/with-key.sh node --disable-warning=ExperimentalWarning web/server.ts"
+  },
+  "dependencies": {
+    "@meta-sam/parser": "0.1.0"
   }
 }

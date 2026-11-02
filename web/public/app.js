@@ -17,10 +17,37 @@ function h(tag, attrs, ...kids) {
   }
   return el;
 }
-const getJson = async (url, headers) => (await fetch(url, { headers })).json();
+// Owner sign-in: the admin token lives in this tab's sessionStorage only and goes out as a header.
+function ownerToken() { try { return sessionStorage.getItem('closer.ownerToken') || ''; } catch { return ''; } }
+function authHeaders(extra) { const t = ownerToken(); return Object.assign({}, extra || {}, t ? { 'x-admin-token': t } : {}); }
+const getJson = async (url, headers) => (await fetch(url, { headers: authHeaders(headers) })).json();
 async function postJson(url, body) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body || {}) });
   return r.json();
+}
+function ownerBar() {
+  const input = h('input', { type: 'password', id: 'owner-token', autocomplete: 'off', placeholder: 'Owner token (real mode)', class: 'tok' });
+  const state = h('span', { class: 'muted' }, ownerToken() ? 'Signed in for this tab' : 'Not signed in');
+  return h('div', { class: 'row ownerbar' }, input,
+    h('button', { class: 'btn small ghost', type: 'button', onclick: () => { try { sessionStorage.setItem('closer.ownerToken', input.value.trim()); } catch {} location.reload(); } }, 'Sign in'),
+    ownerToken() ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => { try { sessionStorage.removeItem('closer.ownerToken'); } catch {} location.reload(); } }, 'Sign out') : null,
+    state);
+}
+
+/** Two copies from one canvas: JPEG (long side ≤ 1600) for the models, PNG (≤ 800) for pixel work. Drops EXIF. */
+async function prepareUpload(file) {
+  const bmp = await createImageBitmap(file);
+  const draw = (max, type, q) => {
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k);
+    c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return { url: c.toDataURL(type, q), w: c.width, h: c.height };
+  };
+  const jpeg = draw(1600, 'image/jpeg', 0.9);
+  const png = draw(800, 'image/png');
+  return { jpeg, png };
 }
 const uuid = () => crypto.randomUUID();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -140,7 +167,7 @@ const sameOutfit = (a, b) => SLOTS.every((s) => (a[s] || null) === (b[s] || null
 
 // ---------- decision component (Try and App) ----------
 function decisionUI(root, cfg) {
-  const S = { wsId: cfg.wsId, view: null, photoId: 'p1', chipId: 'c1', flash: [], busy: false, painted: new Set(), answers: {}, ran: false };
+  const S = { wsId: cfg.wsId, view: null, photoId: 'p1', chipId: 'c1', sentence: '', flash: [], busy: false, painted: new Set(), answers: {}, ran: false };
 
   async function refresh() {
     if (S.wsId) S.view = await getJson(`/api/ws/${S.wsId}/view`);
@@ -157,7 +184,8 @@ function decisionUI(root, cfg) {
       }
       S.flash = [];
       S.answers = {};
-      const op = await postJson(`/api/ws/${S.wsId}/photo`, { photoId: S.photoId, chipId: S.chipId });
+      const own = !cfg.visitor && S.sentence.trim();
+      const op = await postJson(`/api/ws/${S.wsId}/photo`, own ? { photoId: S.photoId, sentence: S.sentence.trim() } : { photoId: S.photoId, chipId: S.chipId });
       if (op.ok === false) flash({ chip: `${op.code} · ${op.detail}`, cls: 'bad' });
       S.ran = true;
     });
@@ -166,18 +194,35 @@ function decisionUI(root, cfg) {
   function inputs() {
     const photos = h('div', { class: 'photos' }, META.photos.map((p) =>
       h('button', { class: 'photo-pick', type: 'button', 'aria-pressed': String(S.photoId === p.photoId), onclick: () => { S.photoId = p.photoId; render(); } },
-        h('img', { src: p.url, alt: `${p.title}, sample photo` }),
+        h('img', { src: p.url, alt: `${p.title}${p.mine ? ', your photo' : ', sample photo'}` }),
         h('div', { class: 'cap' }, `${p.title}`),
-        h('span', { class: 'chip sample' }, META.labels.samplePhoto))));
+        p.mine ? h('span', { class: 'chip accent' }, 'Your photo') : h('span', { class: 'chip sample' }, META.labels.samplePhoto))));
+    const fileInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/heic', capture: 'environment', id: 'upload-file', hidden: true, onchange: async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      await busy(async () => {
+        try {
+          const { jpeg, png } = await prepareUpload(f);
+          const r = await postJson(`/api/ws/${S.wsId}/upload`, { jpegBase64: jpeg.url.split(',')[1], pngBase64: png.url.split(',')[1] });
+          if (r.ok === false) { flash({ chip: `${r.code} · ${r.detail}`, cls: 'bad' }); return; }
+          META.photos.unshift({ photoId: r.photoId, title: 'Your photo', url: jpeg.url, w: r.w, h: r.h, count: 0, mine: true });
+          S.photoId = r.photoId;
+          flash({ chip: 'Photo saved on your server (EXIF removed). Delete it any time.', cls: 'ok' });
+        } catch (err) { flash({ chip: `UNSUPPORTED_IMAGE · ${err && err.message ? err.message : 'could not read the photo'}`, cls: 'bad' }); }
+      });
+    } });
     const sentences = h('div', { class: 'sentences' }, META.chips.map((c) =>
       h('button', { class: 'sentence', type: 'button', 'aria-pressed': String(S.chipId === c.chipId), onclick: () => { S.chipId = c.chipId; render(); } }, `“${c.text}”`)));
     return h('div', { class: 'grid cols-2' },
       h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '1'), cfg.visitor ? 'Pick a sample outfit' : 'Outfit photo'),
-        cfg.visitor ? null : h('div', { class: 'row', style: 'margin-bottom:10px' }, h('button', { class: 'btn ghost small', type: 'button', disabled: true }, 'Upload photo'), h('span', { class: 'muted' }, META.labels.uploadOff)),
+        cfg.visitor ? null : h('div', { class: 'row', style: 'margin-bottom:10px' }, fileInput,
+          h('button', { class: 'btn ghost small', type: 'button', id: 'upload', disabled: S.busy || !S.wsId ? true : null, onclick: () => fileInput.click() }, 'Upload or take a photo'),
+          h('span', { class: 'muted' }, 'Reading your own photo needs real mode (a Meta key on the server). Mock mode reads the sample photos only.')),
         photos),
       h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '2'), 'Pick a sentence'),
-        h('p', { class: 'muted' }, cfg.visitor ? 'Fixed sentences only. Free text and visitor photos are off on this page.' : 'Mock mode uses the same fixed sentences.'),
+        h('p', { class: 'muted' }, cfg.visitor ? 'Fixed sentences only. Free text and visitor photos are off on this page.' : 'Pick one, or write your own (your wardrobe only).'),
         sentences,
+        cfg.visitor ? null : h('textarea', { id: 'own-sentence', rows: '2', class: 'draft', maxlength: '200', placeholder: 'Or write your own: Keep this jacket. The rest feels too dressed-up.', oninput: (e) => { S.sentence = e.target.value; } }, S.sentence),
         h('div', { class: 'spacer' }),
         h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: run }, S.busy ? 'Working…' : 'Run'),
           cfg.visitor ? h('span', { class: 'muted' }, 'Each run uses a fresh copy of the sample wardrobe.') : null)));
@@ -443,7 +488,9 @@ async function tryScreen(view) {
 
 async function appScreen(view) {
   chrome([h('span', { class: 'chip sample' }, META.labels.samplePhoto)]);
-  view.append(h('h1', null, 'My wardrobe'), h('p', { class: 'lede' }, 'Owner view of the same loop. Photo upload needs admin sign-in; in mock mode the sample photos stand in.'));
+  view.append(h('h1', null, 'My wardrobe'), ownerBar(), h('p', { class: 'lede' }, 'Owner view of the same loop. In real mode, sign in with the owner token first. Photos you upload stay on your server.'));
+  const probe = await fetch('/api/ws/owner/view', { headers: authHeaders() });
+  if (probe.status === 403) { view.append(h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
   const root = h('div');
   view.append(root);
   const ui = decisionUI(root, { wsId: 'owner', visitor: false });
@@ -476,8 +523,8 @@ async function demoScreen(view) {
 
 async function adminScreen(view) {
   chrome();
-  const r = await fetch('/api/admin');
-  if (r.status === 403) { view.append(h('h1', null, 'Admin'), h('p', { class: 'lede' }, 'Admin token required.')); return; }
+  const r = await fetch('/api/admin', { headers: authHeaders() });
+  if (r.status === 403) { view.append(h('h1', null, 'Admin'), ownerBar(), h('p', { class: 'lede' }, 'Admin token required. Sign in above (the token is on the server, see deploy/README.md).')); return; }
   const a = await r.json();
   const usd = (m) => `$${(m / 1e6).toFixed(4)}`;
   const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`;
