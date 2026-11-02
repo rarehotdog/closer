@@ -15,9 +15,24 @@ const BANNED = [
   ['about to ', 'buy'], ['knows ', 'what'], ['the ', 'only'], ['first ', 'app'], ['nobody ', 'else'], ['유', '일'], ['최', '초'],
 ].map((p) => p.join(''));
 
-// Person-name deny list as SHA-256 of lowercase tokens (the names are not stored in the repository).
-const NAME_HASHES: { len: number; script: 'hangul' | 'ascii'; hash: string }[] = [
-];
+// Person-name deny list. The names are never stored in the repository, not even hashed (short
+// hashed tokens reverse by dictionary). Each machine keeps them in an untracked file:
+// .closer/deny-names.json = ["name", "another name", ...]. Without that file the name check is
+// reported as not run (namesChecked = 0), never as a pass.
+const NAME_HASHES: { len: number; script: 'hangul' | 'ascii'; hash: string }[] = loadDenyNames();
+
+function loadDenyNames(): { len: number; script: 'hangul' | 'ascii'; hash: string }[] {
+  const file = join(new URL('..', import.meta.url).pathname, '.closer', 'deny-names.json');
+  if (!existsSync(file)) return [];
+  const names = JSON.parse(readFileSync(file, 'utf8')) as string[];
+  return names.map((raw) => {
+    const w = raw.toLowerCase().trim();
+    return { len: [...w].length, script: /^[\u3131-\uD79D]+$/.test(w) ? 'hangul' : 'ascii', hash: createHash('sha256').update(w, 'utf8').digest('hex') };
+  });
+}
+
+/** Number of names the person-name check used on this machine (0 = check not run). */
+export const namesChecked = (): number => NAME_HASHES.length;
 
 /** Commit and text e-mail domains allowed (synthetic or no-reply only). */
 export const ALLOWED_EMAIL_DOMAINS = ['closer.invalid', 'example.invalid', 'example.com', 'users.noreply.github.com'];

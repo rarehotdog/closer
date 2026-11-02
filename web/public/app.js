@@ -436,8 +436,8 @@ async function tryScreen(view) {
   view.append(root);
   const ui = decisionUI(root, { wsId: null, visitor: true });
   // Banner before the first run: describe a fresh visitor copy.
-  const ownerView = await getJson('/api/ws/owner/view');
-  showBanner({ ...ownerView.banner, ifLive: `If live: ${META.labels.replayAndLedger} (visitor cap $0 by default)` });
+  const vb = await getJson('/api/banner/visitor');
+  showBanner({ ...vb, ifLive: vb.ifLive || `If live: ${META.labels.replayAndLedger} (visitor cap $0 by default)` });
   ui.render();
 }
 
@@ -521,6 +521,281 @@ async function versionScreen(view) {
         h('li', null, 'Turn K1 on in /admin and check that a button re-plan still works.'))));
 }
 
+
+// ---------- features 11/2: Today (keep this one) · Closet (60-day review) · Discover (looks) ----------
+const TYPE_NAME = { jacket: 'jacket', coat: 'coat', dress_shirt: 'dress shirt', knit: 'knit', tee: 'T-shirt', trousers: 'trousers', jeans: 'jeans', chinos: 'chinos', derby: 'derby shoes', sneakers: 'sneakers', track_jacket: 'track jacket', blouse: 'blouse', training_top: 'training top', skirt: 'skirt', joggers: 'joggers', shorts: 'shorts', running_shoes: 'running shoes', loafers: 'loafers' };
+const itemName = (it) => (it ? `${it.color !== 'unknown' ? `${it.color} ` : ''}${TYPE_NAME[it.type] || it.type}` : '');
+
+async function closetWs() {
+  let id = null;
+  try { id = localStorage.getItem('closer.closet'); } catch {}
+  if (id) {
+    const r = await fetch(`/api/ws/${id}/view`);
+    if (r.ok) return { id, view: await r.json() };
+  }
+  const s = await postJson('/api/closet/start', {});
+  try { localStorage.setItem('closer.closet', s.workspaceId); } catch {}
+  return { id: s.workspaceId, view: await getJson(`/api/ws/${s.workspaceId}/view`), fresh: true };
+}
+
+function tabbar() {
+  const tabs = [['/today', 'Today'], ['/closet', 'My closet'], ['/discover', 'Discover']];
+  return h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, tabs.map(([href, label]) => h('a', { href, class: location.pathname === href ? 'on' : null, 'aria-current': location.pathname === href ? 'page' : null }, label)));
+}
+
+function sampleChips() {
+  return [h('span', { class: 'chip sample' }, 'Sample closet'), h('span', { class: 'chip sample' }, 'Synthetic wear history')];
+}
+
+function tile(it, opts = {}) {
+  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` }, it ? placeholder(it.color) : h('span', { class: 'muted' }, '—'), h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : opts.label || 'none'), opts.badge ? h('span', { class: 'chip accent' }, opts.badge) : null);
+}
+
+async function todayScreen(view) {
+  chrome(sampleChips());
+  document.body.append(tabbar());
+  const { id, view: v } = await closetWs();
+  const params = new URLSearchParams(location.search);
+  const S = { locks: new Set((params.get('lock') || '').split(',').filter(Boolean)), direction: 'none', rain: false, op: null, msg: null, saved: null, view: v };
+  const byId = () => Object.fromEntries(S.view.items.map((i) => [i.itemId, i]));
+  const root = h('div');
+  view.append(h('h1', null, 'What do you want to wear today?'),
+    h('p', { class: 'lede' }, 'Tap the piece you want. Closer keeps it and completes the rest from what you own and have available. Nothing is saved until you pick.'), root);
+
+  async function run() {
+    S.msg = null;
+    S.op = await postJson(`/api/ws/${id}/anchor`, { anchorItemIds: [...S.locks], direction: S.direction, rainPct: S.rain ? 80 : null });
+    render();
+  }
+  async function pick(i) {
+    const before = S.view.revision;
+    const r = await saveFlow(id, 'lock', { eventId: uuid(), expectedRevision: before, operationId: S.op.operationId, optionIndex: i },
+      (vv) => vv.plans.some((p) => p.planId === S.op.planId && p.state === 'LOCKED' && sameOutfit(p.slots, S.op.options[i].outfit)), 'Saved and read back');
+    if (r.view) S.view = r.view;
+    S.saved = r.ok ? S.op.options[i].outfit : null;
+    S.msg = h('span', { class: `chip ${r.cls}` }, r.chip);
+    render();
+  }
+  async function laundry(itemId) {
+    const r = await postJson(`/api/ws/${id}/availability`, { eventId: uuid(), expectedRevision: S.view.revision, itemId, state: 'LAUNDRY' });
+    S.view = await getJson(`/api/ws/${id}/view`);
+    if (!r.ok) { S.msg = h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`); render(); return; }
+    S.msg = h('span', { class: 'chip warn' }, `${itemId} is in the laundry now. Your kept pieces stay; the rest is re-planned.`);
+    S.saved = null;
+    await run();
+  }
+
+  function render() {
+    const items = byId();
+    const grid = h('div', { class: 'wardrobe' }, S.view.items.map((it) => {
+      const on = S.locks.has(it.itemId);
+      const avail = it.availability;
+      return h('button', { type: 'button', class: `item pickable${on ? ' locked' : ''}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => { on ? S.locks.delete(it.itemId) : S.locks.add(it.itemId); S.op = null; S.saved = null; render(); } },
+        h('div', { class: 'thumb' }, placeholder(it.color)),
+        h('div', { class: 'meta' }, h('b', null, `${it.itemId} · ${itemName(it)}`), h('span', null, `${it.formality} formality`),
+          avail !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, avail.toLowerCase()) : null,
+          on ? h('span', { class: 'chip accent' }, 'Keep this today') : null));
+    }));
+    const dir = h('div', { class: 'seg', role: 'group', 'aria-label': 'Direction' }, [['none', 'As it is'], ['less_formal', 'More relaxed'], ['more_formal', 'Dressier']].map(([k, l]) =>
+      h('button', { type: 'button', 'aria-pressed': S.direction === k ? 'true' : 'false', onclick: () => { S.direction = k; render(); } }, l)));
+    const rain = h('label', { class: 'row muted' }, h('input', { type: 'checkbox', id: 'rain', checked: S.rain ? true : null, onchange: (e) => { S.rain = e.target.checked; render(); } }), 'Rain likely today (you tell Closer; no weather service)');
+    const parts = [
+      h('section', { class: 'panel' }, h('h2', null, 'Your closet'), grid),
+      h('section', { class: 'panel' }, h('h2', null, 'Anything else?'), h('div', { class: 'row' }, dir), rain, h('div', { class: 'spacer' }),
+        h('button', { class: 'btn', type: 'button', id: 'complete', disabled: S.locks.size === 0 ? true : null, onclick: run }, S.locks.size ? `Keep ${[...S.locks].join(' + ')} and complete the rest` : 'Tap a piece to keep first')),
+    ];
+    if (S.op) {
+      const op = S.op;
+      if (op.ok === false) parts.push(h('section', { class: 'panel' }, h('span', { class: 'chip bad' }, `${op.code} · ${op.detail}`)));
+      else if (op.state === 'HOLD') {
+        const q = op.questions[0];
+        parts.push(h('section', { class: 'panel' }, h('h2', null, 'Closer needs you'), h('p', { class: 'question' }, q ? q.text : op.detail),
+          h('div', { class: 'row' }, (q ? q.choices : []).map((c) => c === 'discover' ? h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover') : h('span', { class: 'chip' }, c)))));
+      } else {
+        parts.push(h('section', { class: 'panel' }, h('h2', null, `${op.options.length === 1 ? 'One outfit' : 'Two outfits'} with what you kept`),
+          h('div', { class: 'options' }, op.options.map((o, i) => h('div', { class: 'option' }, h('h3', null, o.label),
+            h('div', { class: 'flatlay' }, SLOTS.map((s) => tile(items[o.outfit[s]], { label: s, empty: !o.outfit[s], badge: S.locks.has(o.outfit[s]) ? 'kept' : null }))),
+            h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))),
+            h('button', { class: 'btn', type: 'button', onclick: () => pick(i) }, 'Wear this')))),
+          h('p', { class: 'muted' }, `${(op.labels || []).join(' · ')}`)));
+      }
+    }
+    if (S.saved) {
+      const loose = SLOTS.map((s) => S.saved[s]).filter((x) => x && !S.locks.has(x));
+      parts.push(h('section', { class: 'panel' }, h('h2', null, 'Something changed?'),
+        h('div', { class: 'row' }, loose.map((x) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => laundry(x) }, `${x} is in the laundry`)))));
+    }
+    if (S.msg) parts.push(h('div', { class: 'flash' }, S.msg));
+    root.replaceChildren(...parts);
+  }
+  render();
+}
+
+async function closetScreen(view) {
+  chrome(sampleChips());
+  document.body.append(tabbar());
+  const { id, view: v } = await closetWs();
+  const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
+  const root = h('div');
+  view.append(h('h1', null, 'My closet'),
+    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose. Days without any record count as unknown. You decide what happens next; Closer does not post, sell or donate anything.'), root);
+
+  async function load() { S.review = await getJson(`/api/ws/${id}/review?window=${S.window}`); render(); }
+  async function act(itemId, action) {
+    const r = await postJson(`/api/ws/${id}/reviewchoice`, { itemId, action });
+    S.msg = r.ok === false ? h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`) : null;
+    if (action === 'restyle') { location.href = `/today?lock=${itemId}`; return; }
+    S.open = { itemId, action };
+    S.draft = null;
+    if (action === 'sell_review') S.market = await getJson(`/api/ws/${id}/market/${itemId}`);
+    if (action === 'donate_review') S.draft = await postJson(`/api/ws/${id}/draft`, { itemId, kind: 'DONATE' });
+    await load();
+  }
+  async function keep(itemId) {
+    const after = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+    const r = await postJson(`/api/ws/${id}/exempt`, { itemId, reason: 'season', reviewAfter: after });
+    S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}` }, r.ok === false ? `${r.code} · ${r.detail}` : `Kept for the season · next look on ${r.reviewAfter}`);
+    S.open = null;
+    await load();
+  }
+
+  function priceCards() {
+    if (!S.market) return null;
+    const fmt = (e) => e.currency === 'KRW' ? `₩${e.amount.toLocaleString('en-US')}` : `$${e.amount.toFixed(2)}`;
+    return h('div', { class: 'grid cols-3' }, S.market.cards.map((c) => h('div', { class: 'card' },
+      h('div', { class: 'hd' }, c.info.name, h('span', { class: 'chip' }, c.info.currency)),
+      h('div', { class: 'muted' }, c.info.region),
+      c.entries.length ? h('ul', { class: 'reasons' }, c.entries.map((e) => h('li', null, `${fmt(e)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'} · ${e.matchLevel.toLowerCase().replace('_', ' ')} · ${e.retrievedAt}`, e.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)))
+        : h('p', { class: 'muted' }, c.emptyLine),
+      h('ul', { class: 'reasons muted' }, c.info.notes.map((n) => h('li', null, n))),
+      h('button', { class: 'btn small ghost', type: 'button', onclick: async () => {
+        S.draft = await postJson(`/api/ws/${id}/draft`, { itemId: S.open.itemId, kind: 'SELL', platform: c.platform });
+        render();
+      } }, `Draft a ${c.info.name} listing`))));
+  }
+
+  function evidenceForm() {
+    const f = (id, el) => { el.id = id; return el; };
+    const plat = f('ev-platform', h('select', { 'aria-label': 'Platform' }, [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['POSHMARK', 'Poshmark (USD)']].map(([v, l]) => h('option', { value: v }, l))));
+    const type = f('ev-type', h('select', { 'aria-label': 'Price type' }, h('option', { value: 'ASK' }, 'Asking price'), h('option', { value: 'TRADE' }, 'Traded price')));
+    const match = f('ev-match', h('select', { 'aria-label': 'Match' }, h('option', { value: 'SIMILAR' }, 'Similar item'), h('option', { value: 'SAME_ITEM' }, 'Same item'), h('option', { value: 'UNVERIFIED' }, 'Not sure')));
+    const amount = f('ev-amount', h('input', { type: 'number', min: '1', step: 'any', placeholder: 'Amount', 'aria-label': 'Amount' }));
+    const link = f('ev-link', h('input', { type: 'url', placeholder: 'https:// link (optional)', 'aria-label': 'Link' }));
+    const add = async () => {
+      const cur = plat.value === 'POSHMARK' ? 'USD' : 'KRW';
+      const r = await postJson(`/api/ws/${id}/evidence`, { itemId: S.open.itemId, platform: plat.value, priceType: type.value, amount: Number(amount.value), currency: cur, url: link.value || null, retrievedAt: new Date().toISOString().slice(0, 10), matchLevel: match.value });
+      S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}` }, r.ok === false ? `${r.code} · ${r.detail}` : 'Price saved and read back');
+      S.market = await getJson(`/api/ws/${id}/market/${S.open.itemId}`);
+      render();
+    };
+    return h('div', null, h('h2', { style: 'margin-top:14px' }, 'Add a price you saw'), h('div', { class: 'evform' }, plat, type, match, amount, link, h('button', { class: 'btn small', type: 'button', onclick: add }, 'Save price')));
+  }
+
+  function draftPanel() {
+    const d = S.draft;
+    if (!d) return null;
+    if (d.ok === false) return h('span', { class: 'chip bad' }, `${d.code} · ${d.detail}`);
+    const ta = h('textarea', { id: 'draft-body', rows: '7', class: 'draft' });
+    ta.value = d.body;
+    const move = async (to) => {
+      const r = await postJson(`/api/ws/${id}/draftmove`, { draftId: d.draftId, to, body: ta.value });
+      if (r.ok === false) S.msg = h('span', { class: 'chip warn' }, r.code === 'NEEDS_CHECK' ? 'Fill every [check] / [확인] part first' : `${r.code} · ${r.detail}`);
+      else { S.draft = r; S.msg = h('span', { class: 'chip ok' }, r.state === 'REVIEWED' ? 'Reviewed and read back' : 'Marked done by you'); }
+      render();
+    };
+    return h('section', { class: 'panel' }, h('h2', null, d.kind === 'SELL' ? `Listing draft · ${d.platform}` : 'Donation checklist'),
+      h('div', { class: 'row' }, h('span', { class: 'chip' }, d.state.toLowerCase().replace(/_/g, ' ')), h('span', { class: 'muted' }, `Still to check: ${d.toCheck.join(', ')}`)),
+      ta,
+      h('div', { class: 'row' },
+        d.state === 'DRAFT' ? h('button', { class: 'btn small', type: 'button', onclick: () => move('REVIEWED') }, 'I checked it') : null,
+        d.state === 'REVIEWED' ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => move('OWNER_REPORTED_DONE') }, d.kind === 'SELL' ? 'I posted it myself' : 'I handed it over') : null),
+      h('p', { class: 'muted' }, 'Copy the text into the platform yourself. Closer never posts, messages, books a pickup or records a sale.'));
+  }
+
+  function render() {
+    const r = S.review;
+    if (!r) { root.replaceChildren(h('p', { class: 'muted' }, 'Loading…')); return; }
+    const win = h('div', { class: 'seg', role: 'group', 'aria-label': 'Window' }, [30, 60, 90].map((d) => h('button', { type: 'button', 'aria-pressed': S.window === d ? 'true' : 'false', onclick: () => { S.window = d; load(); } }, `${d} days`)));
+    const cands = r.rows.filter((x) => x.status === 'CANDIDATE');
+    const others = r.rows.filter((x) => x.status !== 'CANDIDATE');
+    const actions = [['restyle', 'Wear it again'], ['keep', 'Keep it'], ['repair_check', 'Check repair'], ['sell_review', 'Look at selling'], ['donate_review', 'Look at donating']];
+    const parts = [
+      h('section', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, 'Review window'), win),
+        h('p', { class: 'muted' }, r.note),
+        h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, `${k.toLowerCase().replace('_', ' ')} ${n}`)))),
+      h('section', { class: 'panel' }, h('h2', null, `To look at (${cands.length})`),
+        cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this window.') : null,
+        h('div', { class: 'grid' }, cands.map((x) => h('div', { class: `item wide${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
+          h('div', { class: 'thumb' }, placeholder(S.items[x.itemId] ? S.items[x.itemId].color : 'unknown')),
+          h('div', { class: 'meta' }, h('b', null, `${x.itemId} · ${itemName(S.items[x.itemId])}`), h('span', null, x.line),
+            h('span', { class: 'muted' }, `Tracked since ${x.trackedSince} · ${x.unrecordedDays} days without any record · source: ${x.source}`),
+            x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
+            x.lastChoice ? h('span', { class: 'chip' }, `Last choice: ${x.lastChoice.action.replace('_', ' ')}`) : null,
+            h('div', { class: 'row' }, actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
+    ];
+    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel' }, h('h2', null, `Price evidence for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), priceCards(), evidenceForm()));
+    if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
+    parts.push(draftPanel());
+    parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),
+      h('table', { class: 't' }, h('tbody', null, others.map((x) => h('tr', null, h('td', { class: 'mono' }, x.itemId), h('td', null, x.status.toLowerCase().replace('_', ' ')), h('td', null, x.line)))))));
+    if (S.msg) parts.push(h('div', { class: 'flash' }, S.msg));
+    root.replaceChildren(...parts.filter(Boolean));
+  }
+  await load();
+}
+
+async function discoverScreen(view) {
+  chrome(sampleChips());
+  document.body.append(tabbar());
+  const { id, view: v } = await closetWs();
+  const items = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
+  const L = await getJson('/api/looks');
+  const S = { cat: 'wedding_guest', look: null, match: null };
+  const root = h('div');
+  view.append(h('h1', null, 'Discover looks'),
+    h('p', { class: 'lede' }, 'Sample looks drawn for the demo. Closer rebuilds a look with what you own first; only the pieces you lack become optional cards.'), root);
+  const lv = { SAME: ['ok', 'same'], SIMILAR: ['warn', 'similar'], NONE: ['bad', 'missing'] };
+
+  async function open(lookId) {
+    S.look = lookId;
+    S.match = await getJson(`/api/ws/${id}/look/${lookId}`);
+    render();
+  }
+  function render() {
+    const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Occasion' }, L.categories.map((c) => h('button', { type: 'button', 'aria-pressed': S.cat === c.id ? 'true' : 'false', onclick: () => { S.cat = c.id; S.match = null; render(); } }, c.label)));
+    const looks = L.looks.filter((l) => l.category === S.cat);
+    const parts = [h('section', { class: 'panel' }, h('div', { class: 'row' }, tabs), h('div', { class: 'spacer' }),
+      h('div', { class: 'cards' }, looks.map((l) => h('button', { type: 'button', class: `card look${S.look === l.lookId ? ' pinned' : ''}`, onclick: () => open(l.lookId) },
+        h('div', { class: 'row' }, l.pieces.map((p) => placeholder(p.color))),
+        h('div', { class: 'hd' }, l.title), h('div', { class: 'muted' }, `${l.credit} · ${l.note}`)))))];
+    const m = S.match;
+    if (m && m.ok !== false) {
+      const own = Object.values(m.ownOutfit);
+      parts.push(h('section', { class: 'panel' }, h('h2', null, `${m.title}: ${m.reused} of ${m.pieces.length} from your closet`),
+        h('table', { class: 't look' }, h('tbody', null, m.pieces.map((p) => h('tr', null,
+          h('td', null, p.piece.label), h('td', null, h('span', { class: `chip ${lv[p.level][0]}` }, lv[p.level][1])),
+          h('td', null, p.itemId ? `${p.itemId} · ${itemName(items[p.itemId])}` : '—'), h('td', { class: 'muted' }, p.why))))),
+        h('div', { class: 'spacer' }),
+        own.length ? h('a', { class: 'btn', href: `/today?lock=${own.join(',')}`, role: 'button' }, `Wear it with mine (${own.join(' + ')})`) : null));
+      if (m.gaps.length) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Pieces you do not have'),
+        h('div', { class: 'grid' }, m.gaps.map((g) => h('div', { class: 'card' },
+          h('div', { class: 'hd' }, g.piece.label, placeholder(g.piece.color)),
+          h('p', null, g.outfitsAdded > 0 ? `Adding it gives ${g.outfitsAdded} more complete outfits from this closet.` : 'It adds no new complete outfits to this closet.'),
+          h('p', { class: 'muted' }, m.basis),
+          h('div', { class: 'row' },
+            g.alternatives.length ? h('a', { class: 'btn small ghost', href: `/today?lock=${[...own, g.alternatives[0]].join(',')}` }, `Use my ${g.alternatives[0]}`) : null,
+            h('button', { class: 'btn small ghost', type: 'button', onclick: (e) => { e.target.textContent = 'Skipped'; } }, 'Skip it'),
+            h('button', { class: 'btn small ghost', type: 'button', onclick: (e) => { e.target.textContent = 'Saved for later'; } }, 'Later'),
+            h('button', { class: 'btn small', type: 'button', disabled: g.piece.shop.url ? null : true }, g.piece.shop.url ? 'Open product page' : 'No checked product link yet')))))));
+      parts.push(h('details', { class: 'panel' }, h('summary', null, 'Buy the whole look instead'),
+        h('ul', { class: 'reasons' }, m.fullLook.map((p) => h('li', null, `${p.label} · ${p.shop.url ? `${p.shop.match === 'SAME_ITEM' ? 'same item' : 'similar item'} · ${p.shop.price || 'price not checked'}` : 'no checked product link yet'}`))),
+        h('p', { class: 'muted' }, 'Links open the shop. Closer does not fill a cart, pay, or check stock.')));
+    }
+    root.replaceChildren(...parts);
+  }
+  render();
+}
+
 (async function main() {
   META = await getJson('/api/photos');
   const view = $('#view');
@@ -530,5 +805,8 @@ async function versionScreen(view) {
   else if (p === '/w/demo-rc1') await demoScreen(view);
   else if (p === '/admin') await adminScreen(view);
   else if (p === '/version') await versionScreen(view);
+  else if (p === '/today') await todayScreen(view);
+  else if (p === '/closet') await closetScreen(view);
+  else if (p === '/discover') await discoverScreen(view);
   document.body.dataset.ready = '1';
 })();

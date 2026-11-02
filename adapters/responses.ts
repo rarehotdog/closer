@@ -14,8 +14,9 @@ export const SAM_MODEL = 'sam-3.1';
 export const EST_MICRO_USD = { spark1: 18_000, sam: 2_500, spark2: 15_000 } as const;
 
 /** Muse Spark Standard mode per 1M tokens: input $1.25, output (reasoning included) $4.25. SAM: $2.50 / 1,000 images. */
-export function sparkCostMicroUsd(u: { inputTokens: number; outputTokens: number } | null): number {
-  if (!u) return 0;
+/** Missing usage is charged at the estimate, never at zero, so the caps cannot fail open. */
+export function sparkCostMicroUsd(u: { inputTokens: number; outputTokens: number } | null, fallbackMicroUsd: number): number {
+  if (!u || !Number.isFinite(u.inputTokens) || !Number.isFinite(u.outputTokens)) return fallbackMicroUsd;
   return Math.round(u.inputTokens * 1.25 + u.outputTokens * 4.25);
 }
 export const SAM_IMAGE_MICRO_USD = 2_500;

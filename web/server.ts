@@ -18,6 +18,10 @@ import { addDays, isIsoDate, kstDateOf } from '../shared/dates.ts';
 import { BUILD_CHIP, LABELS, livePerception, sampleWardrobe } from '../shared/labels.ts';
 import { EST_MICRO_USD } from '../adapters/responses.ts';
 import type { WorkspaceRow } from '../shared/ledger.ts';
+import { ExtrasStore } from '../store/extras.ts';
+import { FeatureService } from '../engine/features.ts';
+import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
+import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
@@ -43,6 +47,7 @@ const clock = {
 let mode: 'mock' | 'real';
 let svc: CloserService;
 let ledger: SqliteLedger;
+let feat: FeatureService;
 try {
   const p = createPortsFromEnv(env, lib, {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -53,6 +58,7 @@ try {
   mkdirSync(dirname(DB_PATH), { recursive: true });
   ledger = new SqliteLedger(DB_PATH, { kill: { on: false, setAt: null, ttlMs: KILL_TTL_MS }, caps: PROVISIONAL_CAPS });
   svc = new CloserService({ ledger, ports: p.ports, clock, photos: lib, mode });
+  feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now });
 } catch (e) {
   if (e instanceof RealModeRefused) {
     console.error(`Refusing to start: ${e.message}`);
@@ -89,6 +95,15 @@ function adminAllowed(req: IncomingMessage): boolean {
   if (token) return req.headers['x-admin-token'] === token;
   return mode === 'mock'; // local mock only; real mode needs CLOSER_ADMIN_TOKEN
 }
+/**
+ * The owner's real wardrobe ('real' workspace) is private in real mode: reads and writes need the
+ * owner token (same value as CLOSER_ADMIN_TOKEN). Visitor, demo and sample-closet copies stay open.
+ */
+function ownerAllowed(req: IncomingMessage, ws: WorkspaceRow): boolean {
+  if (ws.kind !== 'real' || mode === 'mock') return true;
+  const token = env.CLOSER_ADMIN_TOKEN;
+  return !!token && req.headers['x-admin-token'] === token;
+}
 
 function banner(ws: WorkspaceRow | null, sessionId: string | null) {
   const flags = ledger.getFlags();
@@ -117,7 +132,8 @@ function publicPhotos() {
 const sessions = new Map<string, string>(); // workspaceId → sessionId (visitor forks)
 
 // ---------- API ----------
-async function api(req: IncomingMessage, res: ServerResponse, path: string) {
+async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
+  const path = url.pathname;
   const method = req.method ?? 'GET';
   if (path === '/api/version') {
     return send(res, 200, { sha: SHA, builtAt: STARTED_AT, mode, node: process.version, demoRc1StateHash: ledger.stateHash('demo-rc1'), buildChip: BUILD_CHIP });
@@ -134,7 +150,29 @@ async function api(req: IncomingMessage, res: ServerResponse, path: string) {
     sessions.set(wsId, sessionId);
     return send(res, 200, { workspaceId: wsId, sessionId, seededLabel: sampleWardrobe(roles.length) });
   }
+  if (path === '/api/banner/visitor') return send(res, 200, banner({ workspaceId: 'visitor-preview', kind: 'visitor', publicReadOnly: false, seedRef: null, ledgerRevision: 0, createdOn: clock.today() }, null));
+  if (path === '/api/closet/start' && method === 'POST') {
+    // A private copy of the sample closet per visitor: 12 sample items and a synthetic 75-day wear history.
+    const wsId = `closet-${randomUUID().slice(0, 8)}`;
+    const since = addDays(clock.today(), -HISTORY_DAYS);
+    ledger.createWorkspace({ workspaceId: wsId, kind: 'rehearsal', publicReadOnly: false, seedRef: 'sample-closet', createdOn: since }, { items: closetItems(), since });
+    let i = 0;
+    for (const h of closetHistory(clock.today())) {
+      const r = svc.recordPastWear(wsId, { eventId: `${wsId}-hist-${++i}`, actor: 'demo_script', expectedRevision: ledger.getWorkspace(wsId)!.ledgerRevision, itemIds: h.itemIds, occurredAt: h.occurredAt });
+      if (!r.ok) return send(res, 500, { ok: false, detail: `sample history failed: ${r.code}` });
+    }
+    return send(res, 200, { workspaceId: wsId, label: `Sample closet · ${closetItems().length} sample items · synthetic wear history (${HISTORY_DAYS} days)` });
+  }
+  if (path === '/api/looks') {
+    const cat = url.searchParams.get('category') ?? undefined;
+    return send(res, 200, { categories: LOOK_CATEGORIES.map((c) => ({ id: c, label: CATEGORY_LABEL[c] })), looks: feat.looks(cat) });
+  }
+  if (path === '/api/net' && method === 'POST') {
+    const b = await readJson(req);
+    return send(res, 200, feat.net(Number(b.price), b.platform as never, Array.isArray(b.fees) ? (b.fees as never) : []));
+  }
   if (path === '/api/demo-clock' && method === 'POST') {
+    if (!adminAllowed(req)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'demo clock is local mock or admin only' });
     const body = await readJson(req);
     demoOffsetDays = Math.max(0, Math.min(7, Number(body.days ?? 0)));
     return send(res, 200, { today: clock.today(), offsetDays: demoOffsetDays, label: demoOffsetDays ? LABELS.demoClockPlusOne : null });
@@ -162,7 +200,13 @@ async function api(req: IncomingMessage, res: ServerResponse, path: string) {
   const [, wsId, action, arg] = m;
   const ws = ledger.getWorkspace(wsId);
   if (!ws) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'unknown workspace' });
+  if (!ownerAllowed(req, ws)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'owner sign-in required' });
   const sessionId = sessions.get(wsId) ?? null;
+  const sample = ws.seedRef === 'sample-closet' ? sampleEvidence(clock.today()) : [];
+  if (method === 'GET' && action === 'review') return send(res, 200, feat.review(wsId, Number(url.searchParams.get('window') ?? 60)));
+  if (method === 'GET' && action === 'market' && arg) return send(res, 200, feat.market(wsId, arg, sample));
+  if (method === 'GET' && action === 'drafts') return send(res, 200, { drafts: feat.drafts(wsId) });
+  if (method === 'GET' && action === 'look' && arg) return send(res, 200, feat.matchLook(wsId, arg));
   if (method === 'GET' && action === 'view') return send(res, 200, { ...svc.view(wsId), banner: banner(ws, sessionId), sessionId });
   if (method === 'GET' && action === 'event' && arg) {
     const r = ledger.lookupEvent(wsId, arg);
@@ -198,19 +242,31 @@ async function api(req: IncomingMessage, res: ServerResponse, path: string) {
       return send(res, 200, svc.undoWear(wsId, { ...who, wearEventId: String(b.wearEventId) }));
     case 'next':
       return send(res, 200, await svc.startNext(wsId, { fromPlanId: String(b.fromPlanId), sessionId }));
+    case 'anchor':
+      return send(res, 200, svc.startAnchor(wsId, { anchorItemIds: Array.isArray(b.anchorItemIds) ? (b.anchorItemIds as string[]) : [], direction: b.direction as never, rainPct: typeof b.rainPct === 'number' ? b.rainPct : null, sessionId }));
+    case 'reviewchoice':
+      return send(res, 200, feat.choose(wsId, { itemId: String(b.itemId), action: String(b.action), note: (b.note as string) ?? null }));
+    case 'exempt':
+      return send(res, 200, feat.exempt(wsId, { itemId: String(b.itemId), reason: String(b.reason), reviewAfter: String(b.reviewAfter), note: (b.note as string) ?? null }));
+    case 'evidence':
+      return send(res, 200, feat.addEvidence(wsId, { ...(b as object), itemId: String(b.itemId) } as never));
+    case 'draft':
+      return send(res, 200, feat.draft(wsId, { itemId: String(b.itemId), kind: String(b.kind), platform: (b.platform as string) ?? null, facts: (b.facts as never) ?? {}, price: typeof b.price === 'number' ? b.price : null }));
+    case 'draftmove':
+      return send(res, 200, feat.moveDraft(wsId, { draftId: String(b.draftId), to: String(b.to), body: typeof b.body === 'string' ? b.body : undefined }));
     default:
       return send(res, 404, { ok: false, detail: 'unknown action' });
   }
 }
 
 const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-const PAGES = new Set(['/', '/app', '/w/demo-rc1', '/admin', '/version']);
+const PAGES = new Set(['/', '/app', '/w/demo-rc1', '/admin', '/version', '/today', '/closet', '/discover']);
 
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
-    if (path.startsWith('/api/')) return await api(req, res, path);
+    if (path.startsWith('/api/')) return await api(req, res, url);
     if (PAGES.has(path)) return send(res, 200, readFileSync(join(PUBLIC, 'index.html')), TYPES['.html']);
     if (path.startsWith('/static/')) {
       const file = join(PUBLIC, path.slice('/static/'.length));

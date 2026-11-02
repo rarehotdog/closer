@@ -79,7 +79,7 @@ export function createSpark1Port(deps: CallDeps): Spark1Port {
       const { outcome, calls } = await callResponses(deps, buildSpark1Body(req), {
         model: SPARK_MODEL,
         estMicroUsd: EST_MICRO_USD.spark1,
-        price: (u) => sparkCostMicroUsd(u),
+        price: (u) => sparkCostMicroUsd(u, EST_MICRO_USD.spark1),
       });
       const f = outcome.final;
       if (!f || f.status < 200 || f.status >= 300) {

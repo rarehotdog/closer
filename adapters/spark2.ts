@@ -102,7 +102,7 @@ export function createSpark2Port(deps: CallDeps): Spark2Port {
       const { outcome, calls } = await callResponses(deps, buildSpark2Body(req), {
         model: SPARK_MODEL,
         estMicroUsd: EST_MICRO_USD.spark2,
-        price: (u) => sparkCostMicroUsd(u),
+        price: (u) => sparkCostMicroUsd(u, EST_MICRO_USD.spark2),
       });
       const f = outcome.final;
       if (!f || f.status < 200 || f.status >= 300) {
