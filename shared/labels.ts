@@ -23,6 +23,8 @@ export const LABELS = {
   noConfirmedWearYet: 'no confirmed wear yet',
   needsReplan: 'Needs re-plan',
   checkedByCode: 'Checked by code: owned · available · pinned item kept · only flagged slots changed',
+  /** Same check without flagged slots (next plan without a photo, sentence path): direction is what was checked. */
+  checkedByCodeDirection: 'Checked by code: owned · available · pinned item kept · direction met',
   mockBanner: 'Mock mode · no Meta calls · sample data only',
   killBanner: 'Model calls off (K1) · button re-plans and read-back still work',
   readOnly: 'Read-only · writes return SCOPE_DENIED',

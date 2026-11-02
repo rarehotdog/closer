@@ -271,6 +271,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       return send(res, 200, svc.setAvailability(wsId, { ...who, itemId: String(b.itemId), state: b.state as never }));
     case 'wear':
       return send(res, 200, svc.wore(wsId, { ...who, planId: String(b.planId) }));
+    case 'unlock':
+      return send(res, 200, svc.unlock(wsId, { ...who, planId: String(b.planId) }));
     case 'undo':
       return send(res, 200, svc.undoWear(wsId, { ...who, wearEventId: String(b.wearEventId) }));
     case 'next':

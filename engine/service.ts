@@ -473,7 +473,7 @@ export class CloserService {
     }
     const opts = [...verdict.options].sort((x, y) => x.changedSlots.length - y.changedSlots.length);
     op.options = opts.map((o, i) => this.optionView(i, o.outfit, o.changedSlots, formalitySum(o.outfit, facts), o.reasonFactIds, allFacts, 'model'));
-    op.labels.push(LABELS.checkedByCode);
+    op.labels.push(ctx.offenders.length > 0 ? LABELS.checkedByCode : LABELS.checkedByCodeDirection);
     return this.propose_(op, ws.kind);
   }
 

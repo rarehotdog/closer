@@ -15,7 +15,7 @@ License: [MIT](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 ## Verify it yourself
 
 1. Open `/w/demo-rc1` and `/version` in a private window and compare the stateHash and sha.
-2. Compare the first commit sha (`git log --reverse --format=%H | head -1`) with the sha on `/version`.
+2. Compare `git rev-parse HEAD` of the code you have with the sha on `/version`: they must be the same release.
 3. Turn K1 on in `/admin` and check that a button re-plan still works while model calls are off.
 
 ## Current state

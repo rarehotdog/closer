@@ -165,6 +165,17 @@ async function saveFlow(wsId, action, body, matches, okLabel) {
 }
 const sameOutfit = (a, b) => SLOTS.every((s) => (a[s] || null) === (b[s] || null));
 
+
+/** Re-render without losing keyboard focus: remember the focused control and focus its twin afterwards. */
+function keepFocus(root, paint) {
+  const a = document.activeElement;
+  const key = a && root.contains(a) ? (a.id ? `#${a.id}` : `${a.tagName}|${a.className}|${(a.textContent || '').trim()}`) : null;
+  paint();
+  if (!key) return;
+  const twin = key.startsWith('#') ? root.querySelector(key) : [...root.querySelectorAll(a.tagName)].find((e) => `${e.tagName}|${e.className}|${(e.textContent || '').trim()}` === key);
+  if (twin && typeof twin.focus === 'function') twin.focus({ preventScroll: true });
+}
+
 // ---------- decision component (Try and App) ----------
 function decisionUI(root, cfg) {
   const S = { wsId: cfg.wsId, view: null, photoId: 'p1', chipId: 'c1', sentence: '', flash: [], busy: false, painted: new Set(), answers: {}, ran: false };
@@ -420,7 +431,7 @@ function decisionUI(root, cfg) {
           op.state === 'PROPOSED' ? h('button', { class: 'btn small', type: 'button', 'data-pick': String(i), disabled: S.busy, onclick: () => pick(op, i) }, 'Pick this') : null))));
       if (op.state === 'PROPOSED' && op.kind !== 'replan') parts.push(h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => keep(op) }, 'Keep as is (separate button)')));
     }
-    if (S.flash.length) parts.push(h('div', { class: 'chip-row flash', id: 'flash' }, S.flash.map((f) => h('span', { class: `chip ${f.cls}` }, f.chip))));
+    if (S.flash.length) parts.push(h('div', { class: 'chip-row flash', id: 'flash', role: 'status', 'aria-live': 'polite' }, S.flash.map((f) => h('span', { class: `chip ${f.cls}` }, f.chip))));
     return h('section', { class: 'panel', id: 'decision' }, parts);
   }
 
@@ -467,7 +478,7 @@ function decisionUI(root, cfg) {
       parts.push(planPanel());
       parts.push(wardrobePanel());
     }
-    root.replaceChildren(...parts.filter(Boolean));
+    keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
   return { refresh, render, state: S };
 }
@@ -564,7 +575,7 @@ async function versionScreen(view) {
     h('section', { class: 'panel' }, h('h2', null, 'Verify it yourself'),
       h('ol', null,
         h('li', null, 'Open /w/demo-rc1 and /version in a private window; compare stateHash and sha.'),
-        h('li', null, 'Compare the first commit sha (git log --reverse | head -1) with the sha above.'),
+        h('li', null, 'Compare git rev-parse HEAD of the code you have with the sha above: same release.'),
         h('li', null, 'Turn K1 on in /admin and check that a button re-plan still works.'))));
 }
 
@@ -631,6 +642,26 @@ async function todayScreen(view) {
       (vv) => vv.plans.some((p) => p.planId === S.op.planId && p.state === 'LOCKED' && sameOutfit(p.slots, S.op.options[i].outfit)), 'Saved and read back');
     if (r.view) S.view = r.view;
     S.saved = r.ok ? S.op.options[i].outfit : null;
+    S.planId = r.ok ? S.op.planId : null;
+    S.worn = false;
+    S.msg = h('span', { class: `chip ${r.cls}` }, r.chip);
+    render();
+  }
+  async function wore() {
+    const planId = S.planId;
+    const r = await saveFlow(id, 'wear', { eventId: uuid(), expectedRevision: S.view.revision, planId },
+      (vv) => vv.wearRows.some((w) => w.planId === planId), 'Wear recorded and read back');
+    if (r.view) S.view = r.view;
+    S.worn = r.ok;
+    S.msg = h('span', { class: `chip ${r.cls}` }, r.chip);
+    render();
+  }
+  async function notToday() {
+    const planId = S.planId;
+    const r = await saveFlow(id, 'unlock', { eventId: uuid(), expectedRevision: S.view.revision, planId },
+      (vv) => vv.plans.some((p) => p.planId === planId && p.state === 'PROPOSED'), 'Kept as an idea · no wear recorded');
+    if (r.view) S.view = r.view;
+    if (r.ok) { S.saved = null; S.planId = null; }
     S.msg = h('span', { class: `chip ${r.cls}` }, r.chip);
     render();
   }
@@ -687,13 +718,19 @@ async function todayScreen(view) {
           h('p', { class: 'muted' }, `${(op.labels || []).join(' · ')}`)));
       }
     }
-    if (S.saved) {
+    if (S.saved && !S.worn) {
       const loose = SLOTS.map((s) => S.saved[s]).filter((x) => x && !S.locks.has(x));
+      parts.push(h('section', { class: 'panel' }, h('h2', null, 'Did you wear it?'),
+        h('p', { class: 'muted' }, 'Only what you confirm counts as a wear. The 60-day review in My closet reads these records.'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', type: 'button', id: 'wore', onclick: wore }, 'I wore this'),
+          h('button', { class: 'btn ghost', type: 'button', id: 'not-today', onclick: notToday }, 'Not today'))));
       parts.push(h('section', { class: 'panel' }, h('h2', null, 'Something changed?'),
         h('div', { class: 'row' }, loose.map((x) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => laundry(x) }, `${x} is in the laundry`)))));
     }
-    if (S.msg) parts.push(h('div', { class: 'flash' }, S.msg));
-    root.replaceChildren(...parts);
+    if (S.worn) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Recorded'), h('p', null, 'This outfit now counts as worn today.'), h('a', { class: 'btn ghost', href: '/closet' }, 'See My closet')));
+    if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
+    keepFocus(root, () => root.replaceChildren(...parts));
   }
   render();
 }
@@ -805,8 +842,8 @@ async function closetScreen(view) {
     parts.push(draftPanel());
     parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),
       h('table', { class: 't' }, h('tbody', null, others.map((x) => h('tr', null, h('td', { class: 'mono' }, x.itemId), h('td', null, x.status.toLowerCase().replace('_', ' ')), h('td', null, x.line)))))));
-    if (S.msg) parts.push(h('div', { class: 'flash' }, S.msg));
-    root.replaceChildren(...parts.filter(Boolean));
+    if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
+    keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
   await load();
 }
@@ -858,7 +895,7 @@ async function discoverScreen(view) {
         h('ul', { class: 'reasons' }, m.fullLook.map((p) => h('li', null, `${p.label} · ${p.shop.url ? `${p.shop.match === 'SAME_ITEM' ? 'same item' : 'similar item'} · ${p.shop.price || 'price not checked'}` : 'no checked product link yet'}`))),
         h('p', { class: 'muted' }, 'Links open the shop. Closer does not fill a cart, pay, or check stock.')));
     }
-    root.replaceChildren(...parts);
+    keepFocus(root, () => root.replaceChildren(...parts));
   }
   render();
 }
