@@ -8,8 +8,8 @@ import type { Actor, PlanState, WorkspaceKind } from '../shared/states.ts';
 import type { Decision, EventInput, ItemRow, LedgerState, Mutation, PlanRow, WorkspaceRow, WriteResponse, CallRow } from '../shared/ledger.ts';
 import { kstDateOf, type IsoDate } from '../shared/dates.ts';
 import {
-  GARMENT_TYPES, SLOTS, SLOT_ID_PREFIX,
-  type ColorFamily, type DecisionContext, type Formality, type GarmentType, type HardRule, type Item, type Outfit, type Slot,
+  DIRECTIONS, GARMENT_TYPES, SLOTS, SLOT_ID_PREFIX,
+  type ColorFamily, type DecisionContext, type Direction, type Formality, type GarmentType, type HardRule, type Item, type Outfit, type Slot,
 } from '../shared/wardrobe.ts';
 import { LABELS, callPanel, changedOnly, keepTarget, liveChip, offendersChip, sampleWardrobe, confirmedWearsSince } from '../shared/labels.ts';
 import type { SqliteLedger, StoredOperation } from '../store/ledger.ts';
@@ -25,6 +25,7 @@ import { validateSam, validateSpark1, validateSpark2, type Spark2Check } from '.
 import { buildBoxPrompt, encodeMockRle, normToPixelBox, type PixelBox } from './coords.ts';
 import { maskColor, type PixelSource } from './color.ts';
 import { gateModelCall } from './caps.ts';
+import { planAnchor } from './anchor.ts';
 
 export type Clock = { now(): Date; today(): IsoDate };
 
@@ -72,7 +73,7 @@ export type Operation = StoredOperation & {
   operationId: string;
   workspaceId: string;
   generation: number;
-  kind: 'photo' | 'next' | 'replan';
+  kind: 'photo' | 'next' | 'replan' | 'anchor';
   state: PlanState;
   baseRevision: number;
   planId: string;
@@ -736,6 +737,59 @@ export class CloserService {
     const op = this.newOp(ws, 'next', { sessionId: a.sessionId ?? null, context });
     this.save(op);
     return this.propose(workspaceId, { operationId: op.operationId });
+  }
+
+  // ---------------- feature 1: "오늘은 이 옷" (anchor) without a photo ----------------
+  /**
+   * The owner locks items they want to wear; code completes the other slots from owned, available
+   * items (engine/anchor.ts). A locked item is never swapped: a conflict becomes a question.
+   * The free sentence → locks/direction step is the model's job in real mode (Spark 1); here the
+   * owner taps items and a direction chip.
+   */
+  startAnchor(workspaceId: string, a: { anchorItemIds: string[]; direction?: Direction; rainPct?: number | null; sessionId?: string | null }): Operation | { ok: false; code: ReasonCode; detail: string } {
+    const ws = this.ws(workspaceId);
+    if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
+    const state = this.ledger.readState(workspaceId, { fresh: false });
+    const facts = factsFromState(state);
+    const lastPlan = [...state.plans].filter((p) => p.state === 'LOCKED' || p.state === 'WORN').sort((x, y) => (x.occasionDate < y.occasionDate ? 1 : x.occasionDate > y.occasionDate ? -1 : 0))[0] ?? null;
+    const direction: Direction = a.direction && (DIRECTIONS as readonly string[]).includes(a.direction) ? a.direction : 'none';
+    const rain = typeof a.rainPct === 'number' && Number.isFinite(a.rainPct) ? Math.max(0, Math.min(100, Math.round(a.rainPct))) : null;
+    const anchors = [...new Set(a.anchorItemIds.map(String))];
+    const context: DecisionContext = {
+      baseline: lastPlan?.slots ?? {},
+      pinned: anchors,
+      direction,
+      offenders: [],
+      hardRules: rain !== null ? [{ kind: 'waterproof_outer_if_rain', minRainPct: 60 }] : [],
+      weather: rain !== null ? { rainPct: rain } : null,
+    };
+    const op = this.newOp(ws, 'anchor', { sessionId: a.sessionId ?? null, context, weather: context.weather });
+    this.save(op);
+    const today = this.clock.today();
+    const r = planAnchor({ anchors, ctx: context, last: lastPlan?.slots ?? null }, facts, today, this.rules);
+    if (r.kind === 'invalid') return this.hold(op, ws.kind, [r.code], null, r.detail);
+    if (r.kind === 'pin_conflict') {
+      const why = r.codes.includes('WEATHER_CONFLICT') ? ` is not waterproof and rain is ${rain}%` : ` is ${r.codes.join(', ').toLowerCase()}`;
+      return this.hold(op, ws.kind, ['PIN_CONFLICT'], { code: 'PIN_CONFLICT', itemIds: [r.itemId], cardId: null, attr: null, choices: ['keep', 'switch'], text: `${r.itemId}${why}. Keep it anyway, or switch it?` });
+    }
+    if (r.kind === 'ask_formality') {
+      return this.hold(op, ws.kind, ['ATTR_UNKNOWN'], { code: 'ATTR_UNKNOWN', itemIds: [r.itemId], cardId: null, attr: 'formality', choices: ['low', 'mid', 'high'], text: `How formal is ${r.itemId}?` });
+    }
+    if (r.kind === 'gap') {
+      op.exclusions = r.excluded;
+      const text = r.slots.length > 0
+        ? `Nothing you own and have available fits the ${r.slots.join(' and ')} slot with ${anchors.join(', ')}. Review one in Discover, or change the request.`
+        : 'No outfit with your locked items meets that direction. Relax the direction or unlock an item?';
+      return this.hold(op, ws.kind, ['NO_VALID_COMBO'], { code: 'NO_VALID_COMBO', itemIds: anchors, cardId: null, attr: null, choices: r.slots.length > 0 ? ['discover', 'skip'] : ['relax', 'skip'], text });
+    }
+    op.exclusions = r.excluded;
+    op.options = r.options.map((o, i) => ({
+      index: i,
+      label: o.label === 'fewest_changes' ? 'Fewer changes' : 'Closer to what you said',
+      outfit: o.outfit, changedSlots: o.changedSlots, sum: o.sum, reasonFactIds: [], reasonLines: o.reasonLines, source: 'code' as const,
+    }));
+    op.labels.push(LABELS.reasonByCode);
+    return this.propose_(op, ws.kind);
   }
 
   // ---------------- read model ----------------

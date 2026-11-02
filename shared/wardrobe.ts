@@ -20,6 +20,15 @@ export const GARMENT_TYPES = {
   chinos: 'bottom',
   derby: 'shoes',
   sneakers: 'shoes',
+  // Added 11/2 for looks by occasion (feature 3): wedding-guest and workout pieces.
+  track_jacket: 'outer',
+  blouse: 'top',
+  training_top: 'top',
+  skirt: 'bottom',
+  joggers: 'bottom',
+  shorts: 'bottom',
+  running_shoes: 'shoes',
+  loafers: 'shoes',
 } as const satisfies Record<string, Slot>;
 export type GarmentType = keyof typeof GARMENT_TYPES;
 export function isGarmentType(x: unknown): x is GarmentType {
