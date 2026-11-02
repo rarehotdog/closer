@@ -34,10 +34,15 @@ type Usage = CallDraft['usage'];
 export function readUsage(json: unknown): Usage {
   const u = (json as { usage?: Record<string, unknown> } | null)?.usage;
   if (!u || typeof u !== 'object') return null;
+  const input = u.input_tokens ?? u.prompt_tokens ?? u.inputTokens;
+  const output = u.output_tokens ?? u.completion_tokens ?? u.outputTokens;
+  // A usage object with neither count (e.g. only total_tokens) is unknown usage, charged at the
+  // estimate by the caller. Reading it as 0 tokens would let the caps fail open.
+  if (input === undefined && output === undefined) return null;
   const details = (u.output_tokens_details ?? u.completion_tokens_details) as Record<string, unknown> | undefined;
   return {
-    inputTokens: Number(u.input_tokens ?? u.prompt_tokens ?? u.inputTokens ?? 0),
-    outputTokens: Number(u.output_tokens ?? u.completion_tokens ?? u.outputTokens ?? 0),
+    inputTokens: Number(input ?? 0),
+    outputTokens: Number(output ?? 0),
     reasoningTokens: Number(details?.reasoning_tokens ?? u.reasoning_tokens ?? u.reasoningTokens ?? 0),
   };
 }

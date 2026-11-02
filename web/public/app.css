@@ -34,7 +34,9 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; overflow-x: hidden; }
+/* clip, not hidden: hidden on both html and body turns body into a scroll container, and the
+   sticky .top header then scrolls away with the page. */
+html, body { margin: 0; overflow-x: clip; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -361,6 +363,7 @@ details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
   .cards { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   table.t.look td:nth-child(4) { display: none; }
   textarea.draft, .evform select, .evform input, .ownerbar input.tok, .feerow input, .feerow select, .calc select, .calc input { font-size: 16px; }
+  textarea#say { min-height: 6.4em; }
   .evform { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .evform input[type="url"], .evform button.btn { grid-column: 1 / -1; }
   .feerow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
