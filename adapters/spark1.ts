@@ -3,7 +3,7 @@
 // direction, offenders. Single call, store:false, structured output via text.format (§3-3, §3-4).
 import { COLOR_FAMILIES, DIRECTIONS, FORMALITY_LEVELS, GARMENT_TYPES, OFFENDER_WHY } from '../shared/wardrobe.ts';
 import { statusToReason } from '../engine/retry.ts';
-import { callResponses, EST_MICRO_USD, outputText, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
+import { callResponses, EST_MICRO_USD, outputText, parseJsonOutput, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
 import type { Spark1Port, Spark1Request } from './types.ts';
 
 export const SPARK1_SCHEMA_NAME = 'closer_spark1';
@@ -89,7 +89,7 @@ export function createSpark1Port(deps: CallDeps): Spark1Port {
       const text = outputText(f.json);
       if (text === null) return { ok: false, http: f.status, code: 'INVALID_MODEL_OUTPUT', detail: 'no output_text', calls };
       try {
-        return { ok: true, value: JSON.parse(text) as unknown, calls };
+        return { ok: true, value: parseJsonOutput(text), calls };
       } catch {
         return { ok: false, http: f.status, code: 'INVALID_MODEL_OUTPUT', detail: 'output_text is not JSON', calls };
       }

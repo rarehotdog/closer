@@ -34,11 +34,11 @@ type Usage = CallDraft['usage'];
 export function readUsage(json: unknown): Usage {
   const u = (json as { usage?: Record<string, unknown> } | null)?.usage;
   if (!u || typeof u !== 'object') return null;
-  const details = u.output_tokens_details as Record<string, unknown> | undefined;
+  const details = (u.output_tokens_details ?? u.completion_tokens_details) as Record<string, unknown> | undefined;
   return {
-    inputTokens: Number(u.input_tokens ?? 0),
-    outputTokens: Number(u.output_tokens ?? 0),
-    reasoningTokens: Number(details?.reasoning_tokens ?? 0),
+    inputTokens: Number(u.input_tokens ?? u.prompt_tokens ?? u.inputTokens ?? 0),
+    outputTokens: Number(u.output_tokens ?? u.completion_tokens ?? u.outputTokens ?? 0),
+    reasoningTokens: Number(details?.reasoning_tokens ?? u.reasoning_tokens ?? u.reasoningTokens ?? 0),
   };
 }
 
@@ -67,22 +67,74 @@ export async function callResponses(
   return { outcome, calls };
 }
 
-/** Concatenated output_text parts of message items (Responses API `output` array). */
+/** Concatenated output_text parts of message items (Responses API `output` array, with live fallbacks). */
 export function outputText(json: unknown): string | null {
-  const out = (json as { output?: unknown[] } | null)?.output;
-  if (!Array.isArray(out)) return null;
-  const parts: string[] = [];
-  for (const item of out as Record<string, unknown>[]) {
-    if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
-    for (const c of item.content as Record<string, unknown>[]) if (c?.type === 'output_text' && typeof c.text === 'string') parts.push(c.text);
+  const root = json as Record<string, unknown> | null;
+  if (!root || typeof root !== 'object') return null;
+  const out = root.output;
+  if (Array.isArray(out)) {
+    const parts: string[] = [];
+    for (const item of out as Record<string, unknown>[]) {
+      if ((item?.type === 'output_text' || item?.type === 'text') && typeof item.text === 'string') {
+        parts.push(item.text);
+        continue;
+      }
+      if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
+      for (const c of item.content as Record<string, unknown>[]) {
+        if ((c?.type === 'output_text' || c?.type === 'text') && typeof c.text === 'string') parts.push(c.text);
+      }
+    }
+    if (parts.length) return parts.join('');
   }
-  return parts.length ? parts.join('') : null;
+  if (typeof root.output_text === 'string' && root.output_text.length > 0) return root.output_text;
+  const choices = root.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const msg = (choices[0] as Record<string, unknown> | null)?.message as Record<string, unknown> | undefined;
+    if (typeof msg?.content === 'string') return msg.content;
+  }
+  return null;
+}
+
+/** Parse structured JSON text, tolerating optional markdown code fences returned by live endpoints. */
+export function parseJsonOutput(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const m = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+    if (m) return JSON.parse(m[1]);
+    throw new Error('output_text is not JSON');
+  }
 }
 
 export function functionCalls(json: unknown): { name: string; arguments: string; callId: string }[] {
-  const out = (json as { output?: unknown[] } | null)?.output;
-  if (!Array.isArray(out)) return [];
-  return (out as Record<string, unknown>[])
-    .filter((i) => i?.type === 'function_call')
-    .map((i) => ({ name: String(i.name ?? ''), arguments: String(i.arguments ?? ''), callId: String(i.call_id ?? '') }));
+  const root = json as Record<string, unknown> | null;
+  if (!root || typeof root !== 'object') return [];
+  const out = root.output;
+  if (Array.isArray(out)) {
+    const direct = (out as Record<string, unknown>[])
+      .filter((i) => i?.type === 'function_call')
+      .map((i) => ({
+        name: String(i.name ?? ''),
+        arguments: typeof i.arguments === 'object' && i.arguments !== null ? JSON.stringify(i.arguments) : String(i.arguments ?? ''),
+        callId: String(i.call_id ?? i.id ?? ''),
+      }));
+    if (direct.length) return direct;
+  }
+  const choices = root.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const msg = (choices[0] as Record<string, unknown> | null)?.message as Record<string, unknown> | undefined;
+    const tcs = msg?.tool_calls;
+    if (Array.isArray(tcs)) {
+      return (tcs as Record<string, unknown>[]).map((tc) => {
+        const fn = (tc?.function ?? {}) as Record<string, unknown>;
+        return {
+          name: String(fn.name ?? tc?.name ?? ''),
+          arguments: typeof fn.arguments === 'object' && fn.arguments !== null ? JSON.stringify(fn.arguments) : String(fn.arguments ?? tc?.arguments ?? ''),
+          callId: String(tc?.id ?? tc?.call_id ?? ''),
+        };
+      });
+    }
+  }
+  return [];
 }

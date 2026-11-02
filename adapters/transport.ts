@@ -32,11 +32,11 @@ export function createRealTransport(env: Record<string, string | undefined>): Tr
   if (env.CLOSER_FORBID_REAL === '1') throw new RealModeRefused('real transport is forbidden in this process (tests)');
   const key = env.MODEL_API_KEY;
   if (!key || key.trim() === '') throw new RealModeRefused('MODEL_API_KEY is not set; real mode refuses to run');
-  const base = (env.META_API_BASE_URL ?? '').trim() || DEFAULT_BASE_URL;
+  const base = ((env.META_API_BASE_URL ?? '').trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
   return async ({ path, body }) => {
     const res = await fetch(base + path, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const headers: Record<string, string> = {};

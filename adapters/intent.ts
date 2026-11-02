@@ -5,7 +5,7 @@
 // re-checks everything (engine/intent.ts checkIntent).
 import { DIRECTIONS } from '../shared/wardrobe.ts';
 import type { IntentItem } from '../engine/intent.ts';
-import { callResponses, EST_MICRO_USD, outputText, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
+import { callResponses, EST_MICRO_USD, outputText, parseJsonOutput, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
 import { statusToReason } from '../engine/retry.ts';
 import type { PortResult } from './types.ts';
 
@@ -68,7 +68,7 @@ export function createIntentPort(deps: CallDeps): IntentPort {
       const text = outputText(f.json);
       if (text === null) return { ok: false, http: f.status, code: 'INVALID_MODEL_OUTPUT', detail: 'no output_text', calls };
       try {
-        return { ok: true, value: JSON.parse(text) as unknown, calls };
+        return { ok: true, value: parseJsonOutput(text), calls };
       } catch {
         return { ok: false, http: f.status, code: 'INVALID_MODEL_OUTPUT', detail: 'output_text is not JSON', calls };
       }
