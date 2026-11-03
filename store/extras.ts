@@ -20,7 +20,21 @@ export class ExtrasStore {
       CREATE TABLE IF NOT EXISTS review_choices (choice_id TEXT PRIMARY KEY, workspace_id TEXT, item_id TEXT, action TEXT, note TEXT, at TEXT);
       CREATE TABLE IF NOT EXISTS evidence (evidence_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
       CREATE TABLE IF NOT EXISTS handoffs (draft_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
+      CREATE TABLE IF NOT EXISTS look_targets (workspace_id TEXT, look_id TEXT, at TEXT, PRIMARY KEY (workspace_id, look_id));
     `);
+  }
+
+  // ---- style targets (looks the owner wants to be able to wear) ----
+  setTarget(ws: string, lookId: string, on: boolean, at: string): string[] {
+    if (on) this.db.prepare('INSERT OR REPLACE INTO look_targets VALUES (?,?,?)').run(ws, lookId, at);
+    else this.db.prepare('DELETE FROM look_targets WHERE workspace_id = ? AND look_id = ?').run(ws, lookId);
+    const back = this.targets(ws);
+    if (back.includes(lookId) !== on) throw new Error('READBACK_MISMATCH: target');
+    return back;
+  }
+
+  targets(ws: string): string[] {
+    return (this.db.prepare('SELECT look_id FROM look_targets WHERE workspace_id = ? ORDER BY at, rowid').all(ws) as Row[]).map((r) => String(r.look_id));
   }
 
   close(): void {

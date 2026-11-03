@@ -337,6 +337,87 @@ describe('F3 looks by occasion: rebuild with what you own first', () => {
   });
 });
 
+describe('F3 style targets: a counted match and an item box, nothing estimated', () => {
+  it('F3-06 one target: coverage is a count of same + similar pieces over the pieces of the look', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    assert.deepEqual(t.feat.setTarget(t.ws, { lookId: 'L-WG1', on: true }), { targets: ['L-WG1'] });
+    const c = t.feat.collection(t.ws);
+    assert.deepEqual(c.targets, ['L-WG1']);
+    assert.equal(c.looks.length, 1);
+    assert.deepEqual(c.looks[0].coverage, { matched: 3, total: 4, exact: 3, similar: 0, missing: 1, pct: 75, line: '3 of 4 pieces from your closet (3 same, 0 similar, 1 missing)' });
+    assert.equal(c.matched, 3);
+    assert.equal(c.total, 4);
+    assert.equal(c.pct, 75);
+    assert.equal(c.complete, 0);
+    assert.match(c.basis, /^Counted on the \d+ available items/);
+  });
+
+  it('F3-07 two targets aggregate; the box merges the navy jacket both looks ask for into one FILLED cell', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    t.feat.setTarget(t.ws, { lookId: 'L-WG1', on: true });
+    assert.deepEqual(t.feat.setTarget(t.ws, { lookId: 'L-OF1', on: true }), { targets: ['L-WG1', 'L-OF1'] });
+    const c = t.feat.collection(t.ws);
+    const of1 = t.feat.matchLook(t.ws, 'L-OF1');
+    assert.ok(!('ok' in of1));
+    assert.equal(c.total, 8);
+    assert.equal(c.matched, 3 + of1.reused);
+    assert.equal(c.pct, Math.round((100 * c.matched) / 8));
+    assert.ok(c.pct <= 100);
+    const jacket = c.box.find((e) => e.key === 'outer:jacket:navy');
+    assert.ok(jacket);
+    assert.equal(jacket.state, 'FILLED');
+    assert.equal(jacket.itemId, 'J1');
+    assert.deepEqual(jacket.lookIds, ['L-WG1', 'L-OF1']);
+    assert.equal(jacket.outfitsAdded, null);
+    // 7 distinct pieces across the two looks: the jacket is shared
+    assert.equal(c.box.length, 7);
+    // every EMPTY cell carries the counted "outfits added" number from its gap card, never an estimate
+    for (const e of c.box) {
+      if (e.state === 'EMPTY') assert.equal(typeof e.outfitsAdded, 'number');
+      else assert.equal(e.outfitsAdded, null);
+    }
+    const shoes = c.box.find((e) => e.key === 'shoes:loafers:brown');
+    assert.ok(shoes && shoes.state === 'EMPTY');
+    const wg1 = c.looks.find((l) => l.lookId === 'L-WG1');
+    assert.equal(shoes.outfitsAdded, wg1!.gaps[0].outfitsAdded);
+    assert.ok(c.nextUp.length >= 1 && c.nextUp.length <= 3);
+    assert.ok(c.nextUp.every((e) => e.state === 'EMPTY'));
+  });
+
+  it('F3-08 removing a target and asking with no targets gives counts of zero, not a made-up number', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    t.feat.setTarget(t.ws, { lookId: 'L-WG1', on: true });
+    assert.deepEqual(t.feat.setTarget(t.ws, { lookId: 'L-WG1', on: false }), { targets: [] });
+    const c = t.feat.collection(t.ws);
+    assert.deepEqual(c.targets, []);
+    assert.equal(c.total, 0);
+    assert.equal(c.pct, 0);
+    assert.deepEqual(c.box, []);
+    assert.deepEqual(c.nextUp, []);
+  });
+
+  it('F3-09 an unknown look is refused; a read-only showcase cannot set targets', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    assert.equal((t.feat.setTarget(t.ws, { lookId: 'L-NOPE', on: true }) as { code: string }).code, 'INVALID_TRANSITION');
+    const ro = setup({ kind: 'demo', publicReadOnly: true });
+    assert.equal((ro.feat.setTarget(ro.ws, { lookId: 'L-WG1', on: true }) as { code: string }).code, 'SCOPE_DENIED');
+    assert.deepEqual(ro.feat.collection(ro.ws).targets, []);
+  });
+
+  it('F3-10 the count moves only when the closet does: laundry takes a piece out, the match falls', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    t.feat.setTarget(t.ws, { lookId: 'L-WG1', on: true });
+    assert.equal(t.feat.collection(t.ws).pct, 75);
+    ok(t.svc.setAvailability(t.ws, { eventId: 'e-tg', actor: 'human', expectedRevision: t.rev(), itemId: 'T1', state: 'LAUNDRY' }));
+    const c = t.feat.collection(t.ws);
+    assert.equal(c.matched, 2);
+    assert.equal(c.pct, 50);
+    const top = c.box.find((e) => e.slot === 'top');
+    assert.ok(top && top.state !== 'FILLED');
+    assert.notEqual(top.itemId, 'T1');
+  });
+});
+
 describe('F1 sentence path: Spark reads the words, code checks them', () => {
   const items = closetItems().map((i) => ({ itemId: i.itemId, slot: i.slot, type: i.type, color: i.color }));
 

@@ -221,6 +221,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (method === 'GET' && action === 'market' && arg) return send(res, 200, feat.market(wsId, arg, sample));
   if (method === 'GET' && action === 'drafts') return send(res, 200, { drafts: feat.drafts(wsId) });
   if (method === 'GET' && action === 'look' && arg) return send(res, 200, feat.matchLook(wsId, arg));
+  if (method === 'GET' && action === 'collection') return send(res, 200, feat.collection(wsId));
   if (method === 'GET' && action === 'photos') return send(res, 200, { photos: uploads.list(wsId) });
   if (method === 'GET' && action === 'photo' && arg) {
     const own = uploads.list(wsId).some((p) => p.photoId === arg);
@@ -295,6 +296,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       return send(res, 200, feat.draft(wsId, { itemId: String(b.itemId), kind: String(b.kind), platform: (b.platform as string) ?? null, facts: (b.facts as never) ?? {}, price: typeof b.price === 'number' ? b.price : null }));
     case 'draftmove':
       return send(res, 200, feat.moveDraft(wsId, { draftId: String(b.draftId), to: String(b.to), body: typeof b.body === 'string' ? b.body : undefined }));
+    case 'target':
+      return send(res, 200, feat.setTarget(wsId, { lookId: String(b.lookId ?? ''), on: b.on === true }));
     default:
       return send(res, 404, { ok: false, detail: 'unknown action' });
   }

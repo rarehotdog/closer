@@ -10,7 +10,7 @@ import {
   HANDOFF_KINDS, PLATFORMS, PLATFORM_INFO, donateDraft, netScenario, priceCards, sellDraft, validateEvidence,
   type Evidence, type FeeLine, type Handoff, type HandoffKind, type HandoffState, type OwnerFacts, type Platform,
 } from './market.ts';
-import { SAMPLE_LOOKS, lookById, matchLook, type LookCategory } from './looks.ts';
+import { SAMPLE_LOOKS, collectionOf, lookById, matchLook, type Collection, type Look, type LookCategory } from './looks.ts';
 import type { DecisionContext } from '../shared/wardrobe.ts';
 
 export type Fail = { ok: false; code: string; detail: string };
@@ -176,5 +176,21 @@ export class FeatureService {
     if (!look) return fail('INVALID_TRANSITION', 'no such look');
     const facts = factsFromState(this.ledger.readState(ws, { fresh: true }));
     return matchLook(look, facts, NEUTRAL_CTX, this.today(), this.rules);
+  }
+
+  // ---------------- style targets ----------------
+  /** Looks the owner wants to be able to wear. Stored outside stateHash; read back on every write. */
+  setTarget(ws: string, a: { lookId: string; on: boolean }): { targets: string[] } | Fail {
+    const deny = this.writable(ws);
+    if (deny) return deny;
+    if (!lookById(a.lookId)) return fail('INVALID_TRANSITION', 'no such look');
+    return { targets: this.extras.setTarget(ws, a.lookId, a.on === true, this.now().toISOString()) };
+  }
+
+  /** The target looks measured against the closet: counted pieces, an item box, no estimates. */
+  collection(ws: string): Collection {
+    const targets = this.extras.targets(ws).map(lookById).filter((l): l is Look => l !== null);
+    const facts = factsFromState(this.ledger.readState(ws, { fresh: true }));
+    return collectionOf(targets, facts, NEUTRAL_CTX, this.today(), this.rules);
   }
 }

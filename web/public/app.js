@@ -901,28 +901,66 @@ async function discoverScreen(view) {
   const { id, view: v } = await closetWs();
   const items = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const L = await getJson('/api/looks');
-  const S = { cat: 'wedding_guest', look: null, match: null };
+  const S = { cat: 'wedding_guest', look: null, match: null, col: null, msg: null };
   const root = h('div');
   view.append(h('h1', null, 'Discover looks'),
-    h('p', { class: 'lede' }, 'Sample looks drawn for the demo. Closer rebuilds a look with what you own first; only the pieces you lack become optional cards.'), root);
+    h('p', { class: 'lede' }, 'Sample looks drawn for the demo. Pick the looks you want to be able to wear as targets; Closer counts, piece by piece, how much of each one your closet already covers, and rebuilds it with what you own first.'), root);
   const lv = { SAME: ['ok', 'same'], SIMILAR: ['warn', 'similar'], NONE: ['bad', 'missing'] };
+  const bx = { FILLED: ['filled', 'have it'], PARTIAL: ['partial', 'similar'], EMPTY: ['empty', 'missing'] };
 
+  async function loadCollection() { S.col = await getJson(`/api/ws/${id}/collection`); }
   async function open(lookId) {
     S.look = lookId;
     S.match = await getJson(`/api/ws/${id}/look/${lookId}`);
     render();
   }
+  async function toggleTarget(lookId, on) {
+    const r = await postJson(`/api/ws/${id}/target`, { lookId, on });
+    S.msg = r.ok === false ? h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`) : null;
+    await loadCollection();
+    render();
+  }
+  function targetsPanel() {
+    const c = S.col;
+    if (!c) return null;
+    if (c.targets.length === 0) {
+      return h('section', { class: 'panel' }, h('h2', null, 'My style targets'),
+        h('p', { class: 'muted' }, 'No targets yet. Tap "Add as target" on a look below. The match is a count on your closet, piece by piece; nothing is estimated.'));
+    }
+    const pctLabel = `${c.matched} of ${c.total} pieces · ${c.pct}%`;
+    return h('section', { class: 'panel' }, h('h2', null, 'My style targets'),
+      h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(c.pct), 'aria-label': pctLabel },
+        h('div', { class: 'progress-fill', style: `width:${c.pct}%` })),
+      h('p', null, h('b', null, pctLabel), ` · ${c.complete} of ${c.looks.length} target looks complete`),
+      h('p', { class: 'muted' }, c.basis),
+      h('h3', null, 'Item box'),
+      h('div', { class: 'box' }, c.box.map((e) => h('div', { class: `box-cell ${bx[e.state][0]}` },
+        placeholder(e.color), h('b', null, e.label),
+        h('span', { class: `chip ${e.state === 'FILLED' ? 'ok' : e.state === 'PARTIAL' ? 'warn' : 'bad'}` }, e.itemId ? `${bx[e.state][1]} · ${e.itemId}` : bx[e.state][1]),
+        h('span', { class: 'muted' }, `in ${e.lookIds.length} target look${e.lookIds.length === 1 ? '' : 's'}${e.state === 'EMPTY' && e.outfitsAdded !== null ? ` · adds ${e.outfitsAdded} complete outfits` : ''}`)))),
+      c.nextUp.length ? h('p', { class: 'muted' }, `Fills the most target looks next: ${c.nextUp.map((e) => `${e.label} (${e.lookIds.length} look${e.lookIds.length === 1 ? '' : 's'})`).join(', ')}. Use a similar piece you own, or register a new one from a photo; the count moves only when the closet does.`) : null);
+  }
   function render() {
     const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Occasion' }, L.categories.map((c) => h('button', { type: 'button', 'aria-pressed': S.cat === c.id ? 'true' : 'false', onclick: () => { S.cat = c.id; S.match = null; render(); } }, c.label)));
     const looks = L.looks.filter((l) => l.category === S.cat);
-    const parts = [h('section', { class: 'panel' }, h('div', { class: 'row' }, tabs), h('div', { class: 'spacer' }),
-      h('div', { class: 'cards' }, looks.map((l) => h('button', { type: 'button', class: `card look${S.look === l.lookId ? ' pinned' : ''}`, onclick: () => open(l.lookId) },
-        h('div', { class: 'row' }, l.pieces.map((p) => placeholder(p.color))),
-        h('div', { class: 'hd' }, l.title), h('div', { class: 'muted' }, `${l.credit} · ${l.note}`)))))];
+    const covOf = (lookId) => (S.col ? S.col.looks.find((x) => x.lookId === lookId) : null);
+    const isTarget = (lookId) => !!(S.col && S.col.targets.includes(lookId));
+    const parts = [targetsPanel(), h('section', { class: 'panel' }, h('div', { class: 'row' }, tabs), h('div', { class: 'spacer' }),
+      h('div', { class: 'cards' }, looks.map((l) => {
+        const cov = covOf(l.lookId);
+        return h('div', { class: `card look${S.look === l.lookId ? ' pinned' : ''}` },
+          h('button', { type: 'button', class: 'look-select', onclick: () => open(l.lookId) },
+            h('div', { class: 'row' }, l.pieces.map((p) => placeholder(p.color))),
+            h('div', { class: 'hd' }, l.title), h('div', { class: 'muted' }, `${l.credit} · ${l.note}`)),
+          h('div', { class: 'row actions' },
+            cov ? h('span', { class: `chip ${cov.coverage.missing === 0 ? 'ok' : 'accent'}` }, `${cov.coverage.matched}/${cov.coverage.total} · ${cov.coverage.pct}%`) : null,
+            h('button', { type: 'button', class: `btn small${isTarget(l.lookId) ? '' : ' ghost'}`, 'aria-pressed': isTarget(l.lookId) ? 'true' : 'false', onclick: () => toggleTarget(l.lookId, !isTarget(l.lookId)) }, isTarget(l.lookId) ? 'Target · remove' : 'Add as target')));
+      })))];
     const m = S.match;
     if (m && m.ok !== false) {
       const own = Object.values(m.ownOutfit);
-      parts.push(h('section', { class: 'panel' }, h('h2', null, `${m.title}: ${m.reused} of ${m.pieces.length} from your closet`),
+      const pct = m.pieces.length ? Math.round((100 * m.reused) / m.pieces.length) : 0;
+      parts.push(h('section', { class: 'panel' }, h('h2', null, `${m.title}: ${m.reused} of ${m.pieces.length} from your closet (${pct}%)`),
         h('table', { class: 't look' }, h('tbody', null, m.pieces.map((p) => h('tr', null,
           h('td', null, p.piece.label), h('td', null, h('span', { class: `chip ${lv[p.level][0]}` }, lv[p.level][1])),
           h('td', null, p.itemId ? `${p.itemId} · ${itemName(items[p.itemId])}` : '—'), h('td', { class: 'muted' }, p.why))))),
@@ -942,8 +980,10 @@ async function discoverScreen(view) {
         h('ul', { class: 'reasons' }, m.fullLook.map((p) => h('li', null, `${p.label} · ${p.shop.url ? `${p.shop.match === 'SAME_ITEM' ? 'same item' : 'similar item'} · ${p.shop.price || 'price not checked'}` : 'no checked product link yet'}`))),
         h('p', { class: 'muted' }, 'Links open the shop. Closer does not fill a cart, pay, or check stock.')));
     }
-    keepFocus(root, () => root.replaceChildren(...parts));
+    if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
+    keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
+  await loadCollection();
   render();
 }
 

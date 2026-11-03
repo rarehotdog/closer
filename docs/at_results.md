@@ -4,7 +4,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
 - AT test cases (variants counted separately): PASS 31 · FAIL 1 · SKIP 7 · total 39.
-- Other tests (unit, fixture answer): PASS 14 · FAIL 0 · SKIP 0 · total 14.
+- Other tests (unit, fixture answer): PASS 27 · FAIL 0 · SKIP 0 · total 27.
 
 | Test | Result | Note |
 |---|---|---|
@@ -55,14 +55,27 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | Test | Result | Note |
 |---|---|---|
 | canonical JSON: key order and NFC do not change the hash; non-integers rejected | PASS |  |
+| caps: environment can raise the visitor day cap and the app total, within ceilings; bad values keep the defaults | PASS |  |
 | caps: visitor cap is $0 from 2026-11-19 00:00 KST; kill TTL; free mock calls pass a $0 cap | PASS |  |
 | every adapters/ file carries the unverified header | PASS |  |
 | fixture colors map to their declared color family (12 named colors) | PASS |  |
 | FX-H pre-registered answer (§4-5) — A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1 | PASS |  |
 | live chip only for live + callId + 2xx | PASS |  |
 | mode: mock is the default; real refuses without MODEL_API_KEY and in test processes; fetch is blocked here | PASS |  |
+| PH-01 official decoder reads the docs' own lossless example (27 × 60) | PASS |  |
+| PH-02 SAM request asks for one_bit masks | PASS |  |
+| PH-03 PNG round trip and JPEG size header | PASS |  |
+| PH-04 photo store keeps the two copies together and maps pixels to photo coordinates | PASS |  |
+| PH-05 photo store refuses what it cannot use safely | PASS |  |
+| PH-06 cut-out thumbnail: garment pixels inside the mask, transparent outside, long side ≤ 256 | PASS |  |
+| PH-07 Spark 2 gets cut-outs only for items registered from a photo | PASS |  |
 | read-only workspace (/w/demo-rc1): every write → SCOPE_DENIED | PASS |  |
 | reason codes: 30 verbatim (13 + 10 + 7), unique, removed codes absent | PASS |  |
+| RP-01 readUsage reads Responses, Chat and camelCase names without adding them up | PASS |  |
+| RP-02 usage with no token counts is unknown and is charged at the estimate, not zero | PASS |  |
+| RP-03 outputText: message parts first, then top-level output_text, then choices | PASS |  |
+| RP-04 parseJsonOutput accepts plain JSON or one fenced block, and nothing else | PASS |  |
+| RP-05 functionCalls: Responses items, object arguments, Chat tool_calls | PASS |  |
 | SAM box prompt matches the doc example token; Spark 0–1000 → pixels uses floor and stays inside | PASS |  |
 | SAM output parser reads the doc example records (box, frame size, mask H,W,encoding) | PASS |  |
 | stale expectedRevision → STALE_STATE; item IDs use the lowest free number per slot | PASS |  |

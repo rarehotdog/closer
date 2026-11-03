@@ -181,4 +181,100 @@ export function lookById(id: string): Look | null {
   return SAMPLE_LOOKS.find((l) => l.lookId === id) ?? null;
 }
 
+// ---------------- style targets: a counted match, an item box, nothing estimated ----------------
+
+/** How much of one look the closet covers. A piece counts when it matched SAME or SIMILAR. */
+export type Coverage = { matched: number; total: number; exact: number; similar: number; missing: number; pct: number; line: string };
+
+export function coverageOf(m: LookMatch): Coverage {
+  const exact = m.pieces.filter((p) => p.level === 'SAME').length;
+  const similar = m.pieces.filter((p) => p.level === 'SIMILAR').length;
+  const total = m.pieces.length;
+  const matched = exact + similar;
+  const pct = total === 0 ? 0 : Math.round((100 * matched) / total);
+  return { matched, total, exact, similar, missing: total - matched, pct, line: `${matched} of ${total} pieces from your closet (${exact} same, ${similar} similar, ${total - matched} missing)` };
+}
+
+export type BoxState = 'FILLED' | 'PARTIAL' | 'EMPTY';
+/** One cell of the item box: a piece that at least one target look asks for, keyed by slot, kind and colour. */
+export type BoxEntry = {
+  key: string;
+  slot: Slot;
+  type: GarmentType;
+  color: ColorFamily;
+  label: string;
+  state: BoxState;
+  /** Target looks that ask for this piece. */
+  lookIds: string[];
+  /** The owned item that fills or partly fills it, when there is one. */
+  itemId: string | null;
+  /** EMPTY cells only: complete outfits the closet gains if this piece is added (counted, not estimated). */
+  outfitsAdded: number | null;
+};
+
+export type Collection = {
+  targets: string[];
+  looks: (LookMatch & { coverage: Coverage })[];
+  matched: number;
+  total: number;
+  pct: number;
+  complete: number;
+  box: BoxEntry[];
+  /** EMPTY cells first by how many target looks they fill, then by outfits added. At most three. */
+  nextUp: BoxEntry[];
+  basis: string;
+};
+
+const STATE_RANK: Record<BoxState, number> = { FILLED: 2, PARTIAL: 1, EMPTY: 0 };
+
+/**
+ * The owner's target looks measured against the closet. Every number is a count on the pieces of
+ * the target looks and the items the owner has available; nothing is weighted or estimated.
+ */
+export function collectionOf(targets: readonly Look[], facts: WardrobeFacts, ctx: DecisionContext, today: IsoDate, rules: RuleSet): Collection {
+  const looks = targets.map((l) => {
+    const m = matchLook(l, facts, ctx, today, rules);
+    return { ...m, coverage: coverageOf(m) };
+  });
+  const matched = looks.reduce((s, l) => s + l.coverage.matched, 0);
+  const total = looks.reduce((s, l) => s + l.coverage.total, 0);
+  const box = new Map<string, BoxEntry>();
+  for (const l of looks) {
+    for (const p of l.pieces) {
+      const key = `${p.piece.slot}:${p.piece.type}:${p.piece.color}`;
+      const state: BoxState = p.level === 'SAME' ? 'FILLED' : p.level === 'SIMILAR' ? 'PARTIAL' : 'EMPTY';
+      const added = state === 'EMPTY' ? (l.gaps.find((g) => g.piece === p.piece)?.outfitsAdded ?? null) : null;
+      const cur = box.get(key);
+      if (!cur) {
+        box.set(key, { key, slot: p.piece.slot, type: p.piece.type, color: p.piece.color, label: p.piece.label, state, lookIds: [l.lookId], itemId: p.itemId, outfitsAdded: added });
+        continue;
+      }
+      if (!cur.lookIds.includes(l.lookId)) cur.lookIds.push(l.lookId);
+      if (STATE_RANK[state] > STATE_RANK[cur.state]) {
+        cur.state = state;
+        cur.itemId = p.itemId;
+      }
+      if (cur.state === 'EMPTY' && added !== null) cur.outfitsAdded = Math.max(cur.outfitsAdded ?? 0, added);
+      if (cur.state !== 'EMPTY') cur.outfitsAdded = null;
+    }
+  }
+  const slotOrder: Record<Slot, number> = { outer: 0, top: 1, bottom: 2, shoes: 3 };
+  const cells = [...box.values()].sort((a, b) => slotOrder[a.slot] - slotOrder[b.slot] || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+  const nextUp = cells.filter((c) => c.state === 'EMPTY')
+    .sort((a, b) => b.lookIds.length - a.lookIds.length || (b.outfitsAdded ?? 0) - (a.outfitsAdded ?? 0) || (a.label < b.label ? -1 : 1))
+    .slice(0, 3);
+  const pool = usable(facts, ctx, today, rules);
+  return {
+    targets: targets.map((l) => l.lookId),
+    looks,
+    matched,
+    total,
+    pct: total === 0 ? 0 : Math.round((100 * matched) / total),
+    complete: looks.filter((l) => l.coverage.missing === 0).length,
+    box: cells,
+    nextUp,
+    basis: `Counted on the ${pool.length} available items in this wardrobe: a piece is filled by an item of the same kind and colour, partly filled by the same kind or the same colour and formality, and empty otherwise.`,
+  };
+}
+
 void SLOTS;

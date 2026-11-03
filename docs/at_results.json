@@ -253,6 +253,12 @@
       "reason": ""
     },
     {
+      "name": "caps: environment can raise the visitor day cap and the app total, within ceilings; bad values keep the defaults",
+      "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
       "name": "caps: visitor cap is $0 from 2026-11-19 00:00 KST; kill TTL; free mock calls pass a $0 cap",
       "file": "tests/unit.test.ts",
       "status": "PASS",
@@ -289,6 +295,48 @@
       "reason": ""
     },
     {
+      "name": "PH-01 official decoder reads the docs' own lossless example (27 × 60)",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-02 SAM request asks for one_bit masks",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-03 PNG round trip and JPEG size header",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-04 photo store keeps the two copies together and maps pixels to photo coordinates",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-05 photo store refuses what it cannot use safely",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-06 cut-out thumbnail: garment pixels inside the mask, transparent outside, long side ≤ 256",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-07 Spark 2 gets cut-outs only for items registered from a photo",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
       "name": "read-only workspace (/w/demo-rc1): every write → SCOPE_DENIED",
       "file": "tests/unit.test.ts",
       "status": "PASS",
@@ -297,6 +345,36 @@
     {
       "name": "reason codes: 30 verbatim (13 + 10 + 7), unique, removed codes absent",
       "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "RP-01 readUsage reads Responses, Chat and camelCase names without adding them up",
+      "file": "tests/responses_parse.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "RP-02 usage with no token counts is unknown and is charged at the estimate, not zero",
+      "file": "tests/responses_parse.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "RP-03 outputText: message parts first, then top-level output_text, then choices",
+      "file": "tests/responses_parse.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "RP-04 parseJsonOutput accepts plain JSON or one fenced block, and nothing else",
+      "file": "tests/responses_parse.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "RP-05 functionCalls: Responses items, object arguments, Chat tool_calls",
+      "file": "tests/responses_parse.test.ts",
       "status": "PASS",
       "reason": ""
     },

@@ -139,3 +139,14 @@ Each visitor gets a private copy of the sample closet: 12 sample items and a syn
 - **Result.** It shows the price, each deduction, the fees not yet checked, and the amount the owner would receive. The line "Not a guarantee" stays on.
 - **Use in drafts.** Once the net is known, a draft for the same platform uses that price.
 - **Checks.** The server rejects a missing name, a negative value, a rate above 100%, more than 10 lines and unknown platforms (tests F2-16 and F2-17).
+
+## Style targets and the item box (added 11/3 night)
+
+The owner picks sample looks on Discover as **targets** ("Add as target"). Closer then shows, for the whole set, how much of it the closet already covers, and an **item box** of every piece the target looks ask for:
+
+- `GET /api/ws/:id/collection` → `{ targets, looks[{…match, coverage}], matched, total, pct, complete, box[], nextUp[], basis }`.
+- `POST /api/ws/:id/target` `{ lookId, on }` → `{ targets }`. Unknown look → `INVALID_TRANSITION`; read-only showcase → `SCOPE_DENIED`. Targets live in `look_targets` (store/extras.ts), outside `stateHash`, read back on every write.
+- **Coverage is a count, not a model output.** A piece counts when it matched `SAME` or `SIMILAR` in `matchLook`; `pct = round(100 × matched / total)`. The screen prints the formula line ("Counted on the N available items in this wardrobe …") next to the number. There is no weighting, no mood distance, no estimate.
+- **Box cells** are keyed by slot + kind + colour, so one navy jacket asked for by two looks is one cell. States: `FILLED` (same item), `PARTIAL` (similar item), `EMPTY`. An `EMPTY` cell carries `outfitsAdded`, the same counted number as the gap card. `nextUp` lists at most three `EMPTY` cells, ordered by how many target looks they fill, then outfits added.
+- The count moves only when the closet does (laundry, repair, a new photo, a removed target). Tests F3-06 … F3-10 in `tests/features.test.ts` pin the count, the merge, the empty state, the refusals and the laundry drop.
+- Words on screen: "have it", "similar", "missing", "N of M pieces · P%". No "score".
