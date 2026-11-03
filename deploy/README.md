@@ -30,6 +30,8 @@ This uses a VM that is separate from any other project's VM.
 
 **Data.** It lives in `/var/lib/closer/closer.db` on the VM's boot disk. A new release does not touch it.
 
+**Visitor cap.** The first install writes `CLOSER_VISITOR_DAY_USD=3` and `CLOSER_APP_TOTAL_USD=20` into `/etc/closer/env`, so a judge opening the public link can use the sentence reader and the photo flow on the sample closet (about three photo runs per day in total). Without the visitor line the cap is $0 and visitors see "Replay & ledger mode"; the tap-to-lock, 60-day review and Discover flows still work, because they make no model calls. To change a cap: edit the line on the VM, then run `deploy.sh` again (it restarts the service). The visitor cap is $0 from 2026-11-19 00:00 KST whatever the line says.
+
 **Costs.** An e2-small and a static IP are billed while they exist. To stop everything:
 `gcloud compute instances delete closer --zone asia-northeast3-a --project PROJECT_ID`, then
 `gcloud compute addresses delete closer-ip --region asia-northeast3 --project PROJECT_ID`.

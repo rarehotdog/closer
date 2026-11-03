@@ -10,7 +10,7 @@ import { canonicalHash, canonicalize } from '../shared/canonical.ts';
 import { buildBoxPrompt, decodeMockRle, encodeMockRle, normToPixelBox, parseSegmentation } from '../engine/coords.ts';
 import { nearestColor, rgbToLab } from '../engine/color.ts';
 import { FXH_ROLES } from '../fixtures/fxh.ts';
-import { capBlocks, killActive, PROVISIONAL_CAPS, visitorDayCap } from '../engine/caps.ts';
+import { capBlocks, capsFromEnv, killActive, PROVISIONAL_CAPS, visitorDayCap } from '../engine/caps.ts';
 import { createRealTransport, RealModeRefused, resolveMode } from '../adapters/transport.ts';
 import { harness, ok, startHero, newId } from './helpers.ts';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -96,6 +96,16 @@ test('caps: visitor cap is $0 from 2026-11-19 00:00 KST; kill TTL; free mock cal
   assert.equal(capBlocks(0, 0, 0), false);
   assert.equal(capBlocks(0, 50_000, 0), true);
   assert.equal(capBlocks(250_000, 0, 250_000), true);
+});
+
+test('caps: environment can raise the visitor day cap and the app total, within ceilings; bad values keep the defaults', () => {
+  assert.deepEqual(capsFromEnv({}), PROVISIONAL_CAPS);
+  assert.deepEqual(capsFromEnv({ CLOSER_VISITOR_DAY_USD: '3', CLOSER_APP_TOTAL_USD: '20' }), { ...PROVISIONAL_CAPS, visitorDayMicroUsd: 3_000_000, appTotalMicroUsd: 20_000_000 });
+  assert.equal(capsFromEnv({ CLOSER_VISITOR_DAY_USD: '0.5' }).visitorDayMicroUsd, 500_000);
+  for (const bad of ['', ' ', 'abc', '-1', '11', 'Infinity']) assert.equal(capsFromEnv({ CLOSER_VISITOR_DAY_USD: bad }).visitorDayMicroUsd, 0, `visitor ${JSON.stringify(bad)}`);
+  assert.equal(capsFromEnv({ CLOSER_APP_TOTAL_USD: '201' }).appTotalMicroUsd, 20_000_000);
+  // The $0-from date is not an environment setting: a raised cap still falls to $0 on 11/19.
+  assert.equal(visitorDayCap(capsFromEnv({ CLOSER_VISITOR_DAY_USD: '3' }), new Date('2026-11-19T00:00:00+09:00')), 0);
 });
 
 test('mode: mock is the default; real refuses without MODEL_API_KEY and in test processes; fetch is blocked here', async () => {

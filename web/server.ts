@@ -12,7 +12,7 @@ import { createPortsFromEnv } from '../adapters/index.ts';
 import { RealModeRefused } from '../adapters/transport.ts';
 import { createPhotoLibrary, CHIPS, rolesOutside } from '../fixtures/photos.ts';
 import { FXH_ROLES, OUTSIDE_PHOTO_ROLES, seedItems } from '../fixtures/fxh.ts';
-import { KILL_TTL_MS, PROVISIONAL_CAPS, killActive, visitorDayCap } from '../engine/caps.ts';
+import { KILL_TTL_MS, capsFromEnv, killActive, visitorDayCap } from '../engine/caps.ts';
 import { NAMED_RGB } from '../engine/color.ts';
 import { addDays, isIsoDate, kstDateOf } from '../shared/dates.ts';
 import { BUILD_CHIP, LABELS, livePerception, sampleWardrobe } from '../shared/labels.ts';
@@ -63,7 +63,11 @@ try {
   });
   mode = p.mode;
   mkdirSync(dirname(DB_PATH), { recursive: true });
-  ledger = new SqliteLedger(DB_PATH, { kill: { on: false, setAt: null, ttlMs: KILL_TTL_MS }, caps: PROVISIONAL_CAPS });
+  // Money caps: the provisional defaults, with the two owner-raisable caps read from the environment
+  // (CLOSER_VISITOR_DAY_USD, CLOSER_APP_TOTAL_USD). Stored on the flags row, so a restart with
+  // different values re-applies them.
+  ledger = new SqliteLedger(DB_PATH, { kill: { on: false, setAt: null, ttlMs: KILL_TTL_MS }, caps: capsFromEnv(env) });
+  ledger.setFlag('caps', capsFromEnv(env));
   uploads = new PhotoStore(join(dirname(DB_PATH), 'photos'));
   // Sample photos for everyone; uploaded photos only through routes that check their workspace.
   const photoSource = { get: (id: string) => uploads.get(id) ?? lib.get(id) };
@@ -121,7 +125,7 @@ function banner(ws: WorkspaceRow | null, sessionId: string | null) {
   const spend = ledger.spend({ sessionId, kstDate: kstDateOf(now) });
   const caps = flags.caps;
   const usd = (m: number) => `$${(m / 1_000_000).toFixed(2)}`;
-  const capLine = `Caps (provisional default): total ${usd(caps.appTotalMicroUsd)} · visitor/day ${usd(visitorDayCap(caps, now))} · session ${usd(caps.sessionMicroUsd)} · spent ${usd(spend.appTotal)}`;
+  const capLine = `Caps: total ${usd(caps.appTotalMicroUsd)} · visitor/day ${usd(visitorDayCap(caps, now))} · session ${usd(caps.sessionMicroUsd)} · spent ${usd(spend.appTotal)}`;
   const hero = EST_MICRO_USD.spark1 + EST_MICRO_USD.sam + EST_MICRO_USD.spark2;
   let liveText: string;
   if (ws?.kind === 'visitor') {

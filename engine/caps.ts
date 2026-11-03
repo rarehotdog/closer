@@ -18,6 +18,24 @@ export const PROVISIONAL_CAPS: Caps = { appTotalMicroUsd: 20_000_000, visitorDay
 
 export type KillFlag = { on: boolean; setAt: string | null; ttlMs: number };
 
+/**
+ * Caps from the server environment, in whole or fractional USD. Only the two money caps the owner
+ * may raise for a judging window are read; anything missing, non-numeric, negative or above the
+ * ceiling keeps the base value. The visitor $0 date rule is never overridden.
+ *   CLOSER_VISITOR_DAY_USD  visitor live calls per KST day (0–10), e.g. 3
+ *   CLOSER_APP_TOTAL_USD    total live spend of the app (0–200), e.g. 20
+ */
+export function capsFromEnv(env: Record<string, string | undefined>, base: Caps = PROVISIONAL_CAPS): Caps {
+  const usd = (raw: string | undefined, max: number): number | null => {
+    if (raw === undefined || raw.trim() === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 && n <= max ? Math.round(n * 1_000_000) : null;
+  };
+  const visitor = usd(env.CLOSER_VISITOR_DAY_USD, 10);
+  const total = usd(env.CLOSER_APP_TOTAL_USD, 200);
+  return { ...base, visitorDayMicroUsd: visitor ?? base.visitorDayMicroUsd, appTotalMicroUsd: total ?? base.appTotalMicroUsd };
+}
+
 export function killActive(k: KillFlag, now: Date): boolean {
   if (!k.on || !k.setAt) return false;
   return now.getTime() < new Date(k.setAt).getTime() + k.ttlMs;
