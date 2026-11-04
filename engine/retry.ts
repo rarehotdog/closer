@@ -42,6 +42,10 @@ export async function sendWithRetry(send: () => Promise<HttpResult>, deps: Retry
   }
 }
 
+/**
+ * The reason-code list is fixed at 30 names (§4-3, pinned by a unit test), so 401/403 have no code
+ * of their own; adapters/responses.ts httpFailure names the key in the detail instead.
+ */
 export function statusToReason(status: number): ReasonCode {
   if (status === 400) return 'META_REQUEST_REJECTED';
   if (status === 413) return 'UNSUPPORTED_IMAGE';
