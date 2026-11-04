@@ -1,9 +1,11 @@
-// AT-03, AT-06, AT-19 as functions of the rule set, so AT-28 can run them against mutant builds.
-// Expected values are hand-written from plan §4-4/§4-5 (not produced by production functions).
+// AT-03, AT-06, AT-19, AT-21 and the next-plan pin check as functions of the rule set, so AT-28 can
+// run them against mutant builds. Expected values are hand-written from plan §4-4/§4-5 (not
+// produced by production functions).
 import assert from 'node:assert/strict';
 import { ALL_RULES, factsFromState, type RuleSet } from '../engine/rules.ts';
 import { buildSolverInput } from '../engine/solver.ts';
-import { harness, heroProposed, heroRegistered, isOp, laundry, lock, ok } from './helpers.ts';
+import { FX_E } from '../fixtures/edge.ts';
+import { harness, heroProposed, heroRegistered, isOp, laundry, lock, ok, sampleItem } from './helpers.ts';
 
 /** Hand-written FX-H formality values (§4-5): high = 3, mid = 2, low = 1. */
 export const FXH_FORMALITY: Record<string, number> = { J1: 3, T1: 3, T2: 2, T3: 1, B1: 3, B2: 1, B3: 2, S1: 3, S2: 1 };
@@ -76,6 +78,45 @@ export async function checkAT19(rules: RuleSet = ALL_RULES): Promise<void> {
     }
     assert.equal(A.changedSlots.length, 1);
     assert.ok(B.changedSlots.length <= 2);
+  } finally {
+    h.cleanup();
+  }
+}
+
+/** AT-21 (FX-E8): the pinned J1 is not waterproof and rain is high → 0 proposals, 1 question PIN_CONFLICT, J1 never swapped. */
+export async function checkAT21(rules: RuleSet = ALL_RULES): Promise<void> {
+  const h = harness({ rules });
+  try {
+    const op = await heroRegistered(h, { weather: FX_E.E8.weather, hardRules: FX_E.E8.hardRules });
+    const r = await h.svc.propose(h.ws, { operationId: op.operationId });
+    assert.ok(isOp(r));
+    assert.equal(r.options.length, 0);
+    assert.equal(r.questions.length, 1);
+    assert.equal(r.questions[0].code, 'PIN_CONFLICT');
+    assert.ok(r.reasonCodes.includes('PIN_CONFLICT'));
+    assert.ok(h.state().plans.every((p) => p.slots.outer === 'J1'));
+  } finally {
+    h.cleanup();
+  }
+}
+
+/**
+ * Next plan with a second outer seeded (AT-28's pin target). After option A of FX-H is locked, the
+ * next decision without a photo has no offenders, so every slot may change and only the pin rule
+ * keeps J1. Returns the outer of each option so AT-28 can show the swap under the pin mutant.
+ */
+export async function nextPlanOuters(rules: RuleSet = ALL_RULES): Promise<string[]> {
+  const h = harness({ rules, extraSeeds: [sampleItem('J2', 'outer', 'track_jacket', 'navy', 'low')] });
+  try {
+    const op = await heroProposed(h);
+    const a = op.options.findIndex((o) => o.outfit.bottom === 'B2' && o.outfit.shoes === 'S1');
+    assert.ok(a >= 0, 'option A (B1 → B2) not proposed');
+    ok(lock(h, op, a));
+    const next = await h.svc.startNext(h.ws, { fromPlanId: op.planId });
+    assert.ok(isOp(next), JSON.stringify(next));
+    assert.equal(next.state, 'PROPOSED');
+    assert.ok(next.options.length >= 1, 'no next-plan option proposed');
+    return next.options.map((o) => o.outfit.outer ?? '');
   } finally {
     h.cleanup();
   }

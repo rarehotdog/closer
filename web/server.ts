@@ -31,6 +31,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
 const env = process.env;
 const PORT = Number(env.CLOSER_PORT || 8787);
+const HOST = env.CLOSER_HOST || '127.0.0.1'; // loopback only (local, and behind Caddy on the VM); the container image sets 0.0.0.0
 const DB_PATH = env.CLOSER_DB_PATH || join(ROOT, '.data', 'closer.db');
 const STARTED_AT = new Date().toISOString();
 
@@ -350,6 +351,6 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, HOST, () => {
   console.log(`Closer (${mode} mode) on http://localhost:${PORT}  — screens: / · /app · /w/demo-rc1 · /admin · /version`);
 });

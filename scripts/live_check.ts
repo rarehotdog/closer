@@ -104,7 +104,7 @@ async function main() {
       if (v1?.ok) {
         const objects = v1.value.garments.map((g, i) => ({ id: i + 1, box: normToPixelBox(g.box, size.w, size.h) }));
         const rs = await createSamPort(deps).segment({ imageUrl, prompt: buildBoxPrompt(objects, size.w, size.h) });
-        steps.push({ step: 'SAM masks', ok: rs.ok, ...callSummary(rs.calls), result: rs.ok ? { requested: objects.length, records: rs.value.length, withMask: rs.value.filter((x) => x.mask !== null).length } : { code: rs.code, detail: rs.detail } });
+        steps.push({ step: 'SAM masks', ok: rs.ok, ...callSummary(rs.calls), result: rs.ok ? { requested: objects.length, records: rs.value.length, withMask: rs.value.filter((x) => x.raster !== null).length } : { code: rs.code, detail: rs.detail } });
       }
     }
   }

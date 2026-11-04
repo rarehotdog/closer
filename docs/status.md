@@ -2,7 +2,8 @@
 
 ## 0. Update 2026-11-04 23:30 KST
 
-- main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests: 112 pass · 1 fail (AT-28, see §2) · 9 skip (the real-mode cases, without a key). Static AT-17/18: 0 findings at repo scope.
+- main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests (11/4 run): 123 run · 114 pass · 0 fail · 9 skip (the real-mode cases, without a key). Static AT-17/18: 0 findings at repo scope. `npm run typecheck` passes (TypeScript and `@types/node` are devDependencies now). CI: `.github/workflows/ci.yml` runs `npm ci`, the type check, the tests and the static check on every push and pull request.
+- AT-28 is green since 11/4: the pin-rule mutant is checked on the next-plan path (second outer seeded) and by AT-21 instead of AT-03/06/19, which cannot see it in FX-H (§2). The availability mutant keeps its pre-registered AT-03/06/19 target set; no expected value was changed.
 - 11/4 night: Closet in 3D (layers, exploded view, outfit picking, photo cut-outs), eight resale platforms in their own currencies, and the **keep-or-let-go** screen on My closet: one question per piece with a date, two sides of counted facts, a position saved as a read-back snapshot and resolved by later wear records. No probability anywhere. The `money` initialisation error on My closet → "Look at selling" (reported on cc09bfe) is fixed and re-checked in a browser at 390 px; an empty list of cost lines now leaves the net unknown instead of equal to the price.
 - Features since this file was first written: Today sentence path (Spark reads the words, code checks them), real-photo path with the official SAM decoder, 60-day review with exemptions and choices, per-platform price evidence and net calculator, hand-over drafts, Discover looks rebuilt from the closet, style targets with a counted match and an item box (11/3 night). Details: [features_1102.md](features_1102.md).
 - Caps: visitor-per-day and app-total caps can be raised by the host through `CLOSER_VISITOR_DAY_USD` and `CLOSER_APP_TOTAL_USD` (ceilings 10 and 200). The deploy kit under `deploy/` writes 3 and 20 on first install.
@@ -12,7 +13,7 @@
 - Written: 2026-10-30 (KST evening), AI build window "10/30 12:30–10/31 08:30" of plan v2 §6-1 (L313). The §9 decision card had no answer, so this build runs under **provisional freeze (잠정 동결)**: the plan's no-answer defaults below.
 - Scope covered: §6-1 rows L313 (scaffold, shared, engine, store mock DB, Spark·SAM adapters marked unverified, AT mock, local repo) and L315 (UI five screens, Try on mock, K1, caps, banner). The L314 row (10/31 08:30–15:30) has no keyless work beyond "UI·docs·mock only".
 - Real calls: 0. Keys or tokens: 0. Deploy, push, remote, paid calls, account actions: 0. Repository is local only (`git init`, no remote).
-- Status line (§6-1 L340 format): last commit = see `git log -1`; **AT mock 28/29 PASS** (AT-28 fails, reason below); static AT-17/18 PASS at repo scope; blocked: nothing for mock work; owner action needed: answer '예' or '중단' in the first minute of the 10/31 19:00 window, then the key window steps below.
+- Status line (§6-1 L340 format): last commit = see `git log -1`; **AT mock 29/29 PASS** (28/29 until 11/4: AT-28's pin case, reason and the new target set below); static AT-17/18 PASS at repo scope; blocked: nothing for mock work; owner action needed: answer '예' or '중단' in the first minute of the 10/31 19:00 window, then the key window steps below.
 
 ## 1. What exists
 
@@ -31,11 +32,11 @@
 
 Stack: the plan v2 does not name one; plan v1 §4-2 L362 says "TypeScript 하나 [가정]" with these module folders, so this build is TypeScript on Node.js ≥ 22.18 (built-in type stripping), `node:sqlite`, `node:test`, and a no-framework browser UI. Runtime dependencies: 0.
 
-How to run: `npm test` (tests + report) · `npm run ui` (http://localhost:8787) · `npm run screens` · `npm run typecheck` (optional, needs TypeScript + Node types locally; it was run clean in this session).
+How to run: `npm test` (tests + report) · `npm run ui` (http://localhost:8787) · `npm run screens` · `npm run typecheck` (TypeScript and Node types are devDependencies since 11/4; run clean on 11/4).
 
 ## 2. Acceptance tests (run in this session, mock mode)
 
-Totals from `docs/at_results.md`: AT cases PASS 31 · FAIL 1 · SKIP 7 (39 active-AT cases; variants counted separately) · other tests PASS 14 / 14. Per AT id (34 active):
+Totals from `docs/at_results.md` (11/4 run): AT cases PASS 33 · FAIL 0 · SKIP 7 (40 active-AT cases; variants counted separately) · other tests PASS 27 / 27. Per AT id (34 active):
 
 | AT | Result | Note |
 |---|---|---|
@@ -47,15 +48,15 @@ Totals from `docs/at_results.md`: AT cases PASS 31 · FAIL 1 · SKIP 7 (39 activ
 | 17 | PASS (static, repo scope) | RC2 verdict still open: script, subtitles, form draft, video OCR do not exist yet |
 | 18 | PASS (static, repo scope) | same; names checked by hashed deny-list so no name is stored in the repo |
 | 19 | PASS (mock) · SKIP (real) | |
-| 28 | **FAIL** | availability mutant caught (AT-03, AT-06 fail); **pin mutant survives AT-03/06/19** |
+| 28 | PASS (mock, since 11/4) | availability mutant caught by AT-03/06/19; pin mutant caught on the next-plan path (second outer seeded) and by AT-21, not by AT-03/06/19 (note below) |
 | 31 | SKIP | real-only (실제 1회) |
 | 36 | PASS (mock) · SKIP (real) | |
 | 05, 24 | SKIP | archived, numbers kept (not counted in the 34) |
 
-- AT mock count in the plan's format (§6-1 L313 "AT mock n/29"): **28/29**.
+- AT mock count in the plan's format (§6-1 L313 "AT mock n/29"): **29/29** (28/29 until 11/4).
 - Also passing: the §4-5 pre-registered FX-H answer (A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1).
 
-**AT-28 failure, one line:** under the frozen FX-H the pinned item J1 is never in an offender slot (an overlap is already PIN_CONFLICT), so the offender-scope rule alone keeps J1 and a build without the pin rule still passes AT-03, AT-06 and AT-19. The pin mutant is caught by AT-21 (pin vs rain rule), which AT-28 does not list. The test was not weakened; changing AT-28's target set is an owner decision (expected values are pre-registered, §4-4 L257).
+**AT-28, one line (updated 11/4):** under the frozen FX-H the pinned item J1 is never in an offender slot (an overlap is already PIN_CONFLICT), so the offender-scope rule alone keeps J1 and a build without the pin rule still passes AT-03, AT-06 and AT-19. Since 11/4 the pin mutant is checked where the outer slot may change: the next plan without a photo with a second outer seeded (J1 kept with the rule, swapped to J2 without it) and AT-21 (pin vs rain rule); both catch it, measured by running each check against the mutant. The availability mutant keeps its pre-registered AT-03/06/19 target set, and no expected value of AT-03/06/19/21 was changed.
 
 ## 3. Mock vs real
 
@@ -116,7 +117,7 @@ Totals from `docs/at_results.md`: AT cases PASS 31 · FAIL 1 · SKIP 7 (39 activ
 4. Hosting + managed persistent DB (no sleep, ≥ 60 s requests, server env vars). Server environment variable names: `CLOSER_MODE` (= real), `MODEL_API_KEY`, `CLOSER_ADMIN_TOKEN`, `CLOSER_DB_PATH` (only while the SQLite store is used), `CLOSER_PORT` if the host needs it, `META_API_BASE_URL` only if the documented base changes. Leave `CLOSER_TODAY` unset in production.
 5. Credit form only after the owner's own approvals are settled (Team ID needed).
 6. After the window (AI, 19:50–): first deploy (SP-C1) → SP-A1 (`/v1/models` lists both IDs, Spark 'OK' 200) → A2 (SAM, 6 drawn squares, IDs 1–6) → A3 (text.format 3/3; fallback Chat Completions response_format) → plug in the official SAM mask decoder and an image decoder → A4 sample photos with muse-image-1.0 (tools off) + manifest before any call → B1/B2/B4 → B3/B5 → G2 → rerun the skipped real variants (AT-01, 11, 16, 19, 31, 36). Apply §6-4 results without changing expected values.
-7. Owner decisions waiting: AT-28 target set (add AT-21?), LICENSE choice, git author identity before the repo goes public, managed DB choice (needs a store adapter for the same contract).
+7. Owner decisions waiting: LICENSE choice, git author identity before the repo goes public, managed DB choice (needs a store adapter for the same contract). AT-28's target set was settled on 11/4 (next-plan path + AT-21, §2).
 
 ## 7. Screenshots (`docs/screens/`, Playwright Chromium, mock mode)
 

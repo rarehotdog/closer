@@ -105,7 +105,7 @@ node scripts/intent_ablation.ts --live        # 12 Spark calls (≈ $0.05)
 ## Run
 
 ```
-npm test          # 88 tests: 78 pass, 1 fail (AT-28, plan gap), 9 skipped (need keys or a deploy)
+npm test          # 123 tests (11/4): 114 pass, 0 fail, 9 skipped (need keys or a deploy)
 npm run ui        # http://localhost:8787/today · /closet · /discover
 ```
 

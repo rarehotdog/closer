@@ -187,10 +187,16 @@
       "reason": ""
     },
     {
-      "name": "AT-28 [mock] mutation — pin-rule mutant is caught by AT-03/06/19",
+      "name": "AT-28 [mock] mutation — pin-rule mutant is caught by AT-21 (FX-E8)",
       "file": "tests/at_mutation.test.ts",
-      "status": "FAIL",
-      "reason": "pin mutant survived AT-03, AT-06 and AT-19 (in FX-H the pin item J1 is outside the offender slots, so OUTSIDE_OFFENDERS already blocks a J1 change)"
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-28 [mock] mutation — pin-rule mutant is caught on the next-plan path (second outer seeded): J1 kept with the rule, swapped without it",
+      "file": "tests/at_mutation.test.ts",
+      "status": "PASS",
+      "reason": ""
     },
     {
       "name": "AT-29 [mock] ambiguous reference \"그거 말고 다른 거\" — AMBIGUOUS_REFERENCE, 1 question, 0 guesses",

@@ -58,6 +58,29 @@ ReadWritePaths=/var/lib/closer
 [Install]
 WantedBy=multi-user.target
 UNIT
+# Daily backup (deploy/backup.sh): ledger copy + photos tar into /var/backups/closer, 7 days kept, as the closer user.
+install -d -o closer -g closer -m 700 /var/backups/closer
+install -m 755 "$REL/deploy/backup.sh" /usr/local/bin/closer-backup
+cat > /etc/systemd/system/closer-backup.service <<UNIT
+[Unit]
+Description=Closer backup (ledger copy + photos tar)
+
+[Service]
+Type=oneshot
+User=closer
+ExecStart=/usr/local/bin/closer-backup /var/lib/closer /var/backups/closer
+UNIT
+cat > /etc/systemd/system/closer-backup.timer <<UNIT
+[Unit]
+Description=Daily Closer backup
+
+[Timer]
+OnCalendar=*-*-* 04:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
 cat > /etc/caddy/Caddyfile <<CADDY
 $DOMAIN {
   encode gzip
@@ -69,6 +92,7 @@ systemctl daemon-reload
 systemctl enable --now caddy >/dev/null 2>&1 || true
 systemctl reload caddy || systemctl restart caddy
 systemctl enable closer >/dev/null 2>&1
+systemctl enable --now closer-backup.timer >/dev/null 2>&1 || echo "warning: closer-backup.timer not enabled" >&2
 if grep -q '^MODEL_API_KEY=.' /etc/closer/env; then
   systemctl restart closer
   echo "closer restarted on release $SHA"

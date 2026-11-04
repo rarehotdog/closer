@@ -52,9 +52,11 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 | `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/today`, `/closet`, `/closet/3d`, `/discover`, `/w/demo-rc1`, `/admin`, `/version`. |
 | `npm run live:check` | Owner's machine only: one real call per model with the key read from the Keychain; writes `.data/live_check.json`. Never runs inside tests. |
 | `npm run screens` | Captures the screens into `docs/screens/` with Playwright Chromium (Playwright is not a project dependency). |
-| `npm run typecheck` | Optional `tsc` check (needs TypeScript and Node type definitions installed locally). |
+| `npm run typecheck` | `tsc` type check. TypeScript and the Node type definitions are devDependencies, so `npm install` is enough. |
 
-Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies.
+Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies and the two type-check tools.
+
+CI: `.github/workflows/ci.yml` runs `npm ci`, `npm run typecheck`, `npm test` and the static check (`scripts/static_check.ts`) on every push and pull request, on Node 22.18.
 
 Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written before any call` — not measured yet.
 
@@ -65,7 +67,7 @@ Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written b
 - "No confirmed wear" needs records. Without enough of them the review says so instead of guessing.
 - The keep-or-let-go screen shows no probability and no expected value. A position is resolved only by wear records you confirm afterwards; days with no record stay unknown, so a closed question reads "1 confirmed wear in the 30 days after the decision", never "you did not wear it".
 - Spend caps: $20 for the whole app (`CLOSER_APP_TOTAL_USD` raises it), $0.25 per visitor copy (each Try fork and each sample closet, counted across restarts from the call rows), one per-day cap for all visitor copies together (0 unless `CLOSER_VISITOR_DAY_USD` is set; `npm run live:ui` and the deploy kit set 3; $0 from 2026-11-19 KST whatever is set), and the K1 kill switch. The owner's own wardrobe counts toward the app total only.
-- One acceptance test, AT-28, fails on purpose-built grounds: its planted pin-rule mutant is masked by another rule in the fixture, so the test cannot tell them apart. The pin rule itself is covered by the F1 tests. Listed here rather than hidden.
+- AT-28's pin-rule mutant is caught on the next-plan path (a second outer seeded: J1 is swapped without the rule, kept with it) and by AT-21, not by the pre-registered AT-03/06/19: in FX-H the kept piece J1 sits outside the offender slots, so the offender-scope rule alone keeps it there and those three cannot tell the two rules apart. The test says so in its name rather than hiding it.
 
 ## What comes next (not built)
 

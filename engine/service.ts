@@ -71,7 +71,7 @@ export type Card = {
 
 export type OptionView = {
   index: number;
-  label: 'Fewer changes' | 'Closer to what you said' | 'Re-plan' | 'Keep as is';
+  label: 'Fewer changes' | 'Closer to what you said' | 'A gentler step' | 'Re-plan' | 'Keep as is';
   outfit: Outfit;
   changedSlots: Slot[];
   sum: number | null;
@@ -900,7 +900,7 @@ export class CloserService {
    * to the caller and nothing is written to the wardrobe. Public copies never call it in real mode.
    */
   async askWonder(workspaceId: string, a: { request: WonderRequest; sessionId?: string | null }): Promise<
-    { ok: true; result: WonderResult; callLines: string[]; liveChips: string[]; mode: Mode } | { ok: false; code: ReasonCode; detail: string }
+    { ok: true; result: WonderResult; callLines: string[]; liveChips: string[]; mode: 'mock' | 'real' } | { ok: false; code: ReasonCode; detail: string }
   > {
     const ws = this.ws(workspaceId);
     if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };

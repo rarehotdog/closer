@@ -21,5 +21,9 @@
   "dependencies": {
     "@meta-sam/parser": "0.1.0",
     "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
   }
 }
