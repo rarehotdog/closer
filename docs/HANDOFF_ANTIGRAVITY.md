@@ -6,7 +6,7 @@ From 11/2 Antigravity writes the main code. Claude, Sol, Instinct and Leo edit t
 
 - **Repository.** This one, with zero runtime dependencies. It needs Node ≥ 22.18, because it uses the built-in SQLite and test runner.
 - **Antigravity's earlier v1.3 code.** It stays as a reference only, and is not merged. Port an idea from it only if it fits the rules below.
-- **Commands.** `npm test` runs 88 tests: 78 pass, 1 fails (AT-28, a plan gap) and 9 are skipped because they need keys or a deploy. `npm run ui` serves http://localhost:8787 with the screens /today, /closet, /discover, /, /app, /admin and /version.
+- **Commands.** `npm test` runs 123 tests (counted 11/4): 114 pass, 0 fail and 9 are skipped because they need keys or a deploy. `npm run ui` serves http://localhost:8787 with the screens /today, /closet, /discover, /, /app, /admin and /version.
 - **Commit identity.** Use a no-reply identity. Do not commit personal e-mails, home paths (`/Users/...`) or keys.
 
 ## Map
