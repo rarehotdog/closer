@@ -1,0 +1,20 @@
+# Every push and pull request: install from the lock file, type check, keyless tests, static checks.
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the static check also scans git history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: node --disable-warning=ExperimentalWarning scripts/static_check.ts

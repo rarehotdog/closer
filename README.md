@@ -56,6 +56,8 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 
 Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies and the two type-check tools.
 
+CI: `.github/workflows/ci.yml` runs `npm ci`, `npm run typecheck`, `npm test` and the static check (`scripts/static_check.ts`) on every push and pull request, on Node 22.18.
+
 Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written before any call` — not measured yet.
 
 ## Known limits
