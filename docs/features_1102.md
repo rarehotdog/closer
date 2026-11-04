@@ -154,7 +154,7 @@ The owner picks sample looks on Discover as **targets** ("Add as target"). Close
 
 ## Closet in 3D (added 11/4 night)
 
-`/closet/3d` (link "See the closet in 3D" on My closet) draws the closet by layer in three.js 0.170.0: outerwear rail, tops shelf, bottoms shelf, shoe rack, inside a wireframe frame.
+`/closet/3d` (link "See it in 3D" under the asset board on My closet) draws the closet by layer in three.js 0.170.0: outerwear rail, tops shelf, bottoms shelf, shoe rack, inside a wireframe frame.
 
 - **Same data, no new numbers.** `web/public/anatomy.js` groups the items from `GET /api/ws/:id/view` with the rows from `GET /api/ws/:id/review?window=60`. The canvas and the list view both draw from that one result. Tests F4-01 … F4-03 check that every piece appears once on its own layer, that the counts per layer, per availability and per review status equal My closet's, that a laundry change shows up, and that the data has no price, value or estimate fields.
 - **On screen.** Cards show the piece's colour and kind (code-drawn, like the rest of the sample closet), its ID and name. Pieces that are not available are washed out with their state; an amber outline marks "no confirmed wear in 60 days" only where enough days were recorded (the review rule). Drag sideways to turn, slide for an exploded view, tap a piece for its facts and the price evidence entered per platform (never averaged).
@@ -184,3 +184,12 @@ The screen the team's reviews converged on: not a closet list but the place wher
 - **Tests** F5-01 … F5-10 in `tests/features.test.ts`: no lines → unknown; typed 0 ≠ deleted line; 100,000 · 5% · 3,000 → 92,000; negative net kept; keep side equals the review counts and carries no `%`; owner and sample prices counted apart; snapshot read back and identical on every later read; net computed server-side; refusals (unknown piece, choice, horizon, platform, past date, more than five uses, rate above 1, read-only wardrobe); outcomes open and closed from later wear records.
 - **Find listings with Wonder.** One button on the sell side asks Muse Wonder (or Spark, by the server's model flag) for listing links of this piece on the chosen platform through `POST /api/ws/:id/wonder`; only the links come back to the screen, sorted by platform, and the owner enters any price they read there as evidence themselves. Details in [wonder.md](wonder.md).
 - **Browser check (390 px).** My closet → J2 → "Look at selling" and B3 → "Look at selling" open with a clean console (the `money` initialisation error reported on cc09bfe is fixed: the panel's local formatter shadowed the shared one). "Keep or let go?" renders the two sides side by side, the slider moves the net, a typed 0 turns "unknown" into an amount, a position shows "Saved and read back · d_…", and the history survives a reload.
+
+## Closet ledger at a glance (added 11/5 night)
+
+The asset board at the top of My closet and on the landing page: the closet's prices as counted numbers, one big number per currency.
+
+- **Endpoint.** `GET /api/ws/:id/ledger` → `ClosetLedger` (`engine/ledger.ts`, pure; `FeatureService.closetLedger`, named so because `ledger` on that class is the wear-record store). Sample closets get the sample rows exactly as the `market` route does.
+- **Totals.** Per currency and per source (owner-entered or sample), the sum over pieces of each piece's latest row in that currency and source: latest = newest `retrievedAt`, then a traded price before an asking price on the same day, then `evidenceId`. Each total carries the pieces it covers and how many of them are asking vs traded prices. KRW to the won, USD and EUR to the cent. Owner and sample totals are never added; currencies are never converted.
+- **On screen.** The owner's total is the big number when they entered a price in that currency; otherwise the sample total, with its Sample chip. A currency with both keeps the sample total on a smaller line, "kept apart, never added to yours". Under it: "N of M pieces have a price; M−N are not counted as zero", the net of saved positions whose every cost line was checked (each piece's latest position only), and the 60-day wear counts from the review rows.
+- **Tests** L-01 … L-09 in `tests/ledger.test.ts` (hand-built rows; the fixture closet case asserts relations only).

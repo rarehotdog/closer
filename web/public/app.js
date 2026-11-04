@@ -540,17 +540,30 @@ async function landingScreen(view) {
   chrome([]);
   const card = (href, title, line) => h('a', { class: 'card land', href }, h('div', { class: 'hd' }, title), h('p', { class: 'muted' }, line));
   const bn = h('div', { class: 'banner', id: 'banner-landing', hidden: true });
+  const boardSlot = h('div', { id: 'asset-slot' });
   view.append(
     h('h1', null, 'Keep the piece you love. Change only what feels off.'),
     h('p', { class: 'lede' }, 'Closer finishes today’s outfit from the clothes you already own, counts only the wears you confirm, and drafts the listing when a piece should go. It never posts, pays or sends anything.'),
     h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/today', id: 'start' }, 'Start with today'), h('a', { class: 'muted', href: '/try', id: 'try-link' }, 'Try the loop on three sample photos')),
+    boardSlot,
     h('div', { class: 'grid cols-3' },
       card('/today', 'Today', 'Keep one piece; Closer completes up to two outfits from what you own and have available.'),
       card('/closet', 'My closet', 'See which pieces have no confirmed wear, with the days recorded next to the count.'),
       card('/discover', 'Discover', 'Pick looks you want; see how many of their pieces you already have.')),
     bn);
-  const vb = await getJson('/api/banner/visitor');
+  const [vb] = await Promise.all([getJson('/api/banner/visitor'), landingBoard(boardSlot)]);
   showBanner(vb, bn);
+}
+
+/** The sample closet's asset board on the landing page (the same closet /today and /closet open). */
+async function landingBoard(slot) {
+  try {
+    const { id } = await closetWs();
+    const L = await getJson(`/api/ws/${id}/ledger`);
+    slot.replaceChildren(...[assetBoard(L, { sampleCloset: true, foot: h('p', { class: 'asset-foot' }, h('a', { class: 'btn small ghost', href: '/closet', id: 'board-closet' }, 'Open My closet')) })].filter(Boolean));
+  } catch {
+    slot.replaceChildren();
+  }
 }
 
 async function tryScreen(view) {
@@ -813,6 +826,57 @@ async function closetWs() {
   return { id: s.workspaceId, view: await getJson(`/api/ws/${s.workspaceId}/view`), fresh: true };
 }
 
+// ---------- asset board: the closet ledger at a glance (GET /api/ws/:id/ledger, engine/ledger.ts) ----------
+/**
+ * The owner's assets as counted numbers. Per currency ONE big number: the owner's total when they
+ * entered a price, otherwise the sample total with its Sample chip; under it the pieces it covers and
+ * the rule. Owner and sample totals are never added, and currencies are never converted.
+ * opts: { title, sampleCloset (adds the demo chip), foot (a node under the board's last line) }.
+ */
+function assetBoard(L, opts = {}) {
+  if (!L || L.ok === false || !Array.isArray(L.byCurrency)) return null;
+  const pcs = (n) => `${n} piece${n === 1 ? '' : 's'}`;
+  const title = opts.title || 'Your closet at a glance';
+  const W = L.wear || { windowDays: 60, recentWear: 0, candidates: 0, tooFewRecords: 0, exempt: 0 };
+  const wear = h('div', { class: 'asset-wear', id: 'asset-wear' },
+    h('div', { class: 'asset-stats' }, [[W.recentWear, 'worn at least once'], [W.candidates, 'no confirmed wear'], [W.tooFewRecords, 'too few records'], [W.exempt, 'left out for now']]
+      .map(([n, label]) => h('div', { class: 'asset-stat' }, h('b', null, String(n)), h('span', null, label)))),
+    h('p', { class: 'asset-caption' }, `Last ${W.windowDays} days · counted from confirmed wear records · days without a record are unknown`));
+  const board = (...kids) => h('section', { class: 'asset-board', id: 'asset-board', 'aria-label': title },
+    h('div', { class: 'asset-hd' }, h('span', { class: 'asset-eyebrow' }, title),
+      opts.sampleCloset ? h('span', { class: 'chip sample' }, 'Sample closet · demo') : null,
+      h('span', { class: 'asset-pieces' }, `${pcs(L.pieces)} confirmed`)),
+    ...kids, wear, opts.foot || null);
+  if (!L.withEvidence) {
+    return board(h('p', { class: 'asset-empty', id: 'asset-empty' }, 'No prices yet. Add one you saw on any piece.'),
+      h('p', { class: 'asset-rule' }, `${pcs(L.pieces)} in the closet; a piece without a price is not counted as zero.`));
+  }
+  const curs = L.byCurrency.map((c) => {
+    const own = c.owner.pieces > 0;
+    const big = own ? c.owner : c.sample;
+    return h('div', { class: 'asset-cur', 'data-currency': c.currency },
+      h('div', { class: 'asset-line' },
+        h('span', { class: 'asset-num' }, money(big.total, c.currency)),
+        h('span', { class: 'asset-code' }, c.currency),
+        own ? null : h('span', { class: 'chip sample' }, 'Sample')),
+      h('p', { class: 'asset-rule' }, `latest price seen on ${big.pieces} of ${pcs(L.pieces)} · ${big.trade} traded, ${big.ask} asking`),
+      own && c.sample.pieces
+        ? h('p', { class: 'asset-side' }, h('span', { class: 'chip sample' }, 'Sample'), `${money(c.sample.total, c.currency)} at sample prices on ${pcs(c.sample.pieces)} · kept apart, never added to yours`)
+        : null);
+  });
+  const without = L.pieces - L.withEvidence;
+  const evidence = h('div', { class: 'asset-ev', id: 'asset-evidence' },
+    h('div', { class: 'asset-meter', role: 'img', 'aria-label': `${L.withEvidence} of ${pcs(L.pieces)} with a price, ${without} without` },
+      h('span', { class: 'asset-meter-on', style: `flex-grow:${L.withEvidence}` }),
+      h('span', { class: 'asset-meter-off', style: `flex-grow:${without}` })),
+    h('p', { class: 'asset-rule' }, `${L.withEvidence} of ${pcs(L.pieces)} ${L.withEvidence === 1 ? 'has' : 'have'} a price; ${without} ${without === 1 ? 'is' : 'are'} not counted as zero`,
+      L.sampleOnly ? ` · ${L.sampleOnly} only from sample rows` : null));
+  const net = h('p', { class: 'asset-net', id: 'asset-net' }, h('span', { class: 'asset-k' }, 'Net'), (L.lines && L.lines.net) || '');
+  return board(h('div', { class: 'asset-curs' }, curs),
+    h('p', { class: 'asset-caption' }, 'Each currency stands alone · nothing converted · asking prices are not sales'),
+    evidence, net);
+}
+
 /** One tab bar on every page (shown on phones, where the top nav is hidden). */
 function tabbar() {
   const tabs = [['/today', 'Today'], ['/closet', 'My closet'], ['/discover', 'Discover'], ['/try', 'Photo']];
@@ -986,11 +1050,18 @@ async function closetScreen(view) {
   const { id, view: v } = await closetWs();
   const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
+  const boardSlot = h('div', { id: 'asset-slot' });
   view.append(h('h1', null, 'My closet'),
     h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose; days without a record count as unknown.'),
-    h('p', null, h('a', { class: 'btn small ghost', href: '/closet/3d' }, 'See the closet in 3D')), root);
+    boardSlot, root);
+  /** The asset board above the review window, read again after every load, saved price and saved position. */
+  async function paintBoard() {
+    let L = null;
+    try { L = await getJson(`/api/ws/${id}/ledger`); } catch { L = null; }
+    boardSlot.replaceChildren(...[assetBoard(L), h('p', { class: 'asset-after' }, h('a', { class: 'btn small ghost', href: '/closet/3d', id: 'see-3d' }, 'See it in 3D'))].filter(Boolean));
+  }
 
-  async function load() { [S.review, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/review?window=${S.window}`), getJson(`/api/ws/${id}/coverage`)]); render(); }
+  async function load() { [S.review, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/review?window=${S.window}`), getJson(`/api/ws/${id}/coverage`), paintBoard()]); render(); }
   /** 'Price evidence on N of M pieces', counted on the server from the rows that exist; sample-only pieces are named apart. */
   function coverageChips() {
     const c = S.coverage;
@@ -1216,6 +1287,7 @@ async function closetScreen(view) {
       S.calc = { platform: D.platform, price: D.price, fees: D.fees.map((f) => ({ ...f })), result: D.net && D.net.ok !== false ? D.net : null };
     }
     S.msg = r.duplicate ? h('span', { class: 'chip' }, `Already saved · ${r.decision.decisionId}`) : h('span', { class: 'chip ok' }, `Saved and read back · ${CHOICE_LABEL[choice]} · ${r.decision.decisionId}`);
+    paintBoard();
     await loadDecide();
   }
   function decidePanel() {
@@ -1310,7 +1382,7 @@ async function closetScreen(view) {
       const cur = PLATFORM_CURRENCY[plat.value];
       const r = await postJson(`/api/ws/${id}/evidence`, { itemId: S.open.itemId, platform: plat.value, priceType: type.value, amount: Number(amount.value), currency: cur, url: link.value || null, retrievedAt: new Date().toISOString().slice(0, 10), matchLevel: match.value });
       S.msg = r.ok === false ? errChip(r, 'bad', 'evidence') : h('span', { class: 'chip ok', 'data-at': 'evidence' }, 'Price saved and read back');
-      [S.market, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/market/${S.open.itemId}`), getJson(`/api/ws/${id}/coverage`)]);
+      [S.market, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/market/${S.open.itemId}`), getJson(`/api/ws/${id}/coverage`), paintBoard()]);
       if (S.decide && S.decide.itemId === S.open.itemId) S.decide.market = S.market;
       render();
     };
