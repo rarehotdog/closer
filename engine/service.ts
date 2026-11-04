@@ -134,7 +134,8 @@ export class CloserService {
   readonly mode: 'mock' | 'real';
   readonly rules: RuleSet;
   readonly spark2Mode: 'model' | 'code';
-  readonly maskTolerancePx: number;
+  /** null: per-box default (engine/validate.ts autoMaskTolerancePx); a number: CLOSER_MASK_TOLERANCE_PX. */
+  readonly maskTolerancePx: number | null;
 
   constructor(d: ServiceDeps) {
     this.ledger = d.ledger;
@@ -144,7 +145,7 @@ export class CloserService {
     this.mode = d.mode;
     this.rules = d.rules ?? ALL_RULES;
     this.spark2Mode = d.spark2Mode ?? 'model';
-    this.maskTolerancePx = d.maskTolerancePx ?? 0;
+    this.maskTolerancePx = d.maskTolerancePx ?? null;
   }
 
   // ---------------- operations ----------------
@@ -218,6 +219,11 @@ export class CloserService {
     }
   }
 
+  private noteLastCall(op: Operation, notes: readonly string[]): void {
+    if (notes.length === 0 || op.callLines.length === 0) return;
+    op.callLines[op.callLines.length - 1] += ` · ${notes.join(' · ')}`;
+  }
+
   private gate(ws: WorkspaceRow, sessionId: string | null, est: number) {
     const flags = this.ledger.getFlags();
     const now = this.clock.now();
@@ -268,9 +274,12 @@ export class CloserService {
         op.labels.push(LABELS.boxCropsOnly);
       } else return this.hold(op, ws.kind, [rs.code], null, rs.detail);
     } else {
+      const parserNotes = rs.notes ?? [];
+      this.noteLastCall(op, parserNotes); // parser diagnostics on the SAM call line
       const vs = validateSam(objects, rs.value, photo.w, photo.h, this.maskTolerancePx);
-      if (!vs.ok) return this.hold(op, ws.kind, vs.codes, null, vs.detail);
-      rs.value.forEach((r, i) => {
+      if (!vs.ok) return this.hold(op, ws.kind, vs.codes, null, [vs.detail, ...parserNotes].join(' · '));
+      this.noteLastCall(op, vs.notes); // 'mask N overshoot X px': clamped, not held
+      vs.records.forEach((r, i) => {
         arrival.set(r.id, i);
         if (r.raster) rasters.set(r.id, { x: r.raster.x, y: r.raster.y, w: r.raster.w, h: r.raster.h, rle: encodeMockRle(r.raster.bits), bits: r.raster.bits });
       });

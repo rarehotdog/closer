@@ -62,7 +62,7 @@ Totals from `docs/at_results.md`: AT cases PASS 31 · FAIL 1 · SKIP 7 (39 activ
 | Part | This build | Real when |
 |---|---|---|
 | Spark 1, SAM, Spark 2 | Mock transport, doc-shaped responses; request builders and parsers are the real ones | key window + SP-A1–A3 |
-| SAM mask decoding | Mock-only RLE (marker `R`). Documented encodings (`~`, `!`) need the official parser library, not installed → real SAM returns INVALID_MODEL_OUTPUT until a decoder is plugged into `createSamPort({ decodeMask })` | after key window |
+| SAM response parsing and mask decoding | Live text goes through the official `@meta-sam/parser` (fields read by name, masks decoded by the library, parser diagnostics on the call line); the mock transport keeps its positional records and `R` masks. Mask-in-box tolerance = max(8 px, 5 % of the prompted box side) or `CLOSER_MASK_TOLERANCE_PX`; an overshoot within it is clamped and noted ("mask N overshoot X px"), not held. `metadata.mask_encoding` is sent only with `CLOSER_SAM_METADATA=1` | first live run: write the measured overshoot here as a number (live_check prints it per record) |
 | Mask color re-measure | Works on the code-drawn sample photos (analytic pixels). Real JPEG/PNG photos need an image decoder (none included) | after key window |
 | Sample photos | 3 code-drawn color-block placeholders (plan's fallback) | muse-image-1.0 at SP-A4 |
 | Spark 2 thumbnails (256 px mask cuts) | Not produced; Spark 2 gets fact IDs only (= G3 cut #1 state) | later, if kept |

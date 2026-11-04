@@ -63,23 +63,69 @@ export function validateSpark1(raw: unknown): { ok: true; value: Spark1Output } 
 // ---------- SAM ----------
 export type SamRecord = { id: number; box: PixelBox; frameW: number; frameH: number; raster: MaskRaster | null };
 
-/** Response ID set = request ID set; sent w·h = image size; mask inside the prompted box (± tolerance). */
-export function validateSam(objects: readonly PromptObject[], records: readonly SamRecord[], w: number, h: number, tolerancePx = 0): { ok: true } | Fail {
+/** Records as code accepted them (an overshooting box clamped to its prompt box) plus one note per clamp. */
+export type SamCheck = { ok: true; records: SamRecord[]; notes: string[] } | Fail;
+
+/**
+ * Default mask-in-box tolerance: max(8 px, 5 % of the longer side of the prompted box). The docs'
+ * own example lands 1–4 px outside its prompt box (docs/status.md §4-12), so 0 would hold every run.
+ */
+export function autoMaskTolerancePx(box: PixelBox): number {
+  const side = Math.max(box.x2 - box.x1 + 1, box.y2 - box.y1 + 1);
+  return Math.max(8, Math.ceil(side * 0.05));
+}
+
+/** CLOSER_MASK_TOLERANCE_PX: a fixed tolerance in whole pixels. Unset, empty or unusable → the per-box default. */
+export function maskToleranceFromEnv(env: Record<string, string | undefined>): number | undefined {
+  const raw = (env.CLOSER_MASK_TOLERANCE_PX ?? '').trim();
+  if (raw === '') return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** The part of a raster that lies inside `box` (box must be inside the raster's own box). */
+function cropRaster(r: MaskRaster, box: PixelBox): MaskRaster {
+  const w = box.x2 - box.x1 + 1;
+  const h = box.y2 - box.y1 + 1;
+  const bits = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const from = (box.y1 - r.y + y) * r.w + (box.x1 - r.x);
+    bits.set(r.bits.subarray(from, from + w), y * w);
+  }
+  return { x: box.x1, y: box.y1, w, h, bits };
+}
+
+/**
+ * Response ID set = request ID set; sent w·h = image size; raster size = returned box size; the
+ * returned box inside the prompted box within the tolerance (undefined/null → autoMaskTolerancePx
+ * per box). A box that overshoots within the tolerance is clamped to the prompt box, its raster
+ * cropped, and noted as 'mask N overshoot X px' instead of holding the decision.
+ */
+export function validateSam(objects: readonly PromptObject[], records: readonly SamRecord[], w: number, h: number, tolerancePx?: number | null): SamCheck {
   const req = objects.map((o) => o.id).sort((a, b) => a - b).join(',');
   const res = records.map((r) => r.id).sort((a, b) => a - b).join(',');
   if (req !== res) return fail(['INVALID_MODEL_OUTPUT'], `SAM ids {${res}} != requested {${req}}`);
+  const out: SamRecord[] = [];
+  const notes: string[] = [];
   for (const r of records) {
     if (r.frameW !== w || r.frameH !== h) return fail(['INVALID_MODEL_OUTPUT'], `SAM frame ${r.frameW}x${r.frameH} != ${w}x${h}`);
     const p = objects.find((o) => o.id === r.id)!.box;
-    const t = tolerancePx;
-    if (r.box.x1 < p.x1 - t || r.box.y1 < p.y1 - t || r.box.x2 > p.x2 + t || r.box.y2 > p.y2 + t) {
-      return fail(['INVALID_MODEL_OUTPUT'], `mask ${r.id} leaves its box`);
-    }
     if (r.raster && (r.raster.w !== r.box.x2 - r.box.x1 + 1 || r.raster.h !== r.box.y2 - r.box.y1 + 1)) {
       return fail(['INVALID_MODEL_OUTPUT'], `mask ${r.id} raster size != box size`);
     }
+    const over = Math.max(0, p.x1 - r.box.x1, p.y1 - r.box.y1, r.box.x2 - p.x2, r.box.y2 - p.y2);
+    const t = tolerancePx ?? autoMaskTolerancePx(p);
+    if (over > t) return fail(['INVALID_MODEL_OUTPUT'], `mask ${r.id} leaves its box by ${over} px (tolerance ${t})`);
+    if (over === 0) {
+      out.push(r);
+      continue;
+    }
+    const box: PixelBox = { x1: Math.max(r.box.x1, p.x1), y1: Math.max(r.box.y1, p.y1), x2: Math.min(r.box.x2, p.x2), y2: Math.min(r.box.y2, p.y2) };
+    if (box.x1 > box.x2 || box.y1 > box.y2) return fail(['INVALID_MODEL_OUTPUT'], `mask ${r.id} lies outside its box`);
+    out.push({ ...r, box, raster: r.raster ? cropRaster(r.raster, box) : null });
+    notes.push(`mask ${r.id} overshoot ${over} px`);
   }
-  return { ok: true };
+  return { ok: true, records: out, notes };
 }
 
 // ---------- Spark 2 ----------

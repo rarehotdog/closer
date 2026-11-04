@@ -12,11 +12,23 @@ import { createRealTransport, resolveMode, type Mode, type Transport } from './t
 import { createMockTransport, type MockScript, type MockTransport } from './mock/transport.ts';
 import type { Ports } from './types.ts';
 
-export type PortDeps = { sleep: (ms: number) => Promise<void>; nowMs: () => number; nowIso: () => string; decodeMask?: MaskDecoder };
+export type PortDeps = {
+  sleep: (ms: number) => Promise<void>;
+  nowMs: () => number;
+  nowIso: () => string;
+  decodeMask?: MaskDecoder;
+  /** CLOSER_SAM_METADATA=1: send metadata.mask_encoding one_bit with SAM requests (off by default). */
+  samMetadata?: boolean;
+};
 
 export function portsFromTransport(transport: Transport, source: 'live' | 'mock', deps: PortDeps): Ports {
   const d: CallDeps = { transport, source, sleep: deps.sleep, nowMs: deps.nowMs, nowIso: deps.nowIso };
-  return { spark1: createSpark1Port(d), sam: createSamPort({ ...d, decodeMask: deps.decodeMask ?? officialMaskDecoder }), spark2: createSpark2Port(d), intent: createIntentPort(d) };
+  return {
+    spark1: createSpark1Port(d),
+    sam: createSamPort({ ...d, decodeMask: deps.decodeMask ?? officialMaskDecoder, metadata: deps.samMetadata === true }),
+    spark2: createSpark2Port(d),
+    intent: createIntentPort(d),
+  };
 }
 
 export function createMockPorts(lib: PhotoLibrary, deps: PortDeps, script: MockScript = {}): { ports: Ports; transport: MockTransport } {
@@ -27,6 +39,6 @@ export function createMockPorts(lib: PhotoLibrary, deps: PortDeps, script: MockS
 /** Server entry: mock by default; real only with a key (throws RealModeRefused otherwise). */
 export function createPortsFromEnv(env: Record<string, string | undefined>, lib: PhotoLibrary, deps: PortDeps): { mode: Mode; ports: Ports } {
   const mode = resolveMode(env);
-  if (mode === 'real') return { mode, ports: portsFromTransport(createRealTransport(env), 'live', deps) };
+  if (mode === 'real') return { mode, ports: portsFromTransport(createRealTransport(env), 'live', { ...deps, samMetadata: env.CLOSER_SAM_METADATA === '1' }) };
   return { mode, ports: createMockPorts(lib, deps).ports };
 }

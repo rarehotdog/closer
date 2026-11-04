@@ -24,6 +24,7 @@ import { FeatureService } from '../engine/features.ts';
 import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
 import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
 import { INTENT_CHIPS } from '../engine/intent.ts';
+import { maskToleranceFromEnv } from '../engine/validate.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
@@ -71,7 +72,8 @@ try {
   uploads = new PhotoStore(join(dirname(DB_PATH), 'photos'));
   // Sample photos for everyone; uploaded photos only through routes that check their workspace.
   const photoSource = { get: (id: string) => uploads.get(id) ?? lib.get(id) };
-  svc = new CloserService({ ledger, ports: p.ports, clock, photos: photoSource, mode });
+  // CLOSER_MASK_TOLERANCE_PX fixes the mask-in-box tolerance; unset → max(8 px, 5 % of the box side).
+  svc = new CloserService({ ledger, ports: p.ports, clock, photos: photoSource, mode, maskTolerancePx: maskToleranceFromEnv(env) });
   feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now, revision: SHA });
 } catch (e) {
   if (e instanceof RealModeRefused) {
