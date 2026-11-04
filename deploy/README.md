@@ -8,7 +8,7 @@
    - `npm run live:check`: the model list plus one Spark intent call, about $0.004.
    - `npm run live:check -- --image ./outfit.jpg`: adds one Spark photo call and one SAM call, about $0.04.
    - `npm run live:ablation`: 12 Spark calls, about $0.05.
-   - `npm run live:ui`: a local server in real mode.
+   - `npm run live:ui`: a local server in real mode. It sets `CLOSER_VISITOR_DAY_USD=3`, so the sample closets on `/today` and `/` can make live calls (about 84 photo runs a day at the plan estimates, shared by every visitor copy). Without that line the visitor cap is $0: the sentence path holds with `CALL_CAP_REACHED` and the banner says "Replay & ledger mode".
 3. **Approve each run.** Every run asks macOS for permission: "security wants to use closer-meta-model-api". The owner clicks Allow. Do not click Always Allow; asking each time keeps the owner in the loop.
 4. **What the scripts save.** Results go to `.data/live_check.json` and `.data/intent_ablation.json`, which hold statuses, timings and code checks only.
 

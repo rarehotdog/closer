@@ -35,6 +35,14 @@ export type PhotoSource = {
   get(photoId: string): { photoId: string; w: number; h: number; url: string; pixels: PixelSource } | null;
 };
 
+/**
+ * Public copies — visitor forks and the sample closets — share the visitor money caps on every model
+ * path and, in real mode, fixed sentences only. store/ledger.ts spend() sums the same rows.
+ */
+export function isPublicCopy(ws: Pick<WorkspaceRow, 'kind' | 'seedRef'>): boolean {
+  return ws.kind === 'visitor' || ws.seedRef === 'sample-closet';
+}
+
 export type Question = {
   code: ReasonCode;
   itemIds: string[];
@@ -222,7 +230,7 @@ export class CloserService {
     const flags = this.ledger.getFlags();
     const now = this.clock.now();
     const spend = this.ledger.spend({ sessionId, kstDate: kstDateOf(now) });
-    return gateModelCall({ now, kill: flags.kill, caps: flags.caps, spend, isVisitor: ws.kind === 'visitor', estMicroUsd: this.mode === 'real' ? est : 0 });
+    return gateModelCall({ now, kill: flags.kill, caps: flags.caps, spend, isVisitor: isPublicCopy(ws), estMicroUsd: this.mode === 'real' ? est : 0 });
   }
 
   private ws(workspaceId: string): WorkspaceRow {
@@ -828,12 +836,11 @@ export class CloserService {
     if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
     const sentence = String(a.sentence ?? '').trim().slice(0, 300);
     if (!sentence) return { ok: false, code: 'INVALID_TRANSITION', detail: 'write what you want to wear' };
-    // Public sample closets behave like visitors: visitor money caps, and in real mode fixed sentences only.
-    const publicCopy = ws.kind === 'visitor' || ws.seedRef === 'sample-closet';
-    if (publicCopy && this.mode === 'real' && !INTENT_CHIPS.includes(sentence)) return { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the example sentences' };
+    // Public copies (visitor forks, sample closets): in real mode fixed sentences only; gate() applies the visitor caps.
+    if (isPublicCopy(ws) && this.mode === 'real' && !INTENT_CHIPS.includes(sentence)) return { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the example sentences' };
     const op = this.newOp(ws, 'anchor', { sessionId: a.sessionId ?? null, sentence });
     this.save(op);
-    const g = this.gate(publicCopy ? { ...ws, kind: 'visitor' } : ws, op.sessionId, EST_MICRO_USD.intent);
+    const g = this.gate(ws, op.sessionId, EST_MICRO_USD.intent);
     if (!g.ok) return this.hold(op, ws.kind, [g.code], null, g.detail);
     const state = this.ledger.readState(workspaceId, { fresh: false });
     const facts = factsFromState(state);

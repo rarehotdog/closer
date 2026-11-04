@@ -64,7 +64,7 @@ Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written b
 - Prices, fees and shop links are what you entered. Closer checks no stock, fills no cart and pays nothing.
 - "No confirmed wear" needs records. Without enough of them the review says so instead of guessing.
 - The keep-or-let-go screen shows no probability and no expected value. A position is resolved only by wear records you confirm afterwards; days with no record stay unknown, so a closed question reads "1 confirmed wear in the 30 days after the decision", never "you did not wear it".
-- Spend caps: $20 for the whole app, $0.25 per session, a visitor-per-day cap set by the host (0 unless `CLOSER_VISITOR_DAY_USD` is set; the deploy kit sets 3), and the K1 kill switch.
+- Spend caps: $20 for the whole app (`CLOSER_APP_TOTAL_USD` raises it), $0.25 per visitor copy (each Try fork and each sample closet, counted across restarts from the call rows), one per-day cap for all visitor copies together (0 unless `CLOSER_VISITOR_DAY_USD` is set; `npm run live:ui` and the deploy kit set 3; $0 from 2026-11-19 KST whatever is set), and the K1 kill switch. The owner's own wardrobe counts toward the app total only.
 - One acceptance test, AT-28, fails on purpose-built grounds: its planted pin-rule mutant is masked by another rule in the fixture, so the test cannot tell them apart. The pin rule itself is covered by the F1 tests. Listed here rather than hidden.
 
 ## What comes next (not built)

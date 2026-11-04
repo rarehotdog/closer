@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { join, dirname, extname } from 'node:path';
 import { SqliteLedger } from '../store/ledger.ts';
-import { CloserService } from '../engine/service.ts';
+import { CloserService, isPublicCopy } from '../engine/service.ts';
 import { createPortsFromEnv } from '../adapters/index.ts';
 import { RealModeRefused } from '../adapters/transport.ts';
 import { createPhotoLibrary, CHIPS, rolesOutside } from '../fixtures/photos.ts';
@@ -128,7 +128,7 @@ function banner(ws: WorkspaceRow | null, sessionId: string | null) {
   const capLine = `Caps: total ${usd(caps.appTotalMicroUsd)} · visitor/day ${usd(visitorDayCap(caps, now))} · session ${usd(caps.sessionMicroUsd)} · spent ${usd(spend.appTotal)}`;
   const hero = EST_MICRO_USD.spark1 + EST_MICRO_USD.sam + EST_MICRO_USD.spark2;
   let liveText: string;
-  if (ws?.kind === 'visitor') {
+  if (ws && isPublicCopy(ws)) {
     const left = Math.max(0, Math.floor((visitorDayCap(caps, now) - spend.visitorDay) / hero));
     liveText = left > 0 ? livePerception(left) : LABELS.replayAndLedger;
   } else {
@@ -215,7 +215,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   const ws = ledger.getWorkspace(wsId);
   if (!ws) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'unknown workspace' });
   if (!ownerAllowed(req, ws)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'owner sign-in required' });
-  const sessionId = sessions.get(wsId) ?? null;
+  // Session for the $0.25 cap: a Try fork's session while this process remembers it, else the public
+  // copy itself (sample closets, and Try forks after a restart), so the cap binds per copy and is read
+  // back from the persisted call rows. The owner's own wardrobe has no session: it is behind the owner
+  // token and under the app total.
+  const sessionId = sessions.get(wsId) ?? (isPublicCopy(ws) ? wsId : null);
   const sample = ws.seedRef === 'sample-closet' ? sampleEvidence(clock.today()) : [];
   if (method === 'GET' && action === 'review') return send(res, 200, feat.review(wsId, Number(url.searchParams.get('window') ?? 60)));
   if (method === 'GET' && action === 'market' && arg) return send(res, 200, feat.market(wsId, arg, sample));

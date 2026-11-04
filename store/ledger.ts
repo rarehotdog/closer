@@ -197,13 +197,17 @@ export class SqliteLedger {
     return (this.db.prepare('SELECT * FROM calls WHERE operation_id = ? ORDER BY rowid').all(operationId) as Row[]).map(toCall);
   }
 
-  /** Spend in micro-USD: app total, visitor workspaces on the given KST date, one session. */
+  /**
+   * Spend in micro-USD: app total, public copies on the given KST date, one session. Public copies are
+   * the visitor forks and the sample closets (seed_ref 'sample-closet'): the same rows that
+   * isPublicCopy() in engine/service.ts gates with the visitor day cap.
+   */
   spend(args: { sessionId: string | null; kstDate: IsoDate }): { appTotal: number; visitorDay: number; session: number } {
     const n = (r: unknown) => Number((r as Row | undefined)?.s ?? 0);
     const appTotal = n(this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd),0) AS s FROM calls').get());
     const visitorDay = n(
       this.db
-        .prepare("SELECT COALESCE(SUM(c.cost_micro_usd),0) AS s FROM calls c JOIN workspaces w ON w.workspace_id = c.workspace_id WHERE w.kind = 'visitor' AND date(c.created_at, '+9 hours') = ?")
+        .prepare("SELECT COALESCE(SUM(c.cost_micro_usd),0) AS s FROM calls c JOIN workspaces w ON w.workspace_id = c.workspace_id WHERE (w.kind = 'visitor' OR w.seed_ref = 'sample-closet') AND date(c.created_at, '+9 hours') = ?")
         .get(args.kstDate),
     );
     const session = args.sessionId ? n(this.db.prepare('SELECT COALESCE(SUM(cost_micro_usd),0) AS s FROM calls WHERE session_id = ?').get(args.sessionId)) : 0;

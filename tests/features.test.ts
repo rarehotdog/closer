@@ -11,7 +11,7 @@ import { CloserService, type Operation } from '../engine/service.ts';
 import { FeatureService } from '../engine/features.ts';
 import { createMockPorts } from '../adapters/index.ts';
 import { textResponse, type MockScript } from '../adapters/mock/transport.ts';
-import { createPhotoLibrary } from '../fixtures/photos.ts';
+import { CHIPS, createPhotoLibrary } from '../fixtures/photos.ts';
 import { closetHistory, closetItems, sampleEvidence } from '../fixtures/closet.ts';
 import { KILL_TTL_MS, PROVISIONAL_CAPS } from '../engine/caps.ts';
 import { addDays } from '../shared/dates.ts';
@@ -19,7 +19,7 @@ import { netScenario, priceCards, sellDraft, validateEvidence, HANDOFF_STATES, P
 import { countOutfits } from '../engine/looks.ts';
 // @ts-expect-error plain browser module without type declarations; the same file the 3D screen imports
 import { buildAnatomy } from '../web/public/anatomy.js';
-import { checkIntent, rulesIntent } from '../engine/intent.ts';
+import { checkIntent, INTENT_CHIPS, rulesIntent } from '../engine/intent.ts';
 import { factsFromState } from '../engine/rules.ts';
 import type { Item } from '../shared/wardrobe.ts';
 
@@ -732,5 +732,44 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.match(c.line, /Days without a record stay unknown/);
     // The snapshots themselves did not change when the wears were recorded.
     assert.equal(t.extras.decision(t.ws, open.decision.decisionId)!.keep.wearsCounted, open.decision.keep.wearsCounted);
+  });
+});
+
+describe('Money caps: a sample closet is a public copy, counted and gated like a visitor fork', () => {
+  const SAMPLE = 'closet-sample';
+  const liveCall = (ws: string, callId: string, costMicroUsd: number) => ({
+    callId, operationId: null, workspaceId: ws, sessionId: ws, model: 'muse-spark-1.3', http: 200, latencyMs: 1, usage: null,
+    costMicroUsd, estLiveCostMicroUsd: 0, source: 'live' as const, createdAt: new Date(`${TODAY}T09:00:00+09:00`).toISOString(),
+  });
+  /** t.ws is a private rehearsal closet (seedRef 'closet'); SAMPLE is a public sample-closet copy, as /api/closet/start creates it. */
+  function withSampleCloset() {
+    const t = setup({ kind: 'rehearsal' });
+    const since = addDays(TODAY, -75);
+    t.ledger.createWorkspace({ workspaceId: SAMPLE, kind: 'rehearsal', publicReadOnly: false, seedRef: 'sample-closet', createdOn: since }, { items: closetItems(), since });
+    return t;
+  }
+
+  it('CAP-01 a live call in a sample closet counts toward the visitor day and its own session; a private closet counts toward the app total only', () => {
+    const t = withSampleCloset();
+    t.ledger.insertCall(liveCall(t.ws, 'live-private', 500));
+    t.ledger.insertCall(liveCall(SAMPLE, 'live-sample', 838));
+    assert.deepEqual(t.ledger.spend({ sessionId: SAMPLE, kstDate: TODAY }), { appTotal: 1338, visitorDay: 838, session: 838 });
+    assert.deepEqual(t.ledger.spend({ sessionId: t.ws, kstDate: TODAY }), { appTotal: 1338, visitorDay: 838, session: 500 });
+    assert.deepEqual(t.ledger.spend({ sessionId: null, kstDate: addDays(TODAY, 1) }), { appTotal: 1338, visitorDay: 0, session: 0 });
+  });
+
+  it('CAP-02 both model paths hold a sample closet at the visitor day cap ($0 here) and let the private closet run', async () => {
+    const t = withSampleCloset();
+    t.ledger.insertCall(liveCall(SAMPLE, 'live-sample', 838));
+    const photo = asOp(await t.svc.startPhoto(SAMPLE, { photoId: 'p1', sentence: CHIPS[0].text, sessionId: SAMPLE }));
+    assert.equal(photo.state, 'HOLD');
+    assert.deepEqual(photo.reasonCodes, ['CALL_CAP_REACHED']);
+    assert.equal(photo.detail, 'visitor day cap');
+    assert.equal(photo.modelCalls, 0);
+    const said = asOp(await t.svc.startAnchorFromSentence(SAMPLE, { sentence: INTENT_CHIPS[1], sessionId: SAMPLE }));
+    assert.deepEqual([said.state, said.reasonCodes, said.modelCalls], ['HOLD', ['CALL_CAP_REACHED'], 0]);
+    const own = asOp(await t.svc.startPhoto(t.ws, { photoId: 'p1', sentence: CHIPS[0].text, sessionId: t.ws }));
+    assert.ok(!own.reasonCodes.includes('CALL_CAP_REACHED'), own.detail);
+    assert.ok(own.modelCalls >= 1);
   });
 });
