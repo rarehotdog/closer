@@ -25,7 +25,7 @@ export const LABELS = {
   checkedByCode: 'Checked by code: you own it · it is available · the kept piece stayed · only flagged slots changed',
   /** Same check without flagged slots (next plan without a photo, sentence path): direction is what was checked. */
   checkedByCodeDirection: 'Checked by code: you own it · it is available · the kept piece stayed · direction met',
-  mockBanner: 'Mock mode · no Meta calls · sample data only',
+  mockBanner: 'Model calls: mock · no Meta calls · sample data only',
   killBanner: 'Model calls off (K1) · button re-plans and read-back still work',
   readOnly: 'Read-only sample · nothing can be changed here',
   notRecordedYet: 'No recorded run yet · this read-only page shows the sample wardrobe',
@@ -55,7 +55,7 @@ export function offendersChip(slots: readonly Slot[]): string {
   return `Spark: ${slots.join(', ')} feel off`;
 }
 export function livePerception(callsLeft: number): string {
-  return `Live perception: on, about ${callsLeft} photo runs left in the cap`;
+  return `Model calls: live · about ${callsLeft} photo decisions left in the cap`;
 }
 export function callPanel(c: Pick<CallRow, 'callId' | 'latencyMs' | 'costMicroUsd' | 'estLiveCostMicroUsd' | 'source' | 'model' | 'http'>): string {
   const usd = (m: number) => `$${(m / 1_000_000).toFixed(4)}`;

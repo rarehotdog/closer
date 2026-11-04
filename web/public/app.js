@@ -145,13 +145,15 @@ function thumb(item, cuts) {
 function chrome(extra) {
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.path === location.pathname || (a.dataset.path === '/closet' && location.pathname.startsWith('/closet')));
   const row = $('#chips');
-  row.replaceChildren(h('span', { class: 'chip accent' }, META.buildChip), h('span', { class: 'chip warn' }, META.labels.demoScenario), ...(extra || []));
+  row.replaceChildren(...(extra || []));
 }
+/** One line from the server (mode and sample data); the spend caps fold away and show only to a signed-in owner. */
 function showBanner(b, el = $('#banner')) {
   if (!b) { el.hidden = true; return; }
   el.hidden = false;
   el.className = `banner ${b.kind}`;
-  el.replaceChildren(...[h('strong', null, b.text), b.capLine ? h('div', { class: 'sub' }, b.capLine) : null, b.ifLive ? h('div', { class: 'sub' }, b.ifLive) : null].filter(Boolean));
+  const caps = ownerToken() && (b.capLine || b.ifLive) ? h('details', null, h('summary', null, 'Spend caps'), b.capLine ? h('div', { class: 'sub' }, b.capLine) : null, b.ifLive ? h('div', { class: 'sub' }, b.ifLive) : null) : null;
+  el.replaceChildren(...[h('strong', null, b.text), caps].filter(Boolean));
 }
 /** Proof of tooling from the server's own call records: the live chip strings as served (one per live 2xx call), and a grey chip per mock call read from its call line. */
 function callChips(op) {
@@ -234,7 +236,7 @@ function decisionUI(root, cfg) {
       h('button', { class: 'photo-pick', type: 'button', 'aria-pressed': String(S.photoId === p.photoId), onclick: () => { S.photoId = p.photoId; render(); } },
         h('img', { src: p.url, alt: `${p.title}${p.mine ? ', your photo' : ', sample photo'}` }),
         h('div', { class: 'cap' }, `${p.title}`),
-        p.mine ? h('span', { class: 'chip accent' }, 'Your photo') : h('span', { class: 'chip sample' }, META.labels.samplePhoto))));
+        p.mine ? h('span', { class: 'chip accent' }, 'Your photo') : null)));
     const fileInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/heic', capture: 'environment', id: 'upload-file', hidden: true, onchange: async (e) => {
       const f = e.target.files && e.target.files[0];
       if (!f) return;
@@ -533,7 +535,7 @@ async function landingScreen(view) {
 }
 
 async function tryScreen(view) {
-  chrome([h('span', { class: 'chip sample' }, META.labels.samplePhoto)]);
+  chrome([h('span', { class: 'chip sample' }, 'Sample photos · drawn by code · demo')]);
   view.append(h('h1', null, 'Try it on three sample outfits'),
     h('p', { class: 'lede' }, 'Pick one outfit photo and one fixed sentence. Closer keeps the piece you want, changes only what feels off, and saves nothing until you confirm.'));
   const root = h('div');
@@ -546,7 +548,7 @@ async function tryScreen(view) {
 }
 
 async function appScreen(view) {
-  chrome([h('span', { class: 'chip sample' }, META.labels.samplePhoto)]);
+  chrome([h('span', { class: 'chip sample' }, 'Sample photos · drawn by code')]);
   view.append(h('h1', null, 'My wardrobe'), ownerBar(), h('p', { class: 'lede' }, 'Owner view of the same loop. In real mode, sign in with the owner token first. Photos you upload stay on your server.'));
   const probe = await fetch('/api/ws/owner/view', { headers: authHeaders() });
   if (probe.status === 403) { view.append(h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
@@ -557,7 +559,7 @@ async function appScreen(view) {
 }
 
 async function demoScreen(view) {
-  chrome();
+  chrome([h('span', { class: 'chip sample' }, 'Sample wardrobe · recorded run · demo')]);
   const v = await getJson('/api/ws/demo-rc1/view');
   showBanner({ kind: 'mock', text: META.labels.readOnly, capLine: '', ifLive: '' });
   const out = h('div', { class: 'chip-row', id: 'write-result' });
@@ -611,7 +613,7 @@ async function adminScreen(view) {
 }
 
 async function versionScreen(view) {
-  chrome();
+  chrome([h('span', { class: 'chip accent' }, META.buildChip)]);
   const v = await getJson('/api/version');
   view.append(h('h1', null, 'Version'),
     h('section', { class: 'panel' }, h('dl', { class: 'kv' },
@@ -660,8 +662,9 @@ function tabbar() {
   return h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, tabs.map(([href, label]) => h('a', { href, class: on(href) ? 'on' : null, 'aria-current': on(href) ? 'page' : null }, label)));
 }
 
+/** One merged chip for the sample closet pages (the owner's real wardrobe shows none). */
 function sampleChips() {
-  return [h('span', { class: 'chip sample' }, 'Sample closet'), h('span', { class: 'chip sample' }, 'Synthetic wear history')];
+  return [h('span', { class: 'chip sample' }, 'Sample closet · synthetic wear history · demo')];
 }
 
 function tile(it, opts = {}) {
@@ -679,7 +682,7 @@ async function todayScreen(view) {
   const byId = () => Object.fromEntries(S.view.items.map((i) => [i.itemId, i]));
   const root = h('div');
   view.append(h('h1', null, 'What do you want to wear today?'),
-    h('p', { class: 'lede' }, wanted.length ? `Keeping ${wanted.join(' + ')}, as you picked. Closer completes the rest from what you own and have available; nothing is saved until you choose.` : 'Tap the piece you want. Closer keeps it and completes the rest from what you own and have available. Nothing is saved until you pick.'), root);
+    h('p', { class: 'lede' }, wanted.length ? `Keeping ${wanted.join(' + ')}, as you picked; Closer completes the rest from what you own and have available.` : 'Keep the piece you want; Closer completes the rest from what you own and have available.'), root);
 
   /** Brings the answer on screen: the options, or the question Closer asks back. */
   function reveal() {
@@ -826,7 +829,7 @@ async function closetScreen(view) {
   const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
   view.append(h('h1', null, 'My closet'),
-    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose. Days without any record count as unknown. You decide what happens next; Closer does not post, sell or donate anything.'),
+    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose; days without a record count as unknown.'),
     h('p', null, h('a', { class: 'btn small ghost', href: '/closet/3d' }, 'See the closet in 3D')), root);
 
   async function load() { S.review = await getJson(`/api/ws/${id}/review?window=${S.window}`); render(); }
@@ -1137,7 +1140,7 @@ async function discoverScreen(view) {
   const S = { cat: 'wedding_guest', look: null, match: null, col: null, msg: null, hidden: new Set() };
   const root = h('div');
   view.append(h('h1', null, 'Discover looks'),
-    h('p', { class: 'lede' }, 'Sample looks drawn for the demo. Pick the looks you want to be able to wear as targets; Closer counts, piece by piece, how much of each one your closet already covers, and rebuilds it with what you own first.'), root);
+    h('p', { class: 'lede' }, 'Pick the looks you want; Closer counts how much of them your closet already covers.'), root);
   const lv = { SAME: ['ok', 'same'], SIMILAR: ['warn', 'similar'], NONE: ['bad', 'missing'] };
   const bx = { FILLED: ['filled', 'have it'], PARTIAL: ['partial', 'similar'], EMPTY: ['empty', 'missing'] };
 
@@ -1359,5 +1362,9 @@ async function closet3dScreen(view) {
   else if (p === '/closet') await closetScreen(view);
   else if (p === '/closet/3d') await closet3dScreen(view);
   else if (p === '/discover') await discoverScreen(view);
+  // Value line first: the chip row and the banner sit under the h1 and lede; the build line is a footer.
+  const anchor = view.querySelector('.lede') || view.querySelector('h1');
+  if (anchor) anchor.after($('#chips'), $('#banner'));
+  view.after(h('p', { class: 'muted build' }, META.buildChip));
   document.body.dataset.ready = '1';
 })();
