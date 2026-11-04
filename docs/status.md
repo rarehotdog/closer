@@ -1,5 +1,13 @@
 # Closer — build status (mock mode)
 
+## 0. Update 2026-11-04 10:30 KST
+
+- main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests: 98 pass · 1 fail (AT-28, see §2) · the real-mode cases skip without a key. Static AT-17/18: 0 findings at repo scope.
+- Features since this file was first written: Today sentence path (Spark reads the words, code checks them), real-photo path with the official SAM decoder, 60-day review with exemptions and choices, per-platform price evidence and net calculator, hand-over drafts, Discover looks rebuilt from the closet, style targets with a counted match and an item box (11/3 night). Details: [features_1102.md](features_1102.md).
+- Caps: visitor-per-day and app-total caps can be raised by the host through `CLOSER_VISITOR_DAY_USD` and `CLOSER_APP_TOTAL_USD` (ceilings 10 and 200). The deploy kit under `deploy/` writes 3 and 20 on first install.
+- Still true: real calls 0 in this repository; the Meta adapters follow the documentation examples and stay marked unverified until `.data/live_check.json` is recorded on the owner's machine. Deploy: not done; Live URL: none yet.
+- The rest of this file is the 10/30 snapshot, kept as written.
+
 - Written: 2026-10-30 (KST evening), AI build window "10/30 12:30–10/31 08:30" of plan v2 §6-1 (L313). The §9 decision card had no answer, so this build runs under **provisional freeze (잠정 동결)**: the plan's no-answer defaults below.
 - Scope covered: §6-1 rows L313 (scaffold, shared, engine, store mock DB, Spark·SAM adapters marked unverified, AT mock, local repo) and L315 (UI five screens, Try on mock, K1, caps, banner). The L314 row (10/31 08:30–15:30) has no keyless work beyond "UI·docs·mock only".
 - Real calls: 0. Keys or tokens: 0. Deploy, push, remote, paid calls, account actions: 0. Repository is local only (`git init`, no remote).

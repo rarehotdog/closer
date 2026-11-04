@@ -4,13 +4,35 @@ Closer keeps the piece you want to wear, changes only what feels off or what cha
 
 - Live URL: not deployed yet.
 - Watch the recorded run: `/w/demo-rc1` (read-only, same state hash as the recorded run). Not recorded yet.
-- Built Oct 27–Nov 4 ET.
+- Built Oct 27–Nov 4 ET. Models: `muse-spark-1.3` and `sam-3.1` through the Meta Model API (Responses API), called directly from `adapters/`.
 
 | Built during the hackathon | Third-party | Pre-existing |
 |---|---|---|
-| All code and docs in this repository. The first commit is the scaffold only. | No runtime dependencies. Dev tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). | 0 |
+| All code and docs in this repository. The first commit is the scaffold only. | One runtime dependency: `@meta-sam/parser` 0.1.0 (Meta, SAM License), the official decoder for SAM 3.1 mask payloads. Dev tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). | 0 |
 
 License: [MIT](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+## The loop
+
+Every screen runs the same loop: the model proposes, code checks, you decide.
+
+| Step | Who | What happens | Check |
+|---|---|---|---|
+| 1 | You | One outfit photo and one sentence ("keep the navy jacket, make the rest more relaxed"). | — |
+| 2 | Model `muse-spark-1.3` | Reads the words: the piece to keep, the direction, the pieces that feel off. | Code re-checks every item ID and slot against your closet. |
+| 3 | Model `sam-3.1` | Returns one mask per garment box prompt. | Code re-measures each garment's colour from the mask pixels and asks only when it disagrees. |
+| 4 | You | Confirm the garment cards. | Nothing is saved before this. |
+| 5 | Code | Builds candidates per slot: owned, available, your rules, the kept piece locked. | Rules in `engine/rules.ts`, tested without a key. |
+| 6 | Model `muse-spark-1.3` | Picks at most two edits through one function-tool turn. | Code re-checks every item, slot and rule. The locked piece is never swapped. |
+| 7 | You | Pick an option, confirm the wear. | Shown as saved only after a fresh read from the server matches the screen. |
+
+You decide at three places: the cards (step 4), the option and the wear (step 7), and anything that leaves the app, such as posting a listing or handing a piece over. Closer drafts; you post.
+
+## What it does
+
+- **Today.** The loop above. A laundry, repair or storage button re-plans only that slot, with zero model calls.
+- **My closet.** Items registered from the decision photos. The 60-day review lists a piece as "no confirmed wear in N days" only when tracking is complete and at least half of the days have a record; you choose keep, later or exempt. "Look at selling" shows the per-platform prices you entered, never an average; when a fee is unknown, the net is shown as unknown. Hand-over drafts move DRAFT → REVIEWED → OWNER_REPORTED_DONE and never invent a link.
+- **Discover.** Sample looks by occasion, rebuilt with what you own first; only the pieces you lack become optional cards, with "N more complete outfits" counted on this closet. Pick looks as **style targets**: Closer counts, piece by piece, how much of them your closet already covers ("6 of 8 pieces · 75%") and shows an item box of every piece they ask for (have it / similar / missing). The formula is printed next to the number, and the count moves only when the closet does.
 
 ## Verify it yourself
 
@@ -20,27 +42,35 @@ License: [MIT](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Current state
 
-This build runs in **mock mode**: no Meta model is called and no key exists anywhere in the repository. The Meta adapters are written from the documentation examples and are unverified until the key window. Status, test results and next steps: [docs/status.md](docs/status.md) · [docs/at_results.md](docs/at_results.md).
+This repository runs in **mock mode** by default: no Meta model is called and no key exists anywhere in the repository. The Meta adapters are written from the documentation examples and stay marked unverified until a live run is recorded in `.data/` on the owner's machine. Status, test results and next steps: [docs/status.md](docs/status.md) · [docs/at_results.md](docs/at_results.md) · [docs/features_1102.md](docs/features_1102.md).
 
 | Command | What it does |
 |---|---|
 | `npm test` | Runs the keyless acceptance tests, unit tests and static checks; writes `docs/at_results.json` and `docs/at_results.md`. |
-| `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/app`, `/w/demo-rc1`, `/admin`, `/version`. |
+| `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/today`, `/closet`, `/discover`, `/w/demo-rc1`, `/admin`, `/version`. |
+| `npm run live:check` | Owner's machine only: one real call per model with the key read from the Keychain; writes `.data/live_check.json`. Never runs inside tests. |
 | `npm run screens` | Captures the screens into `docs/screens/` with Playwright Chromium (Playwright is not a project dependency). |
 | `npm run typecheck` | Optional `tsc` check (needs TypeScript and Node type definitions installed locally). |
 
 Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`).
 
-## How it works
-
-1. One outfit photo and one sentence go to `muse-spark-1.3` (Spark 1): garment boxes, the piece to keep, the direction, and the pieces that feel off.
-2. Code turns the boxes into pixel box prompts with its own object IDs; `sam-3.1` returns one mask per ID. Code re-measures each garment's color from the mask pixels and asks only about a garment whose color disagrees.
-3. Nothing is saved until the owner confirms the cards.
-4. Code builds the candidate list per slot (owned, available, owner rules, pinned item kept, only flagged slots open). A second `muse-spark-1.3` call (Spark 2) picks at most two edits through one function-tool turn; code re-checks every item, slot and rule.
-5. A selection or a wear is shown as saved only after a fresh read from the server matches the screen.
-6. A laundry, repair or storage button re-plans only that slot, with zero model calls.
-
 Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written before any call` — not measured yet.
+
+## Known limits
+
+- The demo closet is a sample closet with code-drawn sample photos, marked as such on screen. One real-photo path exists for the owner workspace and needs the owner token in real mode.
+- Prices, fees and shop links are what you entered. Closer checks no stock, fills no cart and pays nothing.
+- "No confirmed wear" needs records. Without enough of them the review says so instead of guessing.
+- Spend caps: $20 for the whole app, $0.25 per session, a visitor-per-day cap set by the host (0 unless `CLOSER_VISITOR_DAY_USD` is set; the deploy kit sets 3), and the K1 kill switch.
+- One acceptance test, AT-28, fails on purpose-built grounds: its planted pin-rule mutant is masked by another rule in the fixture, so the test cannot tell them apart. The pin rule itself is covered by the F1 tests. Listed here rather than hidden.
+
+## What comes next (not built)
+
+- Import your order history as a file you export yourself, so each piece carries what you paid and when.
+- A closet ledger with its denominator on screen: pieces with a price on record out of all pieces, and what each would leave in your hand, per platform.
+- Resale evidence from official platform APIs where they exist; otherwise a screenshot you paste. Never averaged across platforms.
+- Donation points near you from a public directory, using your location only when you allow it.
+- A 3D view of the closet by layer (outer, top, bottom, shoes), drawn from the same counts, in three.js.
 
 ## FAQ
 
