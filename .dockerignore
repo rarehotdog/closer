@@ -1,0 +1,13 @@
+# Not needed in the image, or must never be in it (secrets, local data, git history).
+.git
+.github
+node_modules
+.data
+.closer
+.env*
+**/*.log
+**/.DS_Store
+docs/screens
+deploy
+Dockerfile
+.dockerignore

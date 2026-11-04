@@ -36,6 +36,9 @@ This uses a VM that is separate from any other project's VM.
 `gcloud compute instances delete closer --zone asia-northeast3-a --project PROJECT_ID`, then
 `gcloud compute addresses delete closer-ip --region asia-northeast3 --project PROJECT_ID`.
 
+**Container.** `docker build --build-arg BUILD_SHA=$(git rev-parse HEAD) -t closer .` builds the image from `Dockerfile`: node:22-slim, runtime dependencies only (`npm ci --omit=dev --ignore-scripts`), the sha written to `BUILD_SHA` so `/version` shows it; `.dockerignore` keeps `.git`, `node_modules`, `.data`, `.env*` and `deploy/` out. `docker run --rm -p 8787:8787 -v closer-data:/data closer` serves mock mode on http://localhost:8787. The ledger and photos live in the `/data` volume (`CLOSER_DB_PATH=/data/closer.db`), and the image sets `CLOSER_HOST=0.0.0.0` because outside a container the server binds 127.0.0.1 only. For real mode add `--env-file` with `CLOSER_MODE=real`, `MODEL_API_KEY`, `CLOSER_ADMIN_TOKEN` and the cap lines from the VM recipe; the key never goes on a shared command line or into the image.
+
 **What has been verified.**
 - Checked: script syntax; the key move on a test file (the key is replaced and the file stays mode 600); the server reading `BUILD_SHA` in an unpacked archive.
-- Not run yet: the gcloud and apt steps themselves, which need the owner's account.
+- Checked (11/4, a machine without a Docker daemon): the container recipe step by step outside Docker. A copy of the tree filtered by `.dockerignore`, `npm ci --omit=dev --ignore-scripts`, a `BUILD_SHA` file, then `web/server.ts` started with the image's environment answered `/api/version` with that sha, served `/`, `/today`, `/closet/3d`, the three.js vendor file and `/api/ws/demo-rc1/view`, and was reachable on a non-loopback address (what `docker -p` needs); without `CLOSER_HOST` it stays loopback-only.
+- Not run yet: `docker build` itself, and the gcloud and apt steps, which need the owner's account.
