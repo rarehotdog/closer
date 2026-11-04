@@ -3,15 +3,19 @@
 // ask_owner. parallel_tool_calls:false, tool_choice not sent (only "auto" is supported), store:false.
 // Arguments are re-checked by code (engine/validate.ts). A text reply is NO_ACTION.
 import { SLOTS } from '../shared/wardrobe.ts';
-import { statusToReason } from '../engine/retry.ts';
 import { ASK_CODES } from '../engine/validate.ts';
-import { callResponses, EST_MICRO_USD, functionCalls, outputText, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
+import { callResponses, EST_MICRO_USD, functionCalls, httpFailure, outputText, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
 import type { Spark2Port, Spark2Request } from './types.ts';
 
+/**
+ * Strict schemas carry only type, enum, required and additionalProperties: minItems/maxItems are
+ * not in the structured-output doc's strict-mode list. "One or two options" is said in the
+ * description and the instructions and enforced by engine/validate.ts validateSpark2.
+ */
 export const PROPOSE_EDIT_TOOL = {
   type: 'function',
   name: 'propose_edit',
-  description: 'Propose at most two edits. Use only candidate item IDs given per slot.',
+  description: 'Propose one or two edits, never more. Use only candidate item IDs given per slot.',
   strict: true,
   parameters: {
     type: 'object',
@@ -20,8 +24,6 @@ export const PROPOSE_EDIT_TOOL = {
     properties: {
       options: {
         type: 'array',
-        minItems: 1,
-        maxItems: 2,
         items: {
           type: 'object',
           additionalProperties: false,
@@ -66,7 +68,7 @@ export const ASK_OWNER_TOOL = {
 
 export const SPARK2_INSTRUCTIONS = [
   'You help the owner of these clothes edit one outfit. Call exactly one tool.',
-  'propose_edit: at most two options using only the candidate item IDs listed per slot.',
+  'propose_edit: one or two options (never more) using only the candidate item IDs listed per slot.',
   'Option 1 changes as few items as possible. Option 2 is closer to what the owner said, with at most two changes.',
   'Keep pinned items. Change only flagged slots; if none are flagged, any unpinned slot.',
   'Cite reasons only with IDs from factIds.',
@@ -105,10 +107,7 @@ export function createSpark2Port(deps: CallDeps): Spark2Port {
         price: (u) => sparkCostMicroUsd(u, EST_MICRO_USD.spark2),
       });
       const f = outcome.final;
-      if (!f || f.status < 200 || f.status >= 300) {
-        const status = f?.status ?? 0;
-        return { ok: false, http: status, code: statusToReason(status), detail: `Spark 2 HTTP ${status}`, calls };
-      }
+      if (!f || f.status < 200 || f.status >= 300) return httpFailure('Spark 2', f, calls);
       const fc = functionCalls(f.json);
       if (fc.length > 1) return { ok: false, http: f.status, code: 'INVALID_MODEL_OUTPUT', detail: 'more than one tool call', calls };
       if (fc.length === 1) return { ok: true, value: { kind: 'function_call', name: fc[0].name, arguments: fc[0].arguments }, calls };

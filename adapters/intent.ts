@@ -5,8 +5,7 @@
 // re-checks everything (engine/intent.ts checkIntent).
 import { DIRECTIONS } from '../shared/wardrobe.ts';
 import type { IntentItem } from '../engine/intent.ts';
-import { callResponses, EST_MICRO_USD, outputText, parseJsonOutput, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
-import { statusToReason } from '../engine/retry.ts';
+import { callResponses, EST_MICRO_USD, httpFailure, outputText, parseJsonOutput, SPARK_MODEL, sparkCostMicroUsd, type CallDeps } from './responses.ts';
 import type { PortResult } from './types.ts';
 
 export const INTENT_SCHEMA_NAME = 'closer_intent';
@@ -61,10 +60,7 @@ export function createIntentPort(deps: CallDeps): IntentPort {
         price: (u) => sparkCostMicroUsd(u, EST_MICRO_USD.intent),
       });
       const f = outcome.final;
-      if (!f || f.status < 200 || f.status >= 300) {
-        const status = f?.status ?? 0;
-        return { ok: false, http: status, code: statusToReason(status), detail: `Spark (intent) HTTP ${status}`, calls };
-      }
+      if (!f || f.status < 200 || f.status >= 300) return httpFailure('Spark (intent)', f, calls);
       const text = outputText(f.json);
       if (text === null) return { ok: false, http: f.status, code: 'INVALID_MODEL_OUTPUT', detail: 'no output_text', calls };
       try {

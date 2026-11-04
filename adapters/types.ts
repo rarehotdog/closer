@@ -11,7 +11,8 @@ import type { Fact } from '../engine/facts.ts';
 export type CallDraft = Omit<CallRow, 'operationId' | 'workspaceId' | 'sessionId'>;
 
 export type PortResult<T> =
-  | { ok: true; value: T; calls: CallDraft[] }
+  /** notes: parser diagnostics worth a line in the call panel (live SAM); never model text. */
+  | { ok: true; value: T; calls: CallDraft[]; notes?: string[] }
   | { ok: false; http: number; code: ReasonCode; detail: string; calls: CallDraft[] };
 
 export type Spark1Request = { imageUrl: string; sentence: string };

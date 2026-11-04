@@ -3,7 +3,8 @@
 // row, read output text / function calls, and price usage.
 import { randomUUID } from 'node:crypto';
 import type { CallSource } from '../shared/ledger.ts';
-import { sendWithRetry, type RetryOutcome } from '../engine/retry.ts';
+import type { ReasonCode } from '../shared/reasons.ts';
+import { sendWithRetry, statusToReason, type HttpResult, type RetryOutcome } from '../engine/retry.ts';
 import type { Transport } from './transport.ts';
 import type { CallDraft } from './types.ts';
 
@@ -70,6 +71,17 @@ export async function callResponses(
     };
   });
   return { outcome, calls };
+}
+
+/**
+ * Non-2xx (or no response at all) → port failure. The reason-code list is fixed (§4-3, 30 names),
+ * so 401/403 keep META_API_UNAVAILABLE, but the detail names the key: a mis-pasted key must not
+ * read as a Meta outage on the first live run.
+ */
+export function httpFailure(label: string, final: HttpResult | null, calls: CallDraft[]): { ok: false; http: number; code: ReasonCode; detail: string; calls: CallDraft[] } {
+  const status = final?.status ?? 0;
+  const hint = status === 401 || status === 403 ? ': check the key (MODEL_API_KEY rejected)' : status === 0 ? ' (no response from the transport)' : '';
+  return { ok: false, http: status, code: statusToReason(status), detail: `${label} HTTP ${status}${hint}`, calls };
 }
 
 /** Concatenated output_text parts of message items (Responses API `output` array, with live fallbacks). */

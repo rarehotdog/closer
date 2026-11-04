@@ -5,7 +5,7 @@
 1. **Store the key once.** The owner types the key at a hidden prompt:
    `security add-generic-password -a "$USER" -s closer-meta-model-api -T "" -w`
 2. **Run the live scripts.** Anyone at that Mac, Antigravity included, can now run:
-   - `npm run live:check`: the model list plus one Spark intent call, about $0.004.
+   - `npm run live:check`: the model list, one Spark intent call and one Spark 2 call, about $0.02.
    - `npm run live:check -- --image ./outfit.jpg`: adds one Spark photo call and one SAM call, about $0.04.
    - `npm run live:ablation`: 12 Spark calls, about $0.05.
    - `npm run live:ui`: a local server in real mode. It sets `CLOSER_VISITOR_DAY_USD=3`, so the sample closets on `/today` and `/` can make live calls (about 84 photo runs a day at the plan estimates, shared by every visitor copy). Without that line the visitor cap is $0: the sentence path holds with `CALL_CAP_REACHED` and the banner says "Replay & ledger mode".

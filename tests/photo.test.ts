@@ -36,8 +36,10 @@ test('PH-01 official decoder reads the docs\' own lossless example (27 × 60)', 
   assert.throws(() => officialMaskDecoder({ h: 1, w: 1, enc: '?', payload: '' }), /unknown mask encoding/);
 });
 
-test('PH-02 SAM request asks for one_bit masks', () => {
-  assert.deepEqual(buildSamBody({ imageUrl: 'data:image/png;base64,AA==', prompt: 'x' }).metadata, { mask_encoding: 'one_bit' });
+test('PH-02 SAM request sends metadata.mask_encoding only when asked (CLOSER_SAM_METADATA=1)', () => {
+  const req = { imageUrl: 'data:image/png;base64,AA==', prompt: 'x' };
+  assert.equal('metadata' in buildSamBody(req), false, 'off by default: box prompts return one_bit anyway');
+  assert.deepEqual(buildSamBody(req, { metadata: true }).metadata, { mask_encoding: 'one_bit' });
 });
 
 test('PH-03 PNG round trip and JPEG size header', () => {
