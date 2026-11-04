@@ -684,3 +684,4 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
   .rail-num { font-size: 20px; }
   .rail-head h1 { font-size: 30px; }
 }
+.land-rail { margin: 4px 0 18px; }

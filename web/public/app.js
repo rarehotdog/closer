@@ -541,28 +541,45 @@ async function landingScreen(view) {
   const card = (href, title, line) => h('a', { class: 'card land', href }, h('div', { class: 'hd' }, title), h('p', { class: 'muted' }, line));
   const bn = h('div', { class: 'banner', id: 'banner-landing', hidden: true });
   const boardSlot = h('div', { id: 'asset-slot' });
+  const railSlot = h('div', { class: 'stage rail-stage land-rail', id: 'land-rail' });
   view.append(
     h('h1', null, 'Keep the piece you love. Change only what feels off.'),
-    h('p', { class: 'lede' }, 'Closer finishes today’s outfit from the clothes you already own, counts only the wears you confirm, and drafts the listing when a piece should go. It never posts, pays or sends anything.'),
-    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/today', id: 'start' }, 'Start with today'), h('a', { class: 'muted', href: '/try', id: 'try-link' }, 'Try the loop on three sample photos')),
+    h('p', { class: 'lede' }, 'Today’s outfit from clothes you own. Only confirmed wears count. Closer never posts or pays.'),
+    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/today', id: 'start' }, 'Start with today'), h('a', { class: 'muted', href: '/try', id: 'try-link' }, 'Try three sample photos')),
+    railSlot,
     boardSlot,
     h('div', { class: 'grid cols-3' },
-      card('/today', 'Today', 'Keep one piece; Closer completes up to two outfits from what you own and have available.'),
-      card('/closet', 'My closet', 'See which pieces have no confirmed wear, with the days recorded next to the count.'),
-      card('/discover', 'Discover', 'Pick looks you want; see how many of their pieces you already have.')),
+      card('/today', 'Today', 'Keep one piece. Finish the outfit with what you own.'),
+      card('/closet', 'My closet', 'Confirmed wears and the prices you saw, counted.'),
+      card('/discover', 'Discover', 'Looks you want, counted against your closet.')),
     bn);
-  const [vb] = await Promise.all([getJson('/api/banner/visitor'), landingBoard(boardSlot)]);
+  // One sample closet for the rail and the board: both read the same workspace.
+  const ws = closetWs();
+  const [vb] = await Promise.all([getJson('/api/banner/visitor'), landingBoard(boardSlot, ws), landingRail(railSlot, ws)]);
   showBanner(vb, bn);
 }
 
 /** The sample closet's asset board on the landing page (the same closet /today and /closet open). */
-async function landingBoard(slot) {
+async function landingBoard(slot, ws) {
   try {
-    const { id } = await closetWs();
+    const { id } = await ws;
     const L = await getJson(`/api/ws/${id}/ledger`);
     slot.replaceChildren(...[assetBoard(L, { sampleCloset: true, foot: h('p', { class: 'asset-foot' }, h('a', { class: 'btn small ghost', href: '/closet', id: 'board-closet' }, 'Open My closet')) })].filter(Boolean));
   } catch {
     slot.replaceChildren();
+  }
+}
+
+/** The same closet hung on the rail at the top of the page; a tap opens that piece's keep-or-let-go question. */
+async function landingRail(slot, ws) {
+  try {
+    const { id, view: v } = await ws;
+    const [L, mod] = await Promise.all([getJson(`/api/ws/${id}/ledger`), import('/static/rail3d.js')]);
+    const pieces = (v.items || []).map((it) => ({ itemId: it.itemId, slot: it.slot, type: it.type, rgb: (META.palette && META.palette[it.color]) || null, availability: it.availability || 'AVAILABLE', photo: null }));
+    const rail = mod.mountRail3d(slot, pieces, { tags: L ? L.tags : null, money, onPick: (itemId) => { location.href = `/closet?decide=${encodeURIComponent(itemId)}`; }, label: `This closet on a rail: ${pieces.length} pieces. Tap one for its keep-or-let-go question.` });
+    if (!rail) slot.remove();
+  } catch {
+    slot.remove();
   }
 }
 
