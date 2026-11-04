@@ -6,11 +6,11 @@ import type { IsoDate } from '../shared/dates.ts';
 import type { Item } from '../shared/wardrobe.ts';
 
 /** Korean platforms first, then international ones (Meta's hackathon is global). */
-export const PLATFORMS = ['KREAM', 'KARROT', 'BUNJANG', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'VINTED'] as const;
+export const PLATFORMS = ['KREAM', 'KARROT', 'BUNJANG', 'MUSINSA_USED', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'STOCKX', 'VINTED'] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export type Currency = 'KRW' | 'USD' | 'EUR';
-export const KOREAN_PLATFORMS: readonly Platform[] = ['KREAM', 'KARROT', 'BUNJANG'];
+export const KOREAN_PLATFORMS: readonly Platform[] = ['KREAM', 'KARROT', 'BUNJANG', 'MUSINSA_USED'];
 export type PlatformInfo = { name: string; region: string; currency: Currency; notes: string[] };
 /** Boundaries the owner should see before relying on a platform [확인 범위: Sol 11/1 탭 근거 목록]. */
 export const PLATFORM_INFO: Record<Platform, PlatformInfo> = {
@@ -33,6 +33,13 @@ export const PLATFORM_INFO: Record<Platform, PlatformInfo> = {
     notes: [
       'Listings show asking prices; the final price is agreed with the buyer',
       'Check its current fees and payment options on its own pages before relying on a net',
+    ],
+  },
+  MUSINSA_USED: {
+    name: 'Musinsa Used (무신사 유즈드)', region: 'Korea', currency: 'KRW',
+    notes: [
+      'Check which categories, brands and conditions it accepts before listing',
+      'A listed price is an asking price unless marked as sold; check its current fees and shipping on its own pages before relying on a net',
     ],
   },
   POSHMARK: {
@@ -61,6 +68,13 @@ export const PLATFORM_INFO: Record<Platform, PlatformInfo> = {
     notes: [
       'Prices and fees differ by country site',
       'Check whether it serves sellers in your country before posting',
+    ],
+  },
+  STOCKX: {
+    name: 'StockX', region: 'International, by country', currency: 'USD',
+    notes: [
+      'A listed price is an asking price unless marked as a sale; check which categories it accepts',
+      'Fees and shipping differ by country; check them on its own pages before relying on a net',
     ],
   },
   VINTED: {
@@ -255,9 +269,11 @@ export function sellDraft(item: Item, platform: Platform, f: OwnerFacts, price: 
     `사이즈: ${f.size ?? '[확인]'} / 상태: ${f.condition ?? '[확인]'}${f.purchased ? ` / 구매 시기: ${f.purchased}` : ''}`,
     '실측: [확인]',
     price ? `가격: ${fmt(price.amount, price.currency)}` : '가격: [확인]',
-    platform === 'BUNJANG' ? '거래 방법(택배·직거래)은 채팅으로 정해요.' : '직거래 장소·시간은 채팅으로 정해요.',
+    platform === 'BUNJANG' ? '거래 방법(택배·직거래)은 채팅으로 정해요.'
+      : platform === 'MUSINSA_USED' ? '거래 방법·배송: [확인] (무신사 유즈드가 받는 품목·상태인지 먼저 확인하세요.)'
+        : '직거래 장소·시간은 채팅으로 정해요.',
   ].join('\n');
-  return { title: name, body, toCheck };
+  return { title: name, body, toCheck: platform === 'MUSINSA_USED' ? [...toCheck, 'whether Musinsa Used accepts this item'] : toCheck };
 }
 
 /** Donation hand-off: a checklist, not a pickup booking. Acceptance, pickup and receipts are the organisation's call. */

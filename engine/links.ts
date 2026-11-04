@@ -11,10 +11,12 @@ const HOSTS: [RegExp, Platform][] = [
   [/(^|\.)kream\.co\.kr$/, 'KREAM'],
   [/(^|\.)(daangn\.com|karrotmarket\.com)$/, 'KARROT'],
   [/(^|\.)bunjang\.co\.kr$/, 'BUNJANG'],
+  [/(^|\.)musinsa\.com$/, 'MUSINSA_USED'],
   [/(^|\.)poshmark\.(com|ca|com\.au|in)$/, 'POSHMARK'],
   [/(^|\.)ebay\.[a-z.]+$/, 'EBAY'],
   [/(^|\.)grailed\.com$/, 'GRAILED'],
   [/(^|\.)depop\.com$/, 'DEPOP'],
+  [/(^|\.)stockx\.com$/, 'STOCKX'],
   [/(^|\.)vinted\.[a-z.]+$/, 'VINTED'],
 ];
 
