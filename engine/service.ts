@@ -16,6 +16,7 @@ import type { SqliteLedger, StoredOperation } from '../store/ledger.ts';
 import { stateHashOf } from '../store/ledger.ts';
 import type { CallDraft, Ports, Spark2Request } from '../adapters/types.ts';
 import { EST_MICRO_USD } from '../adapters/responses.ts';
+import { WONDER_EST_MICRO_USD, type WonderRequest, type WonderResult } from '../adapters/wonder.ts';
 import { checkHumanAction, checkTransition } from './stateMachine.ts';
 import { ALL_RULES, factsFromState, formalitySum, pinHardConflict, withFormality, type RuleSet, type WardrobeFacts } from './rules.ts';
 import { buildSolverInput, chooseOptions, type SolverInput } from './solver.ts';
@@ -890,5 +891,36 @@ export class CloserService {
       seededLabel: seeded > 0 ? sampleWardrobe(seeded) : null,
       today: this.clock.today(),
     };
+  }
+
+  // ---------------- Muse Wonder: a direct call the owner controls ----------------
+  /**
+   * One Responses-API call to Muse Wonder (or Spark, by model id) with the owner's prompt. The kill
+   * switch, the caps and the call ledger apply exactly as for the photo loop; the answer is returned
+   * to the caller and nothing is written to the wardrobe. Public copies never call it in real mode.
+   */
+  async askWonder(workspaceId: string, a: { request: WonderRequest; sessionId?: string | null }): Promise<
+    { ok: true; result: WonderResult; callLines: string[]; liveChips: string[]; mode: Mode } | { ok: false; code: ReasonCode; detail: string }
+  > {
+    const ws = this.ws(workspaceId);
+    if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
+    const publicCopy = ws.kind === 'visitor' || ws.seedRef === 'sample-closet';
+    if (publicCopy && this.mode === 'real') return { ok: false, code: 'SCOPE_DENIED', detail: 'Wonder runs only on your own wardrobe' };
+    const prompt = String(a.request.prompt ?? '').trim();
+    if (!prompt) return { ok: false, code: 'INVALID_TRANSITION', detail: 'write a prompt' };
+    const sessionId = a.sessionId ?? null;
+    const g = this.gate(ws, sessionId, WONDER_EST_MICRO_USD);
+    if (!g.ok) return { ok: false, code: g.code, detail: g.detail };
+    const r = await this.ports.wonder.ask({ ...a.request, prompt });
+    const callLines: string[] = [];
+    const liveChips: string[] = [];
+    for (const c of r.calls) {
+      this.ledger.insertCall({ ...c, operationId: null, workspaceId, sessionId });
+      callLines.push(callPanel(c));
+      const chip = liveChip(c);
+      if (chip) liveChips.push(chip);
+    }
+    if (!r.ok) return { ok: false, code: r.code, detail: r.detail };
+    return { ok: true, result: r.value, callLines, liveChips, mode: this.mode };
   }
 }

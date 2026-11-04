@@ -8,6 +8,7 @@ import { garmentShape, spark1Truth, type PhotoLibrary } from '../../fixtures/pho
 import type { HttpResult } from '../../engine/retry.ts';
 import type { Transport, TransportRequest } from '../transport.ts';
 import { SAM_MODEL } from '../responses.ts';
+import { WONDER_MODEL } from '../wonder.ts';
 import type { Spark2Facts } from '../types.ts';
 import { rulesIntent, type IntentItem } from '../../engine/intent.ts';
 
@@ -23,9 +24,11 @@ export type MockScript = {
   spark2?: (n: number, facts: Spark2Facts & { correction: unknown }) => Reply;
   /** Scripted reply for the n-th intent call; null → keyword baseline answer. */
   intent?: (n: number, input: { sentence: string; items: IntentItem[] }) => Reply;
+  /** Scripted reply for the n-th Muse Wonder call (the full request body is passed); null → a canned "mock" line. */
+  wonder?: (n: number, body: Record<string, unknown>) => Reply;
 };
 
-export type MockLogEntry = { kind: 'spark1' | 'sam' | 'spark2' | 'intent'; n: number; status: number };
+export type MockLogEntry = { kind: 'spark1' | 'sam' | 'spark2' | 'intent' | 'wonder'; n: number; status: number };
 export type MockTransport = Transport & { log: MockLogEntry[] };
 
 let seq = 0;
@@ -133,19 +136,25 @@ function spark2Default(facts: Spark2Facts): MockReply {
 }
 
 export function createMockTransport(lib: PhotoLibrary, script: MockScript = {}): MockTransport {
-  const counts = { spark1: 0, sam: 0, spark2: 0, intent: 0 };
+  const counts = { spark1: 0, sam: 0, spark2: 0, intent: 0, wonder: 0 };
   const log: MockLogEntry[] = [];
   const t = async (req: TransportRequest): Promise<HttpResult> => {
     const body = req.body;
     const { text, imageUrl } = userContent(body);
-    let kind: 'spark1' | 'sam' | 'spark2' | 'intent';
+    let kind: 'spark1' | 'sam' | 'spark2' | 'intent' | 'wonder';
+    const schemaName = (body.text as { format?: { name?: string } } | undefined)?.format?.name ?? '';
+    const asksSearch = Array.isArray(body.include) && (body.include as unknown[]).includes('web_search_call.results');
     if (body.model === SAM_MODEL) kind = 'sam';
-    else if ((body.text as { format?: { name?: string } } | undefined)?.format?.name === 'closer_intent') kind = 'intent';
+    else if (body.model === WONDER_MODEL || asksSearch || schemaName.startsWith('wonder_')) kind = 'wonder';
+    else if (schemaName === 'closer_intent') kind = 'intent';
     else if (Array.isArray(body.tools)) kind = 'spark2';
     else kind = 'spark1';
     const n = counts[kind]++;
     let reply: MockReply | null = null;
-    if (kind === 'intent') {
+    if (kind === 'wonder') {
+      // No canned answer pretends to be a model: the text says it is a mock line; a schema gets an empty object.
+      reply = (await script.wonder?.(n, body)) ?? textResponse(String(body.model), schemaName ? '{}' : 'MOCK · Muse Wonder was not called. This is a canned line from mock mode.', 'wonder');
+    } else if (kind === 'intent') {
       const input = JSON.parse(text) as { sentence: string; items: IntentItem[] };
       reply = (await script.intent?.(n, input)) ?? textResponse('muse-spark-1.3', JSON.stringify(rulesIntent(input.sentence, input.items)), 'intent');
     } else if (kind === 'spark1') {

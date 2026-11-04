@@ -46,4 +46,4 @@ export interface Spark2Port {
   propose(req: Spark2Request): Promise<PortResult<Spark2Raw>>;
 }
 
-export type Ports = { spark1: Spark1Port; sam: SamPort; spark2: Spark2Port; intent: import('./intent.ts').IntentPort };
+export type Ports = { spark1: Spark1Port; sam: SamPort; spark2: Spark2Port; intent: import('./intent.ts').IntentPort; wonder: import('./wonder.ts').WonderPort };

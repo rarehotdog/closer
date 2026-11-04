@@ -17,6 +17,8 @@ import { NAMED_RGB } from '../engine/color.ts';
 import { addDays, isIsoDate, kstDateOf } from '../shared/dates.ts';
 import { BUILD_CHIP, LABELS, livePerception, sampleWardrobe } from '../shared/labels.ts';
 import { EST_MICRO_USD } from '../adapters/responses.ts';
+import { wonderRequestFromJson } from '../adapters/wonder.ts';
+import { evidenceLinks } from '../engine/links.ts';
 import type { WorkspaceRow } from '../shared/ledger.ts';
 import { ExtrasStore } from '../store/extras.ts';
 import { PhotoStore } from '../store/photos.ts';
@@ -307,6 +309,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       return send(res, 200, feat.moveDraft(wsId, { draftId: String(b.draftId), to: String(b.to), body: typeof b.body === 'string' ? b.body : undefined }));
     case 'target':
       return send(res, 200, feat.setTarget(wsId, { lookId: String(b.lookId ?? ''), on: b.on === true }));
+    case 'wonder': {
+      // The owner's own prompt to Muse Wonder (or Spark). Caps and the kill switch apply; links come back sorted by platform for the owner to open.
+      const parsed = wonderRequestFromJson(b);
+      if (typeof parsed === 'string') return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: parsed });
+      const r = await svc.askWonder(wsId, { request: parsed, sessionId });
+      return send(res, 200, r.ok ? { ...r, links: evidenceLinks(r.result) } : r);
+    }
     case 'decide':
       return send(res, 200, feat.decide(wsId, {
         itemId: String(b.itemId ?? ''), choice: String(b.choice ?? ''), horizonDays: b.horizonDays === undefined ? undefined : Number(b.horizonDays),
