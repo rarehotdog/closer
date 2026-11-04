@@ -4,6 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { Exemption, ReviewAction } from '../engine/review.ts';
 import type { Evidence, Handoff, HandoffState } from '../engine/market.ts';
+import type { DecisionSnapshot } from '../engine/decision.ts';
 
 type Row = Record<string, unknown>;
 
@@ -21,7 +22,29 @@ export class ExtrasStore {
       CREATE TABLE IF NOT EXISTS evidence (evidence_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
       CREATE TABLE IF NOT EXISTS handoffs (draft_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
       CREATE TABLE IF NOT EXISTS look_targets (workspace_id TEXT, look_id TEXT, at TEXT, PRIMARY KEY (workspace_id, look_id));
+      CREATE TABLE IF NOT EXISTS decisions (decision_id TEXT PRIMARY KEY, workspace_id TEXT, item_id TEXT, at TEXT, body TEXT);
     `);
+  }
+
+  // ---- keep-or-let-go decisions (insert only: a snapshot is never edited or deleted) ----
+  addDecision(ws: string, d: DecisionSnapshot): DecisionSnapshot {
+    const body = JSON.stringify(d);
+    this.db.prepare('INSERT INTO decisions VALUES (?,?,?,?,?)').run(d.decisionId, ws, d.itemId, d.at, body);
+    const back = this.decision(ws, d.decisionId);
+    if (!back || JSON.stringify(back) !== body) throw new Error('READBACK_MISMATCH: decision');
+    return back;
+  }
+
+  decision(ws: string, decisionId: string): DecisionSnapshot | null {
+    const r = this.db.prepare('SELECT body FROM decisions WHERE workspace_id = ? AND decision_id = ?').get(ws, decisionId) as Row | undefined;
+    return r ? (JSON.parse(String(r.body)) as DecisionSnapshot) : null;
+  }
+
+  decisions(ws: string, itemId?: string): DecisionSnapshot[] {
+    const rows = itemId
+      ? (this.db.prepare('SELECT body FROM decisions WHERE workspace_id = ? AND item_id = ? ORDER BY at, decision_id').all(ws, itemId) as Row[])
+      : (this.db.prepare('SELECT body FROM decisions WHERE workspace_id = ? ORDER BY at, decision_id').all(ws) as Row[]);
+    return rows.map((r) => JSON.parse(String(r.body)) as DecisionSnapshot);
   }
 
   // ---- style targets (looks the owner wants to be able to wear) ----

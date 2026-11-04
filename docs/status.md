@@ -1,8 +1,9 @@
 # Closer — build status (mock mode)
 
-## 0. Update 2026-11-04 10:30 KST
+## 0. Update 2026-11-04 23:30 KST
 
-- main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests: 98 pass · 1 fail (AT-28, see §2) · the real-mode cases skip without a key. Static AT-17/18: 0 findings at repo scope.
+- main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests: 112 pass · 1 fail (AT-28, see §2) · 9 skip (the real-mode cases, without a key). Static AT-17/18: 0 findings at repo scope.
+- 11/4 night: Closet in 3D (layers, exploded view, outfit picking, photo cut-outs), eight resale platforms in their own currencies, and the **keep-or-let-go** screen on My closet: one question per piece with a date, two sides of counted facts, a position saved as a read-back snapshot and resolved by later wear records. No probability anywhere. The `money` initialisation error on My closet → "Look at selling" (reported on cc09bfe) is fixed and re-checked in a browser at 390 px; an empty list of cost lines now leaves the net unknown instead of equal to the price.
 - Features since this file was first written: Today sentence path (Spark reads the words, code checks them), real-photo path with the official SAM decoder, 60-day review with exemptions and choices, per-platform price evidence and net calculator, hand-over drafts, Discover looks rebuilt from the closet, style targets with a counted match and an item box (11/3 night). Details: [features_1102.md](features_1102.md).
 - Caps: visitor-per-day and app-total caps can be raised by the host through `CLOSER_VISITOR_DAY_USD` and `CLOSER_APP_TOTAL_USD` (ceilings 10 and 200). The deploy kit under `deploy/` writes 3 and 20 on first install.
 - Still true: real calls 0 in this repository; the Meta adapters follow the documentation examples and stay marked unverified until `.data/live_check.json` is recorded on the owner's machine. Deploy: not done; Live URL: none yet.

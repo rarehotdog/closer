@@ -72,7 +72,7 @@ try {
   // Sample photos for everyone; uploaded photos only through routes that check their workspace.
   const photoSource = { get: (id: string) => uploads.get(id) ?? lib.get(id) };
   svc = new CloserService({ ledger, ports: p.ports, clock, photos: photoSource, mode });
-  feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now });
+  feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now, revision: SHA });
 } catch (e) {
   if (e instanceof RealModeRefused) {
     console.error(`Refusing to start: ${e.message}`);
@@ -222,6 +222,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (method === 'GET' && action === 'drafts') return send(res, 200, { drafts: feat.drafts(wsId) });
   if (method === 'GET' && action === 'look' && arg) return send(res, 200, feat.matchLook(wsId, arg));
   if (method === 'GET' && action === 'collection') return send(res, 200, feat.collection(wsId));
+  if (method === 'GET' && action === 'decide' && arg) {
+    const hz = url.searchParams.get('horizon');
+    return send(res, 200, feat.decisionView(wsId, { itemId: arg, horizonDays: hz === null ? undefined : Number(hz) }, sample));
+  }
+  if (method === 'GET' && action === 'decisions') return send(res, 200, { decisions: feat.decisions(wsId, arg || undefined) });
   if (method === 'GET' && action === 'photos') return send(res, 200, { photos: uploads.list(wsId) });
   if (method === 'GET' && action === 'photo' && arg) {
     const own = uploads.list(wsId).some((p) => p.photoId === arg);
@@ -298,6 +303,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       return send(res, 200, feat.moveDraft(wsId, { draftId: String(b.draftId), to: String(b.to), body: typeof b.body === 'string' ? b.body : undefined }));
     case 'target':
       return send(res, 200, feat.setTarget(wsId, { lookId: String(b.lookId ?? ''), on: b.on === true }));
+    case 'decide':
+      return send(res, 200, feat.decide(wsId, {
+        itemId: String(b.itemId ?? ''), choice: String(b.choice ?? ''), horizonDays: b.horizonDays === undefined ? undefined : Number(b.horizonDays),
+        platform: String(b.platform ?? ''), askPrice: typeof b.askPrice === 'number' ? b.askPrice : null, fees: Array.isArray(b.fees) ? b.fees : [],
+        namedUses: b.namedUses, note: typeof b.note === 'string' ? b.note : null,
+      }, sample));
     default:
       return send(res, 404, { ok: false, detail: 'unknown action' });
   }

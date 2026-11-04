@@ -795,44 +795,172 @@ async function closetScreen(view) {
     DEPOP: [['Platform fee', 'rate'], ['Payment processing', 'rate'], ['Shipping', 'fixed']],
     VINTED: [['Seller fee, if your country has one', 'rate'], ['Shipping', 'fixed']],
   };
+  const platformName = (p) => (PLATFORM_OPTIONS.find(([v]) => v === p) || [p, p])[1].replace(/ \((KRW|USD|EUR)\)$/, '');
+  function newFees(platform) { return FEE_START[platform].map(([label, kind]) => ({ label, kind, value: '' })); }
+  /** Cost lines as typed: blank stays null (not checked); a rate is typed in % and sent as a share. */
+  function feeLines(fees) { return fees.map((f) => ({ label: f.label, kind: f.kind, value: f.value === '' ? null : f.kind === 'rate' ? Number(f.value) / 100 : Number(f.value) })); }
+  function feeRows(fees, cur, onChange, compact) {
+    return h('div', { class: 'feegrid' }, fees.map((f, i) => h('div', { class: 'feerow' },
+      h('input', { type: 'text', 'aria-label': `Cost ${i + 1} name`, value: f.label, maxlength: '40', oninput: (e) => { f.label = e.target.value; } }),
+      h('select', { 'aria-label': `Cost ${i + 1} kind`, onchange: (e) => { f.kind = e.target.value; onChange(); } }, h('option', { value: 'rate', selected: f.kind === 'rate' ? true : null }, compact ? '%' : '% of price'), h('option', { value: 'fixed', selected: f.kind === 'fixed' ? true : null }, compact ? cur : `fixed ${cur}`)),
+      h('input', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', 'aria-label': `Cost ${i + 1} value`, placeholder: compact ? 'not checked' : 'blank = not checked', value: f.value, oninput: (e) => { f.value = e.target.value; }, onchange: onChange }),
+      h('button', { type: 'button', class: 'btn small ghost', 'aria-label': `Remove cost ${i + 1}`, title: 'Remove this line', onclick: () => { fees.splice(i, 1); onChange(); } }, compact ? '×' : 'Remove'))));
+  }
+  /** Rows of a net result: price, each cost, each unchecked line, the net or "unknown". */
+  function netRows(R, cur, priceLabel, netLabel) {
+    return h('dl', { class: 'kv' },
+      h('dt', null, priceLabel), h('dd', null, money(R.price, cur)),
+      ...R.deductions.flatMap((d) => [h('dt', null, d.label), h('dd', null, `− ${money(d.amount, cur)}`)]),
+      ...R.unknown.flatMap((u) => [h('dt', null, u), h('dd', null, h('span', { class: 'chip warn' }, 'not checked'))]),
+      h('dt', null, netLabel), h('dd', null, R.net === null ? h('span', { class: 'chip warn' }, 'unknown') : h('b', null, money(R.net, cur))));
+  }
+
   function calcPanel() {
-    if (!S.calc) S.calc = { platform: 'KARROT', price: '', fees: FEE_START.KARROT.map(([label, kind]) => ({ label, kind, value: '' })), result: null };
+    if (!S.calc) S.calc = { platform: 'KARROT', price: '', fees: newFees('KARROT'), result: null };
     const C = S.calc;
     const cur = PLATFORM_CURRENCY[C.platform];
     const card = S.market ? S.market.cards.find((c) => c.platform === C.platform) : null;
-    const plat = h('select', { id: 'calc-platform', 'aria-label': 'Platform', onchange: (e) => { C.platform = e.target.value; C.fees = FEE_START[C.platform].map(([label, kind]) => ({ label, kind, value: '' })); C.result = null; render(); } },
+    const plat = h('select', { id: 'calc-platform', 'aria-label': 'Platform', onchange: (e) => { C.platform = e.target.value; C.fees = newFees(C.platform); C.result = null; render(); } },
       PLATFORM_OPTIONS.map(([v, l]) => h('option', { value: v, selected: C.platform === v ? true : null }, l)));
     const price = h('input', { id: 'calc-price', type: 'number', min: '1', step: 'any', inputmode: 'decimal', placeholder: `Price you would ask (${cur})`, 'aria-label': 'Price', value: C.price, oninput: (e) => { C.price = e.target.value; } });
     const pick = card && card.entries.length ? h('div', { class: 'chip-row' }, h('span', { class: 'muted' }, 'Use a price you saw:'),
       card.entries.slice(0, 4).map((e) => h('button', { type: 'button', class: 'chip', onclick: () => { C.price = String(e.amount); render(); } }, `${money(e.amount, e.currency)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'}${e.source === 'sample' ? ' · sample' : ''}`))) : null;
-    const rows = h('div', { class: 'feegrid' }, C.fees.map((f, i) => h('div', { class: 'feerow' },
-      h('input', { type: 'text', 'aria-label': `Fee ${i + 1} name`, value: f.label, maxlength: '40', oninput: (e) => { f.label = e.target.value; } }),
-      h('select', { 'aria-label': `Fee ${i + 1} kind`, onchange: (e) => { f.kind = e.target.value; render(); } }, h('option', { value: 'rate', selected: f.kind === 'rate' ? true : null }, '% of price'), h('option', { value: 'fixed', selected: f.kind === 'fixed' ? true : null }, `fixed ${cur}`)),
-      h('input', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', 'aria-label': `Fee ${i + 1} value`, placeholder: 'blank = not checked', value: f.value, oninput: (e) => { f.value = e.target.value; } }),
-      h('button', { type: 'button', class: 'btn small ghost', 'aria-label': `Remove fee ${i + 1}`, onclick: () => { C.fees.splice(i, 1); C.result = null; render(); } }, 'Remove'))));
+    const rows = feeRows(C.fees, cur, () => { C.result = null; render(); });
     const calc = async () => {
-      const fees = C.fees.map((f) => ({ label: f.label, kind: f.kind, value: f.value === '' ? null : f.kind === 'rate' ? Number(f.value) / 100 : Number(f.value) }));
-      C.result = await postJson('/api/net', { price: Number(C.price), platform: C.platform, fees });
+      C.result = await postJson('/api/net', { price: Number(C.price), platform: C.platform, fees: feeLines(C.fees) });
       render();
     };
     const R = C.result;
-    const money = (n) => (cur === 'KRW' ? `₩${Math.round(n).toLocaleString('en-US')}` : `$${Number(n).toFixed(2)}`);
     const out = !R ? null : R.ok === false ? h('p', { class: 'question', role: 'status' }, R.detail)
       : h('div', { class: 'netbox', role: 'status' },
-        h('dl', { class: 'kv' },
-          h('dt', null, 'Price'), h('dd', null, money(R.price)),
-          ...R.deductions.flatMap((d) => [h('dt', null, d.label), h('dd', null, `− ${money(d.amount)}`)]),
-          ...R.unknown.flatMap((u) => [h('dt', null, u), h('dd', null, h('span', { class: 'chip warn' }, 'not checked'))]),
-          h('dt', null, 'You would receive'), h('dd', null, R.net === null ? h('span', { class: 'chip warn' }, 'unknown') : h('b', null, money(R.net)))),
+        netRows(R, cur, 'Price', 'You would receive'),
         h('p', { class: 'muted' }, R.line),
-        R.net !== null ? h('p', { class: 'muted' }, `A draft for ${C.platform === 'KARROT' ? 'Karrot' : C.platform === 'KREAM' ? 'KREAM' : 'Poshmark'} will use this price.`) : null);
+        R.net !== null ? h('p', { class: 'muted' }, `A draft for ${platformName(C.platform)} will use this price.`) : null);
     return h('div', { class: 'calc' }, h('h2', { style: 'margin-top:14px' }, 'What would I receive?'),
-      h('p', { class: 'muted' }, 'Fill in the fees from the platform\'s own page. A blank fee keeps the result unknown; type 0 only if you checked it is free.'),
+      h('p', { class: 'muted' }, 'Fill in the costs from the platform\'s own page. A blank line keeps the result unknown; type 0 only if you checked it is free. No lines at all also means unknown.'),
       h('div', { class: 'row' }, plat, price), pick, rows,
       h('div', { class: 'row' },
-        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { C.fees.push({ label: 'Other cost', kind: 'fixed', value: '' }); render(); } }, 'Add a fee'),
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { C.fees.push({ label: 'Other cost', kind: 'fixed', value: '' }); render(); } }, 'Add a cost line'),
         h('button', { type: 'button', class: 'btn small', id: 'calc-go', onclick: calc }, 'Calculate')),
       out);
+  }
+
+  // ---- Keep or let go: one question per piece, two sides of counted facts, a position saved as a snapshot ----
+  const CHOICE_LABEL = { KEEP: 'Keep', WEAR_ONCE: 'Try wearing it once', SELL_PREPARE: 'Prepare to sell', DEFER: 'Decide later' };
+  async function openDecide(itemId) {
+    S.decide = { itemId, horizon: 90, view: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true };
+    await loadDecide();
+    const el = document.getElementById('decide');
+    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  async function loadDecide() {
+    const D = S.decide;
+    if (!D) return;
+    const v = await getJson(`/api/ws/${id}/decide/${D.itemId}?horizon=${D.horizon}`);
+    if (!v || v.ok === false) { S.msg = h('span', { class: 'chip bad' }, v ? `${v.code} · ${v.detail}` : 'Could not load'); S.decide = null; render(); return; }
+    D.view = v;
+    const last = v.history[0] || null;
+    if (D.fresh) {
+      // Start from the owner's last position on this piece: their own named uses, platform, asking price and cost lines as typed.
+      D.fresh = false;
+      if (v.keep.namedUses.length) D.uses = v.keep.namedUses.map((u) => ({ label: u.label, on: u.on }));
+      if (last && last.sell && PLATFORM_CURRENCY[last.sell.platform]) {
+        D.platform = last.sell.platform;
+        D.horizon = last.keep.horizonDays;
+        if (last.sell.scenario) {
+          D.price = String(last.sell.askPrice);
+          D.fees = last.sell.scenario.costs.map((c) => ({ label: c.label, kind: c.kind, value: c.value === null ? '' : String(c.kind === 'rate' ? Math.round(c.value * 10000) / 100 : c.value) }));
+        } else D.fees = newFees(D.platform);
+        if (D.horizon !== v.keep.horizonDays) { await loadDecide(); return; }
+        if (Number(D.price) > 0) { await recalc(); return; }
+      }
+    }
+    render();
+  }
+  async function recalc() {
+    const D = S.decide;
+    if (!D) return;
+    const p = Number(D.price);
+    D.net = p > 0 ? await postJson('/api/net', { price: p, platform: D.platform, fees: feeLines(D.fees) }) : null;
+    render();
+  }
+  async function takePosition(choice) {
+    const D = S.decide;
+    if (!D) return;
+    const p = Number(D.price);
+    const r = await postJson(`/api/ws/${id}/decide`, { itemId: D.itemId, choice, horizonDays: D.horizon, platform: D.platform, askPrice: p > 0 ? p : null, fees: feeLines(D.fees), namedUses: D.uses, note: null });
+    if (r.ok === false) { S.msg = h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`); render(); return; }
+    if (choice === 'WEAR_ONCE') { location.href = `/today?lock=${D.itemId}`; return; }
+    if (choice === 'SELL_PREPARE') {
+      await act(D.itemId, 'sell_review');
+      S.calc = { platform: D.platform, price: D.price, fees: D.fees.map((f) => ({ ...f })), result: D.net && D.net.ok !== false ? D.net : null };
+    }
+    S.msg = h('span', { class: 'chip ok' }, `Saved and read back · ${CHOICE_LABEL[choice]} · ${r.decision.decisionId}`);
+    await loadDecide();
+  }
+  function decidePanel() {
+    const D = S.decide;
+    if (!D || !D.view) return null;
+    const V = D.view;
+    const K = V.keep;
+    const cur = PLATFORM_CURRENCY[D.platform];
+    const hz = h('div', { class: 'seg', role: 'group', 'aria-label': 'Horizon' }, V.horizons.map((d) => h('button', { type: 'button', 'aria-pressed': D.horizon === d ? 'true' : 'false', onclick: () => { D.horizon = d; loadDecide(); } }, `${d} days`)));
+    // Keep side: counts only. The outlook stays "not computed" because there is no counted basis for a forward number.
+    const useForm = h('div', { class: 'row' },
+      h('input', { id: 'dc-use', type: 'text', maxlength: '40', placeholder: 'e.g. wedding, trip', 'aria-label': 'Upcoming use', value: D.useLabel, oninput: (e) => { D.useLabel = e.target.value; } }),
+      h('input', { id: 'dc-use-on', type: 'date', 'aria-label': 'Date, optional', value: D.useOn, min: V.today, oninput: (e) => { D.useOn = e.target.value; } }),
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => { const l = D.useLabel.trim(); if (!l || D.uses.length >= 5) return; D.uses.push({ label: l, on: D.useOn || null }); D.useLabel = ''; D.useOn = ''; render(); } }, 'Add'));
+    const keep = h('div', { class: 'card side' },
+      h('div', { class: 'hd' }, 'If I keep it'),
+      h('ul', { class: 'reasons' },
+        h('li', null, h('b', null, `${K.wearsCounted} confirmed wear${K.wearsCounted === 1 ? '' : 's'}`), ` in the last ${K.windowDays} days`),
+        h('li', null, `Any wear recorded on ${K.recordedDays} of ${K.trackedDays} tracked days · ${K.unrecordedDays} days unknown`),
+        h('li', null, K.lastConfirmedWear ? `Last confirmed wear ${K.lastConfirmedWear} · ${K.daysSinceLastWear} days ago` : 'No confirmed wear on record')),
+      h('p', { class: 'lbl' }, `Upcoming uses I can name (${D.uses.length})`),
+      D.uses.length ? h('div', { class: 'chip-row' }, D.uses.map((u, i) => h('button', { type: 'button', class: 'chip', title: 'Remove', onclick: () => { D.uses.splice(i, 1); render(); } }, `${u.label}${u.on ? ` · ${u.on}` : ''} ×`))) : null,
+      D.uses.length < 5 ? useForm : null,
+      h('div', { class: 'outlook' }, h('span', { class: 'chip warn' }, 'Wear outlook: not computed'), h('p', { class: 'muted' }, K.wearOutlook.line)),
+      K.missing.length ? h('p', { class: 'muted' }, 'Still unknown: ', K.missing.join(' · ')) : null);
+    // Sell side: an asking price the owner picks (assumed, not offered), prices seen on one platform, costs with their status, a conditional net.
+    const ev = V.evidence.find((e) => e.platform === D.platform);
+    const lo = Math.min(...[ev.owner.min, ev.sample.min].filter((x) => x !== null));
+    const hi = Math.max(...[ev.owner.max, ev.sample.max].filter((x) => x !== null));
+    const hasRange = Number.isFinite(lo) && Number.isFinite(hi);
+    const step = cur === 'KRW' ? 1000 : 1;
+    const rmin = hasRange ? Math.max(step, Math.floor((lo / 2) / step) * step) : 0;
+    const rmax = hasRange ? Math.ceil((hi * 1.5) / step) * step : 0;
+    const plat = h('select', { id: 'dc-platform', 'aria-label': 'Platform', onchange: (e) => { D.platform = e.target.value; D.fees = newFees(D.platform); D.price = ''; D.net = null; render(); } },
+      PLATFORM_OPTIONS.map(([v, l]) => h('option', { value: v, selected: D.platform === v ? true : null }, l)));
+    const num = h('input', { id: 'dc-price', type: 'number', min: '1', step: 'any', inputmode: 'decimal', placeholder: `Asking price to test (${cur})`, 'aria-label': 'Asking price', value: D.price, oninput: (e) => { D.price = e.target.value; if (range) range.value = e.target.value; }, onchange: recalc });
+    const range = hasRange ? h('input', { id: 'dc-range', type: 'range', min: String(rmin), max: String(rmax), step: String(step), 'aria-label': 'Asking price slider', value: D.price || String(Math.round(lo / step) * step), oninput: (e) => { D.price = e.target.value; num.value = e.target.value; }, onchange: recalc }) : null;
+    const seen = h('p', { class: 'muted' }, ev.line, hasRange ? ` Seen: ${lo === hi ? money(lo, cur) : `${money(lo, cur)}–${money(hi, cur)}`}. ` : ' ', ev.sample.count ? h('span', { class: 'chip sample' }, 'Sample') : null);
+    const N = D.net && D.net.ok !== false ? D.net : null;
+    const netbox = h('div', { class: 'netbox', role: 'status' },
+      N ? netRows(N, cur, 'Asking price (assumed)', 'I would receive') : h('dl', { class: 'kv' }, h('dt', null, 'Asking price'), h('dd', null, h('span', { class: 'chip warn' }, 'not set')), h('dt', null, 'I would receive'), h('dd', null, h('span', { class: 'chip warn' }, 'unknown'))),
+      h('p', { class: 'muted' }, N ? N.line : D.net && D.net.ok === false ? D.net.detail : 'Pick a price to test. The net stays unknown until every cost line is checked.'));
+    const sell = h('div', { class: 'card side' },
+      h('div', { class: 'hd' }, 'If I prepare to sell'),
+      plat, seen, range, num,
+      h('p', { class: 'lbl' }, 'Costs on this platform · blank = not checked, 0 = checked and free'),
+      feeRows(D.fees, cur, recalc, true),
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => { D.fees.push({ label: 'Other cost', kind: 'fixed', value: '' }); render(); } }, 'Add a cost line'),
+      netbox);
+    const pos = h('div', { class: 'row actions' },
+      h('button', { type: 'button', class: 'btn small', onclick: () => takePosition('KEEP') }, 'Keep'),
+      h('button', { type: 'button', class: 'btn small', onclick: () => takePosition('WEAR_ONCE') }, 'Try wearing it once'),
+      h('button', { type: 'button', class: 'btn small', onclick: () => takePosition('SELL_PREPARE') }, 'Prepare to sell'),
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => takePosition('DEFER') }, 'Decide later'));
+    const hist = V.history.length ? h('div', null, h('h3', null, `Positions taken (${V.history.length})`),
+      h('ul', { class: 'reasons' }, V.history.map((d) => h('li', null,
+        h('b', null, `${d.at.slice(0, 10)} · ${CHOICE_LABEL[d.choice] || d.choice}`),
+        ` · ${d.keep.horizonDays} days · ${d.sell.askPrice !== null ? `${money(d.sell.askPrice, d.sell.currency)} on ${d.sell.evidence.name}` : 'no price tested'} · ${d.sell.scenario && d.sell.scenario.net !== null ? `net ${money(d.sell.scenario.net, d.sell.currency)}` : 'net unknown'}`,
+        h('br'), h('span', { class: 'muted' }, d.outcome.line))))) : null;
+    return h('section', { class: 'panel decide', id: 'decide' },
+      h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Keep or let go? · ${D.itemId} · ${itemName(S.items[D.itemId])}`), h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.decide = null; render(); } }, 'Close')),
+      h('p', { class: 'ask' }, K.question), hz,
+      h('div', { class: 'grid cols-2 sides' }, keep, sell),
+      pos, hist,
+      h('p', { class: 'muted' }, V.note));
   }
 
   function evidenceForm() {
@@ -892,17 +1020,23 @@ async function closetScreen(view) {
             h('span', { class: 'muted' }, `Tracked since ${x.trackedSince} · ${x.unrecordedDays} days without any record · source: ${x.source}`),
             x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
             x.lastChoice ? h('span', { class: 'chip' }, `Last choice: ${x.lastChoice.action.replace('_', ' ')}`) : null,
-            h('div', { class: 'row' }, actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
+            h('div', { class: 'row' },
+              h('button', { class: 'btn small', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'),
+              actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
     ];
+    parts.push(decidePanel());
     if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel' }, h('h2', null, `Price evidence for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), priceCards(), evidenceForm(), calcPanel()));
     if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
     parts.push(draftPanel());
     parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),
-      h('table', { class: 't' }, h('tbody', null, others.map((x) => h('tr', null, h('td', { class: 'mono' }, x.itemId), h('td', null, x.status.toLowerCase().replace('_', ' ')), h('td', null, x.line)))))));
+      h('table', { class: 't' }, h('tbody', null, others.map((x) => h('tr', null, h('td', { class: 'mono' }, x.itemId), h('td', null, x.status.toLowerCase().replace('_', ' ')), h('td', null, x.line),
+        h('td', null, h('button', { class: 'btn small ghost', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'))))))));
     if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
     keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
   await load();
+  const want = new URLSearchParams(location.search).get('decide');
+  if (want && S.items[want]) await openDecide(want);
 }
 
 async function discoverScreen(view) {
@@ -1073,11 +1207,11 @@ async function closet3dScreen(view) {
   function paintTray() {
     const ids = A.layers.map((l) => outfit[l.slot]).filter(Boolean);
     if (scene) scene.setPicked(ids);
-    tray.replaceChildren(h('h2', null, 'Outfit you are putting together'),
+    tray.replaceChildren(...[h('h2', null, 'Outfit you are putting together'),
       ids.length ? h('div', { class: 'chip-row' }, ids.map((x) => h('button', { type: 'button', class: 'chip accent', onclick: () => show(x) }, `${x} · ${itemName(byId[x])}`))) : h('p', { class: 'muted' }, 'Tap a piece, then "Add to outfit". Any piece, one per layer.'),
       ids.length ? h('div', { class: 'row' },
         wsParam ? h('span', { class: 'muted' }, `Picked: ${ids.join(' + ')}. Use them as locks on My wardrobe.`) : h('a', { class: 'btn small', href: `/today?lock=${ids.join(',')}` }, `Wear these today (${ids.join(' + ')})`),
-        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const k of Object.keys(outfit)) delete outfit[k]; paintTray(); } }, 'Clear')) : null);
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const k of Object.keys(outfit)) delete outfit[k]; paintTray(); } }, 'Clear')) : null].filter(Boolean));
   }
   view.append(h('h1', null, 'Closet in 3D'),
     h('p', { class: 'lede' }, 'Your closet by layer: outerwear rail, tops, bottoms, shoes. Drag sideways to turn it, slide to pull the layers apart, tap a piece.'),
@@ -1106,6 +1240,7 @@ async function closet3dScreen(view) {
       h('div', { class: 'row' },
         h('button', { type: 'button', class: `btn small${inOutfit ? ' ghost' : ''}`, onclick: () => { if (inOutfit) delete outfit[cell.slot]; else outfit[cell.slot] = itemId; paintTray(); show(itemId); } }, inOutfit ? 'Remove from outfit' : 'Add to outfit'),
         wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear it today'),
+        wsParam ? null : h('a', { class: 'btn small ghost', href: `/closet?decide=${itemId}` }, 'Keep or let go?'),
         wsParam ? null : h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
     const m = await getJson(`/api/ws/${id}/market/${itemId}`);
     const cards = (m && m.cards ? m.cards : []).filter((c) => c.entries.length);

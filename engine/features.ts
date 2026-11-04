@@ -11,6 +11,10 @@ import {
   type Evidence, type FeeLine, type Handoff, type HandoffKind, type HandoffState, type OwnerFacts, type Platform,
 } from './market.ts';
 import { SAMPLE_LOOKS, collectionOf, lookById, matchLook, type Collection, type Look, type LookCategory } from './looks.ts';
+import {
+  DECISION_CHOICES, DEFAULT_HORIZON, HORIZON_DAYS, evidenceSummaries, isHorizon, keepSideOf, outcomeOf, sellSideOf, validateNamedUses,
+  type DecisionChoice, type DecisionSnapshot, type EvidenceSummary, type KeepSide, type Outcome,
+} from './decision.ts';
 import type { DecisionContext } from '../shared/wardrobe.ts';
 
 export type Fail = { ok: false; code: string; detail: string };
@@ -18,19 +22,49 @@ const fail = (code: string, detail: string): Fail => ({ ok: false, code, detail 
 
 const NEUTRAL_CTX: DecisionContext = { baseline: {}, pinned: [], direction: 'none', offenders: [], hardRules: [], weather: null };
 
+export type DecisionView = {
+  itemId: string;
+  item: { itemId: string; slot: string; type: string; color: string };
+  today: IsoDate;
+  horizons: number[];
+  keep: KeepSide;
+  evidence: EvidenceSummary[];
+  history: (DecisionSnapshot & { outcome: Outcome })[];
+  note: string;
+};
+
+/** Fee lines as the owner typed them: a blank value is unknown, 0 counts only when typed. Returns a message when a line is malformed. */
+export function parseFees(fees: unknown): FeeLine[] | string {
+  if (!Array.isArray(fees) || fees.length > 10) return 'up to 10 fee lines';
+  const lines: FeeLine[] = [];
+  for (const f of fees as Partial<FeeLine>[]) {
+    const label = String(f?.label ?? '').trim().slice(0, 40);
+    if (!label) return 'every fee line needs a name';
+    if (f?.kind !== 'rate' && f?.kind !== 'fixed') return `${label}: kind must be rate or fixed`;
+    const v = f.value;
+    if (v !== null && v !== undefined && !(typeof v === 'number' && Number.isFinite(v) && v >= 0)) return `${label}: value must be 0 or more, or blank if unknown`;
+    if (f.kind === 'rate' && typeof v === 'number' && v > 1) return `${label}: a rate is a share of the price (0–1, e.g. 0.1 for 10%)`;
+    lines.push({ label, kind: f.kind, value: typeof v === 'number' ? v : null });
+  }
+  return lines;
+}
+
 export class FeatureService {
   readonly ledger: SqliteLedger;
   readonly extras: ExtrasStore;
   readonly today: () => IsoDate;
   readonly now: () => Date;
   readonly rules: RuleSet;
+  /** Build identifier written into every decision snapshot (the server passes its commit). */
+  readonly revision: string;
 
-  constructor(d: { ledger: SqliteLedger; extras: ExtrasStore; today: () => IsoDate; now: () => Date; rules?: RuleSet }) {
+  constructor(d: { ledger: SqliteLedger; extras: ExtrasStore; today: () => IsoDate; now: () => Date; rules?: RuleSet; revision?: string }) {
     this.ledger = d.ledger;
     this.extras = d.extras;
     this.today = d.today;
     this.now = d.now;
     this.rules = d.rules ?? ALL_RULES;
+    this.revision = d.revision ?? 'unknown';
   }
 
   private writable(ws: string): Fail | null {
@@ -41,7 +75,8 @@ export class FeatureService {
   }
 
   // ---------------- 60-day review ----------------
-  review(ws: string, windowDays?: number): { windowDays: number; rows: (ReviewRow & { lastChoice: ReviewChoice | null })[]; counts: Record<string, number>; note: string } {
+  /** Review rows for a window, from confirmed wear records only. */
+  private reviewRows(ws: string, windowDays?: number): ReviewRow[] {
     const w = this.ledger.getWorkspace(ws);
     if (!w) throw new Error('unknown workspace');
     const st = this.ledger.readState(ws, { fresh: true });
@@ -51,11 +86,15 @@ export class FeatureService {
       const id = (e.payload as { item?: { itemId?: string } } | null)?.item?.itemId;
       if (id && !registeredOn.has(id)) registeredOn.set(id, e.occurredAt);
     }
-    const rows = reviewWardrobe({
+    return reviewWardrobe({
       items: st.items, wearRows: st.wearRows,
       availability: new Map(st.availability.map((a) => [a.itemId, a.state])),
       registeredOn, workspaceCreatedOn: w.createdOn, exemptions: this.extras.exemptions(ws), today: this.today(), windowDays,
     });
+  }
+
+  review(ws: string, windowDays?: number): { windowDays: number; rows: (ReviewRow & { lastChoice: ReviewChoice | null })[]; counts: Record<string, number>; note: string } {
+    const rows = this.reviewRows(ws, windowDays);
     const choices = this.extras.choices(ws);
     const counts: Record<string, number> = {};
     for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
@@ -114,18 +153,83 @@ export class FeatureService {
   net(price: number, platform: Platform, fees: unknown[]) {
     if (!PLATFORMS.includes(platform)) return fail('INVALID_TRANSITION', 'unknown platform');
     if (!(typeof price === 'number' && Number.isFinite(price) && price > 0)) return fail('INVALID_TRANSITION', 'price must be a positive number');
-    if (!Array.isArray(fees) || fees.length > 10) return fail('INVALID_TRANSITION', 'up to 10 fee lines');
-    const lines: FeeLine[] = [];
-    for (const f of fees as Partial<FeeLine>[]) {
-      const label = String(f?.label ?? '').trim().slice(0, 40);
-      if (!label) return fail('INVALID_TRANSITION', 'every fee line needs a name');
-      if (f?.kind !== 'rate' && f?.kind !== 'fixed') return fail('INVALID_TRANSITION', `${label}: kind must be rate or fixed`);
-      const v = f.value;
-      if (v !== null && v !== undefined && !(typeof v === 'number' && Number.isFinite(v) && v >= 0)) return fail('INVALID_TRANSITION', `${label}: value must be 0 or more, or blank if unknown`);
-      if (f.kind === 'rate' && typeof v === 'number' && v > 1) return fail('INVALID_TRANSITION', `${label}: a rate is a share of the price (0–1, e.g. 0.1 for 10%)`);
-      lines.push({ label, kind: f.kind, value: typeof v === 'number' ? v : null });
-    }
+    const lines = parseFees(fees);
+    if (typeof lines === 'string') return fail('INVALID_TRANSITION', lines);
     return netScenario(price, PLATFORM_INFO[platform].currency, lines);
+  }
+
+  // ---------------- keep or let go ----------------
+  /**
+   * The two sides of one piece's question, read from counted records and the owner's own price
+   * evidence (sample rows stay labelled). Nothing here is estimated; the wear outlook stays null.
+   */
+  decisionView(ws: string, a: { itemId: string; horizonDays?: number }, sample: readonly Evidence[] = []): DecisionView | Fail {
+    if (!this.ledger.getWorkspace(ws)) return fail('SCOPE_DENIED', 'unknown workspace');
+    const st = this.ledger.readState(ws, { fresh: true });
+    const item = st.items.find((i) => i.itemId === a.itemId && i.ownership === 'CONFIRMED');
+    if (!item) return fail('INVALID_TRANSITION', 'unknown item');
+    const horizonDays = a.horizonDays === undefined ? DEFAULT_HORIZON : a.horizonDays;
+    if (!isHorizon(horizonDays)) return fail('INVALID_TRANSITION', `horizonDays must be one of ${HORIZON_DAYS.join(', ')}`);
+    const row = this.reviewRows(ws, horizonDays).find((r) => r.itemId === item.itemId);
+    if (!row) return fail('INVALID_TRANSITION', 'unknown item');
+    const today = this.today();
+    const history = this.extras.decisions(ws, item.itemId);
+    const last = history[history.length - 1] ?? null;
+    const evidence = [...this.extras.evidence(ws), ...sample.filter((e) => e.itemId === item.itemId)];
+    return {
+      itemId: item.itemId,
+      item: { itemId: item.itemId, slot: item.slot, type: item.type, color: item.color },
+      today,
+      horizons: [...HORIZON_DAYS],
+      keep: keepSideOf(item, row, horizonDays, last?.keep.namedUses ?? [], today),
+      evidence: evidenceSummaries(item.itemId, evidence),
+      history: history.map((d) => ({ ...d, outcome: outcomeOf(d, st.wearRows, today) })).reverse(),
+      note: 'Both sides show counts and the prices you entered. No probability is shown because there is no counted basis for one. Taking a position saves a snapshot of this screen and changes nothing outside Closer.',
+    };
+  }
+
+  /** Save a position as a snapshot. The net is recomputed here from the cost lines; a net sent by a client is ignored. */
+  decide(ws: string, a: { itemId: string; choice: string; horizonDays?: number; platform: string; askPrice?: number | null; fees?: unknown[]; namedUses?: unknown; note?: string | null }, sample: readonly Evidence[] = []): { decision: DecisionSnapshot; outcome: Outcome } | Fail {
+    const deny = this.writable(ws);
+    if (deny) return deny;
+    if (!(DECISION_CHOICES as readonly string[]).includes(a.choice)) return fail('INVALID_TRANSITION', `choice must be one of ${DECISION_CHOICES.join(', ')}`);
+    if (!(PLATFORMS as readonly string[]).includes(a.platform)) return fail('INVALID_TRANSITION', 'unknown platform');
+    const horizonDays = a.horizonDays === undefined ? DEFAULT_HORIZON : a.horizonDays;
+    if (!isHorizon(horizonDays)) return fail('INVALID_TRANSITION', `horizonDays must be one of ${HORIZON_DAYS.join(', ')}`);
+    const askPrice = a.askPrice === undefined || a.askPrice === null ? null : a.askPrice;
+    if (askPrice !== null && !(typeof askPrice === 'number' && Number.isFinite(askPrice) && askPrice > 0)) return fail('INVALID_TRANSITION', 'askPrice must be a positive number or blank');
+    const fees = parseFees(a.fees ?? []);
+    if (typeof fees === 'string') return fail('INVALID_TRANSITION', fees);
+    const today = this.today();
+    const namedUses = validateNamedUses(a.namedUses, today);
+    if (typeof namedUses === 'string') return fail('INVALID_TRANSITION', namedUses);
+    const note = a.note === undefined || a.note === null ? null : String(a.note).trim().slice(0, 200) || null;
+    const st = this.ledger.readState(ws, { fresh: true });
+    const item = st.items.find((i) => i.itemId === a.itemId && i.ownership === 'CONFIRMED');
+    if (!item) return fail('INVALID_TRANSITION', 'unknown item');
+    const row = this.reviewRows(ws, horizonDays).find((r) => r.itemId === item.itemId);
+    if (!row) return fail('INVALID_TRANSITION', 'unknown item');
+    const evidence = [...this.extras.evidence(ws), ...sample.filter((e) => e.itemId === item.itemId)];
+    const snapshot: DecisionSnapshot = {
+      schema: 'closer.decision.1',
+      decisionId: `d_${randomUUID().slice(0, 12)}`,
+      itemId: item.itemId,
+      choice: a.choice as DecisionChoice,
+      at: this.now().toISOString(),
+      today,
+      keep: keepSideOf(item, row, horizonDays, namedUses, today),
+      sell: sellSideOf(item.itemId, a.platform as Platform, askPrice, fees, evidence),
+      note,
+      sourceRevision: this.revision,
+    };
+    const saved = this.extras.addDecision(ws, snapshot);
+    return { decision: saved, outcome: outcomeOf(saved, st.wearRows, today) };
+  }
+
+  decisions(ws: string, itemId?: string): (DecisionSnapshot & { outcome: Outcome })[] {
+    const st = this.ledger.readState(ws, { fresh: true });
+    const today = this.today();
+    return this.extras.decisions(ws, itemId).map((d) => ({ ...d, outcome: outcomeOf(d, st.wearRows, today) }));
   }
 
   // ---------------- hand-off drafts ----------------

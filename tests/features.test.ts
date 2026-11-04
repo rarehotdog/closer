@@ -558,3 +558,179 @@ describe('F1 sentence path: Spark reads the words, code checks them', () => {
     assert.equal(rulesIntent('네이비 재킷, 비 온대', items).rain, true);
   });
 });
+
+describe('F5 keep or let go: two sides of counted facts, a position saved as a snapshot, no probability', () => {
+  const fees = (v: number | null, s: number | null) => [{ label: 'Platform fee', kind: 'rate' as const, value: v }, { label: 'Shipping', kind: 'fixed' as const, value: s }];
+
+  it('F5-01 no cost line at all is "nothing checked", not "no costs": the net stays unknown', () => {
+    const s = netScenario(100000, 'KRW', []);
+    assert.equal(s.net, null);
+    assert.equal(s.costStatus, 'NO_LINES');
+    assert.match(s.line, /no cost line/i);
+    assert.deepEqual(s.unknown, []);
+  });
+
+  it('F5-02 a typed 0 is a confirmed free line; a deleted line is simply absent', () => {
+    const zero = netScenario(100000, 'KRW', [{ label: 'Shipping', kind: 'fixed', value: 0 }]);
+    assert.equal(zero.net, 100000);
+    assert.equal(zero.costStatus, 'CONFIRMED');
+    assert.equal(zero.costs[0].status, 'CONFIRMED_ZERO');
+    const blank = netScenario(100000, 'KRW', [{ label: 'Shipping', kind: 'fixed', value: null }]);
+    assert.equal(blank.costs[0].status, 'UNKNOWN');
+    assert.equal(blank.net, null);
+    assert.notEqual(netScenario(100000, 'KRW', []).costStatus, zero.costStatus);
+  });
+
+  it('F5-03 100,000 at 5% plus 3,000 shipping leaves 92,000; the arithmetic is listed line by line', () => {
+    const s = netScenario(100000, 'KRW', fees(0.05, 3000));
+    assert.equal(s.net, 92000);
+    assert.deepEqual(s.deductions, [{ label: 'Platform fee', amount: 5000 }, { label: 'Shipping', amount: 3000 }]);
+    assert.equal(s.costs[0].status, 'CONFIRMED_VALUE');
+  });
+
+  it('F5-04 a negative net is kept as a negative number and said plainly', () => {
+    const s = netScenario(1000, 'KRW', [{ label: 'Shipping', kind: 'fixed', value: 3000 }]);
+    assert.equal(s.net, -2000);
+    assert.match(s.line, /short/);
+    const e = netScenario(10, 'EUR', [{ label: 'Shipping', kind: 'fixed', value: 12.5 }]);
+    assert.equal(e.net, -2.5);
+  });
+
+  it('F5-05 the keep side repeats the review counts for the same window and shows no probability', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const v = t.feat.decisionView(t.ws, { itemId: 'J2', horizonDays: 60 }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in v));
+    const row = t.feat.review(t.ws, 60).rows.find((r) => r.itemId === 'J2')!;
+    assert.equal(v.keep.wearsCounted, row.wearsInWindow);
+    assert.equal(v.keep.recordedDays, row.recordedDays);
+    assert.equal(v.keep.trackedDays, row.trackedDays);
+    assert.equal(v.keep.unrecordedDays, row.unrecordedDays);
+    assert.equal(v.keep.horizonDays, 60);
+    assert.equal(v.keep.resolvesOn, addDays(TODAY, 60));
+    assert.match(v.keep.question, /Will I wear J2 \(beige coat\) in the next 60 days, by 2027-01-01\?/);
+    assert.equal(v.keep.wearOutlook.value, null);
+    assert.equal(v.keep.wearOutlook.status, 'NOT_COMPUTED');
+    assert.doesNotMatch(JSON.stringify(v.keep), /%/);
+    // no field carries a chance, score or estimate; the note may say in words that none is shown
+    assert.doesNotMatch(JSON.stringify(v), /"(prob|chance|likelihood|estimate|score|pWear|pSell)[A-Za-z]*":/i);
+    assert.ok(v.keep.missing.some((m) => /unknown/.test(m)));
+    assert.ok(v.keep.missing.some((m) => /No upcoming use/.test(m)));
+    const b3 = t.feat.decisionView(t.ws, { itemId: 'B3' }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in b3));
+    assert.equal(b3.keep.horizonDays, 90);
+    assert.ok(b3.evidence.every((e) => e.owner.count === 0 && e.sample.count === 0));
+  });
+
+  it('F5-06 prices the owner entered and sample prices are counted apart and never pooled', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const e = t.feat.addEvidence(t.ws, { itemId: 'J1', platform: 'KARROT', priceType: 'ASK', amount: 90000, currency: 'KRW', retrievedAt: TODAY, matchLevel: 'SIMILAR' });
+    assert.ok(!('ok' in e));
+    const v = t.feat.decisionView(t.ws, { itemId: 'J1' }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in v));
+    const k = v.evidence.find((x) => x.platform === 'KARROT')!;
+    assert.deepEqual({ c: k.owner.count, min: k.owner.min, max: k.owner.max }, { c: 1, min: 90000, max: 90000 });
+    assert.deepEqual({ c: k.sample.count, min: k.sample.min, max: k.sample.max }, { c: 2, min: 85000, max: 120000 });
+    assert.equal(k.owner.ids.some((id) => k.sample.ids.includes(id)), false);
+    assert.doesNotMatch(JSON.stringify(v.evidence), /average|median|pooled/i);
+    assert.match(k.line, /1 price you entered and 2 sample prices/);
+    const kream = v.evidence.find((x) => x.platform === 'KREAM')!;
+    assert.match(kream.line, /No price seen on KREAM yet/);
+  });
+
+  it('F5-07 a position is saved as a snapshot, read back, and comes back identical on every later read', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const before = t.ledger.stateHash(t.ws);
+    const r = t.feat.decide(t.ws, { itemId: 'J2', choice: 'KEEP', horizonDays: 90, platform: 'KARROT', askPrice: 60000, fees: fees(null, 3000), namedUses: [{ label: 'Wedding', on: addDays(TODAY, 18) }] }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in r), JSON.stringify(r));
+    const d = r.decision;
+    assert.match(d.decisionId, /^d_/);
+    assert.equal(d.choice, 'KEEP');
+    assert.equal(d.schema, 'closer.decision.1');
+    assert.equal(d.sell.calculatorVersion, 'closer.decision.1');
+    assert.equal(typeof d.sourceRevision, 'string');
+    assert.deepEqual(d.keep.namedUses, [{ label: 'Wedding', on: addDays(TODAY, 18) }]);
+    assert.equal(d.sell.askStatus, 'ASSUMED');
+    assert.equal(d.sell.scenario!.net, null);
+    assert.deepEqual(d.sell.scenario!.unknown, ['Platform fee']);
+    assert.deepEqual(d.sell.evidence.sample.ids, ['sample-4']);
+    const again = t.feat.decisions(t.ws, 'J2');
+    assert.equal(again.length, 1);
+    const { outcome: _o, ...stored } = again[0];
+    assert.deepEqual(stored, d);
+    assert.equal(JSON.stringify(t.feat.decisions(t.ws, 'J2')), JSON.stringify(again));
+    const v = t.feat.decisionView(t.ws, { itemId: 'J2' }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in v));
+    assert.equal(v.history[0].decisionId, d.decisionId);
+    assert.deepEqual(v.keep.namedUses, d.keep.namedUses);
+    assert.equal(t.ledger.stateHash(t.ws), before);
+  });
+
+  it('F5-08 the net inside a snapshot is computed here from the cost lines; typed costs give a number, blank or none stay unknown', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const a = t.feat.decide(t.ws, { itemId: 'J2', choice: 'SELL_PREPARE', platform: 'KREAM', askPrice: 100000, fees: fees(0.05, 3000) });
+    assert.ok(!('ok' in a));
+    assert.equal(a.decision.sell.scenario!.net, 92000);
+    assert.equal(a.decision.sell.currency, 'KRW');
+    assert.deepEqual(a.decision.sell.missing, ['No price seen on KREAM']);
+    const b = t.feat.decide(t.ws, { itemId: 'J2', choice: 'DEFER', platform: 'VINTED', askPrice: 40, fees: [] });
+    assert.ok(!('ok' in b));
+    assert.equal(b.decision.sell.currency, 'EUR');
+    assert.equal(b.decision.sell.scenario!.costStatus, 'NO_LINES');
+    assert.equal(b.decision.sell.scenario!.net, null);
+    assert.ok(b.decision.sell.missing.includes('No cost line checked'));
+    const c = t.feat.decide(t.ws, { itemId: 'J2', choice: 'WEAR_ONCE', platform: 'KARROT' });
+    assert.ok(!('ok' in c));
+    assert.equal(c.decision.sell.askStatus, 'NOT_SET');
+    assert.equal(c.decision.sell.scenario, null);
+    assert.ok(c.decision.sell.missing.includes('No asking price chosen'));
+    assert.equal(t.feat.decisions(t.ws).length, 3);
+    assert.equal(t.feat.decisions(t.ws, 'J1').length, 0);
+  });
+
+  it('F5-09 a position needs a known piece, a listed choice, a listed horizon, a listed platform, sane uses, and a writable wardrobe', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const bad = (a: Parameters<typeof t.feat.decide>[1]) => (t.feat.decide(t.ws, a) as { ok: false; code: string; detail: string });
+    assert.equal(bad({ itemId: 'NOPE', choice: 'KEEP', platform: 'KARROT' }).code, 'INVALID_TRANSITION');
+    assert.match(bad({ itemId: 'J2', choice: 'SELL_NOW', platform: 'KARROT' }).detail, /choice must be one of KEEP, WEAR_ONCE, SELL_PREPARE, DEFER/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', horizonDays: 45, platform: 'KARROT' }).detail, /30, 60, 90/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'MUSINSA' }).detail, /unknown platform/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', askPrice: -5 }).detail, /askPrice/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', namedUses: [{ label: 'Trip', on: addDays(TODAY, -1) }] }).detail, /in the past/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', namedUses: Array.from({ length: 6 }, (_, i) => ({ label: `u${i}`, on: null })) }).detail, /up to 5/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', fees: [{ label: 'Fee', kind: 'rate', value: 5 }] }).detail, /share of the price/);
+    const ro = setup({ publicReadOnly: true });
+    assert.equal((ro.feat.decide(ro.ws, { itemId: 'J2', choice: 'KEEP', platform: 'KARROT' }) as { ok: false; code: string }).code, 'SCOPE_DENIED');
+    const view = t.feat.decisionView(t.ws, { itemId: 'J2', horizonDays: 7 }) as { ok: false; detail: string };
+    assert.match(view.detail, /30, 60, 90/);
+  });
+
+  it('F5-10 a position resolves by counted wear records after it, open until its date and closed on it', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    // A position taken 10 days ago on a 30-day horizon: still open today.
+    const earlier = new FeatureService({ ledger: t.ledger, extras: t.extras, today: () => addDays(TODAY, -10), now: () => new Date(`${addDays(TODAY, -10)}T09:00:00+09:00`) });
+    const open = earlier.decide(t.ws, { itemId: 'J2', choice: 'KEEP', horizonDays: 30, platform: 'KARROT' });
+    assert.ok(!('ok' in open));
+    // A position taken 40 days ago on a 30-day horizon: closed 10 days ago.
+    const older = new FeatureService({ ledger: t.ledger, extras: t.extras, today: () => addDays(TODAY, -40), now: () => new Date(`${addDays(TODAY, -40)}T09:00:00+09:00`) });
+    const closed = older.decide(t.ws, { itemId: 'J2', choice: 'DEFER', horizonDays: 30, platform: 'KARROT' });
+    assert.ok(!('ok' in closed));
+    for (const [i, d] of [[1, -35], [2, -7], [3, -2]] as const) {
+      ok(t.svc.recordPastWear(t.ws, { eventId: `w-j2-${i}`, actor: 'demo_script', expectedRevision: t.rev(), itemIds: ['J2'], occurredAt: addDays(TODAY, d) }));
+    }
+    const by = Object.fromEntries(t.feat.decisions(t.ws, 'J2').map((d) => [d.decisionId, d.outcome]));
+    const o = by[open.decision.decisionId];
+    assert.equal(o.status, 'OPEN');
+    assert.equal(o.wearsSince, 2);
+    assert.equal(o.daysElapsed, 10);
+    assert.equal(o.daysTotal, 30);
+    assert.match(o.line, /^Open: 2 confirmed wears since the decision, 10 of 30 days passed/);
+    const c = by[closed.decision.decisionId];
+    assert.equal(c.status, 'CLOSED');
+    assert.equal(c.wearsSince, 1);
+    assert.equal(c.daysElapsed, 30);
+    assert.match(c.line, /^Closed on 2026-10-23: 1 confirmed wear in the 30 days after the decision/);
+    assert.match(c.line, /Days without a record stay unknown/);
+    // The snapshots themselves did not change when the wears were recorded.
+    assert.equal(t.extras.decision(t.ws, open.decision.decisionId)!.keep.wearsCounted, open.decision.keep.wearsCounted);
+  });
+});

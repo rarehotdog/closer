@@ -406,3 +406,29 @@ details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
 .explode-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
 .chip.legend-amber { border-color: #c88a1a; color: var(--ink); }
 #layer-list h3 { margin: 10px 0 4px; font-size: 14px; }
+
+/* Keep or let go: one question, two sides, a position. Side by side even on a phone; stacked only below 360px. */
+.decide .ask { font-size: 16px; font-weight: 600; margin: 6px 0 8px; line-height: 1.35; }
+.sides { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); margin-top: 10px; }
+@media (max-width: 760px) { .sides { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 359px) { .sides { grid-template-columns: minmax(0, 1fr); } }
+.side { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13.5px; }
+.side .hd { font-size: 15px; }
+.side .reasons { margin: 0; }
+.side .lbl { font-weight: 600; font-size: 12.5px; margin: 6px 0 0; color: var(--ink-2); }
+.side select, .side input { font: inherit; font-size: 13.5px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; width: 100%; box-sizing: border-box; }
+.side input[type="range"] { padding: 0; height: 28px; accent-color: var(--accent); }
+.side .row { gap: 6px; }
+.side .row input { flex: 1 1 100px; }
+.side .feegrid { margin: 4px 0; }
+.side .feerow { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; }
+.side .feerow .btn { padding: 6px 9px; grid-column: 3; grid-row: 1; }
+.side .feerow input[type="text"] { grid-column: 1 / 3; grid-row: 1; }
+.side .feerow select { grid-column: 1; grid-row: 2; padding-right: 2px; }
+.side .feerow input[type="number"] { grid-column: 2 / 4; grid-row: 2; }
+.side .outlook { margin-top: 6px; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.side .outlook p { margin: 6px 0 0; font-size: 12.5px; }
+.side .netbox { margin-top: 6px; padding: 10px; }
+.side .netbox .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; font-size: 13px; }
+.decide .row.actions { margin-top: 12px; flex-wrap: wrap; gap: 8px; }
+.t td:last-child .btn { white-space: nowrap; }

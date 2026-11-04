@@ -130,26 +130,50 @@ export function priceCards(itemId: string, evidence: readonly Evidence[]): Price
 }
 
 export type FeeLine = { label: string; kind: 'rate' | 'fixed'; value: number | null };
-export type NetScenario = { price: number; currency: Currency; deductions: { label: string; amount: number }[]; unknown: string[]; net: number | null; line: string };
+/**
+ * UNKNOWN: the owner has not checked this line (blank). CONFIRMED_ZERO: the owner typed 0 after
+ * checking. CONFIRMED_VALUE: the owner typed a value. A line that was deleted is simply absent,
+ * which is not the same as CONFIRMED_ZERO.
+ */
+export type CostStatus = 'UNKNOWN' | 'CONFIRMED_ZERO' | 'CONFIRMED_VALUE';
+export type CostLine = { label: string; kind: 'rate' | 'fixed'; value: number | null; status: CostStatus; amount: number | null };
+export type NetScenario = {
+  price: number;
+  currency: Currency;
+  costs: CostLine[];
+  deductions: { label: string; amount: number }[];
+  unknown: string[];
+  /** NO_LINES: nothing has been checked, so the net is unknown. UNKNOWN: a line is blank. CONFIRMED: every line has a typed value. */
+  costStatus: 'NO_LINES' | 'UNKNOWN' | 'CONFIRMED';
+  net: number | null;
+  line: string;
+};
 
 /**
  * Net amount for a price the owner picks. A fee with an unknown value makes the net unknown:
- * it is listed by name and never counted as zero.
+ * it is listed by name and never counted as zero. An empty list of fees is not "no fees": it is
+ * "nothing checked", and the net stays unknown until the owner adds the platform's lines.
  */
 export function netScenario(price: number, currency: Currency, fees: readonly FeeLine[]): NetScenario {
-  const deductions: { label: string; amount: number }[] = [];
-  const unknown: string[] = [];
-  for (const f of fees) {
-    if (f.value === null || !Number.isFinite(f.value)) unknown.push(f.label);
-    else deductions.push({ label: f.label, amount: f.kind === 'rate' ? Math.round(price * f.value * 100) / 100 : f.value });
-  }
+  const costs: CostLine[] = fees.map((f) => {
+    if (f.value === null || !Number.isFinite(f.value)) return { label: f.label, kind: f.kind, value: null, status: 'UNKNOWN', amount: null };
+    const amount = f.kind === 'rate' ? Math.round(price * f.value * 100) / 100 : f.value;
+    return { label: f.label, kind: f.kind, value: f.value, status: f.value === 0 ? 'CONFIRMED_ZERO' : 'CONFIRMED_VALUE', amount };
+  });
+  const deductions = costs.filter((c) => c.amount !== null).map((c) => ({ label: c.label, amount: c.amount as number }));
+  const unknown = costs.filter((c) => c.status === 'UNKNOWN').map((c) => c.label);
+  const costStatus: NetScenario['costStatus'] = costs.length === 0 ? 'NO_LINES' : unknown.length > 0 ? 'UNKNOWN' : 'CONFIRMED';
   const sum = deductions.reduce((s, d) => s + d.amount, 0);
   const raw = price - sum;
-  const net = unknown.length > 0 ? null : currency === 'KRW' ? Math.round(raw) : Math.round(raw * 100) / 100;
-  const line = net === null
-    ? `Net unknown until you check: ${unknown.join(', ')}`
-    : `If it sells at ${fmt(price, currency)}, you would receive about ${fmt(net, currency)} after the fees you entered. Not a guarantee.`;
-  return { price, currency, deductions, unknown, net, line };
+  const net = costStatus !== 'CONFIRMED' ? null : currency === 'KRW' ? Math.round(raw) : Math.round(raw * 100) / 100;
+  const line = costStatus === 'NO_LINES'
+    ? 'Net unknown: no cost line has been checked yet. Add the platform\'s cost lines; type 0 only for a line you confirmed is free.'
+    : net === null
+      ? `Net unknown until you check: ${unknown.join(', ')}`
+      : net < 0
+        ? `At ${fmt(price, currency)}, the costs you entered (${fmt(sum, currency)}) are more than the price: you would be ${fmt(-net, currency)} short. Not a guarantee.`
+        : `If it sells at ${fmt(price, currency)}, you would receive about ${fmt(net, currency)} after the costs you entered. Not a guarantee.`;
+  return { price, currency, costs, deductions, unknown, costStatus, net, line };
 }
 
 export function fmt(n: number, c: Currency): string {
