@@ -65,7 +65,7 @@ Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written b
 - "No confirmed wear" needs records. Without enough of them the review says so instead of guessing.
 - The keep-or-let-go screen shows no probability and no expected value. A position is resolved only by wear records you confirm afterwards; days with no record stay unknown, so a closed question reads "1 confirmed wear in the 30 days after the decision", never "you did not wear it".
 - Spend caps: $20 for the whole app, $0.25 per session, a visitor-per-day cap set by the host (0 unless `CLOSER_VISITOR_DAY_USD` is set; the deploy kit sets 3), and the K1 kill switch.
-- One acceptance test, AT-28, fails on purpose-built grounds: its planted pin-rule mutant is masked by another rule in the fixture, so the test cannot tell them apart. The pin rule itself is covered by the F1 tests. Listed here rather than hidden.
+- AT-28's pin-rule mutant is caught on the next-plan path (a second outer seeded: J1 is swapped without the rule, kept with it) and by AT-21, not by the pre-registered AT-03/06/19: in FX-H the kept piece J1 sits outside the offender slots, so the offender-scope rule alone keeps it there and those three cannot tell the two rules apart. The test says so in its name rather than hiding it.
 
 ## What comes next (not built)
 

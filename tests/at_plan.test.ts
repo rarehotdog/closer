@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness, heroProposed, heroRegistered, isOp, laundry, lock, newId, ok, sampleItem } from './helpers.ts';
-import { checkAT03, checkAT19 } from './at_checks.ts';
+import { checkAT03, checkAT19, checkAT21 } from './at_checks.ts';
 import { toolResponse } from '../adapters/mock/transport.ts';
 import { FX_E } from '../fixtures/edge.ts';
 import { AMBIGUOUS_SENTENCE } from '../fixtures/photos.ts';
@@ -143,19 +143,7 @@ test('AT-20 [mock] zero-change trap — unchanged O0 from the model → NO_CHANG
 });
 
 test('AT-21 [mock] pin vs hard rule (FX-E8) — 0 proposals, 1 question PIN_CONFLICT, J1 never swapped', async () => {
-  const h = harness();
-  try {
-    const op = await heroRegistered(h, { weather: FX_E.E8.weather, hardRules: FX_E.E8.hardRules });
-    const r = await h.svc.propose(h.ws, { operationId: op.operationId });
-    assert.ok(isOp(r));
-    assert.equal(r.options.length, 0);
-    assert.equal(r.questions.length, 1);
-    assert.equal(r.questions[0].code, 'PIN_CONFLICT');
-    assert.ok(r.reasonCodes.includes('PIN_CONFLICT'));
-    assert.ok(h.state().plans.every((p) => p.slots.outer === 'J1'));
-  } finally {
-    h.cleanup();
-  }
+  await checkAT21();
 });
 
 test('AT-24 whole-condition change', { skip: 'archived (보관, number kept) — sentence-change path is v1.1' }, () => {});

@@ -3,7 +3,7 @@
 Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm test`). Mock mode only; zero real calls.
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
-- AT test cases (variants counted separately): PASS 31 · FAIL 1 · SKIP 7 · total 39.
+- AT test cases (variants counted separately): PASS 33 · FAIL 0 · SKIP 7 · total 40.
 - Other tests (unit, fixture answer): PASS 27 · FAIL 0 · SKIP 0 · total 27.
 
 | Test | Result | Note |
@@ -39,7 +39,8 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | AT-26 [mock] item with no record — "no confirmed wear yet", rank bonus 0 | PASS |  |
 | AT-27 [mock] actor check — demo_script confirm/lock/wear → INVALID_TRANSITION in real·demo·visitor, hash unchanged | PASS |  |
 | AT-28 [mock] mutation — availability-rule mutant is caught by AT-03/06/19 | PASS |  |
-| AT-28 [mock] mutation — pin-rule mutant is caught by AT-03/06/19 | FAIL | pin mutant survived AT-03, AT-06 and AT-19 (in FX-H the pin item J1 is outside the offender slots, so OUTSIDE_OFFENDERS already blocks a J1 change) |
+| AT-28 [mock] mutation — pin-rule mutant is caught by AT-21 (FX-E8) | PASS |  |
+| AT-28 [mock] mutation — pin-rule mutant is caught on the next-plan path (second outer seeded): J1 kept with the rule, swapped without it | PASS |  |
 | AT-29 [mock] ambiguous reference "그거 말고 다른 거" — AMBIGUOUS_REFERENCE, 1 question, 0 guesses | PASS |  |
 | AT-30 [mock] unrequested relaxation — option breaking an owner hard rule → UNREQUESTED_RELAXATION | PASS |  |
 | AT-31 [real] instruction text inside a photo | SKIP | needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–); real-only (실제 1회) |
