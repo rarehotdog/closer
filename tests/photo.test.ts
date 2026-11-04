@@ -9,8 +9,10 @@ import { officialMaskDecoder } from '../adapters/samDecoder.ts';
 import { decodePng, encodePng, jpegSize } from '../engine/png.ts';
 import { PhotoStore } from '../store/photos.ts';
 import { cutoutPng } from '../engine/thumbs.ts';
-import { encodeMockRle } from '../engine/coords.ts';
+import { encodeMockRle, normToPixelBox } from '../engine/coords.ts';
 import { buildSamBody } from '../adapters/sam.ts';
+import { createPhotoLibrary, PHOTO_H, PHOTO_W } from '../fixtures/photos.ts';
+import { role } from '../fixtures/fxh.ts';
 
 const dir = join(ROOT, '.data', 'test', `photos-${process.pid}`);
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -83,6 +85,35 @@ test('PH-06 cut-out thumbnail: garment pixels inside the mask, transparent outsi
   const at = (x: number, y: number) => [...png.data.subarray((y * png.w + x) * 4, (y * png.w + x) * 4 + 4)];
   assert.deepEqual(at(10, 10), [200, 10, 10, 255]);
   assert.deepEqual(at(png.w - 5, 10), [0, 0, 0, 0]);
+});
+
+test('PH-08 sample photos are PNG data URLs (the image API lists no SVG) whose bytes are the pixels code measures', () => {
+  const lib = createPhotoLibrary();
+  const photos = lib.list();
+  assert.equal(photos.length, 3);
+  const PREFIX = 'data:image/png;base64,';
+  for (const p of photos) {
+    assert.ok(p.url.startsWith(PREFIX), p.photoId);
+    const png = decodePng(Buffer.from(p.url.slice(PREFIX.length), 'base64'));
+    assert.deepEqual([png.w, png.h], [p.w, p.h]);
+    assert.deepEqual([png.w, png.h], [PHOTO_W, PHOTO_H]);
+    const at = (x: number, y: number) => [...png.data.subarray((y * png.w + x) * 4, (y * png.w + x) * 4 + 4)];
+    // Each garment's centre carries its role colour; its top edge carries the darker outline.
+    for (const g of p.garments) {
+      const b = normToPixelBox(g.box, p.w, p.h);
+      const cx = Math.floor((b.x1 + b.x2) / 2), cy = Math.floor((b.y1 + b.y2) / 2);
+      assert.deepEqual(at(cx, cy), [...role(g.role).rgb, 255], `${p.photoId} ${g.role}`);
+      assert.ok(at(cx, b.y1)[0] < role(g.role).rgb[0], `${p.photoId} ${g.role} outline`);
+    }
+    // The PNG and the pixel source agree, sampled on a 7 px grid (39,000 points per photo, edges and background included).
+    let mismatches = 0;
+    for (let y = 0; y < png.h; y += 7) for (let x = 0; x < png.w; x += 7) if (at(x, y).join() !== [...p.pixels.rgbAt(x, y), 255].join()) mismatches++;
+    assert.equal(mismatches, 0, p.photoId);
+    assert.equal(lib.byUrl(p.url), p);
+  }
+  // Encoded once per process: a second library carries the same strings.
+  const again = createPhotoLibrary();
+  for (const p of photos) assert.equal(again.get(p.photoId)!.url, p.url);
 });
 
 test('PH-07 Spark 2 gets cut-outs only for items registered from a photo', async () => {

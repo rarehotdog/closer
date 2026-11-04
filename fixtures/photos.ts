@@ -2,9 +2,13 @@
 // generation is blocked, §4-5). Each is flagged 'Sample photo · code-drawn placeholder' and each item
 // 'Sample item'. No people, logos or text. Ground truth (manifest) is written here before any call.
 // The three Try photos hold the nine FX-H roles split 4·3·2, each item in one photo only.
-import type { NormBox } from '../engine/coords.ts';
+// Each photo is one PNG data URL (the image API accepts png, jpeg, gif and webp, not SVG), encoded
+// once per process from the same shade() the pixel source reads, so the bytes the models see are
+// the pixels code measures.
+import type { NormBox, PixelBox } from '../engine/coords.ts';
 import { normToPixelBox } from '../engine/coords.ts';
 import type { PixelSource, Rgb } from '../engine/color.ts';
+import { encodePng } from '../engine/png.ts';
 import type { Direction, OffenderWhy } from '../shared/wardrobe.ts';
 import { HERO_SENTENCE, role } from './fxh.ts';
 
@@ -20,7 +24,7 @@ export type SamplePhoto = {
   w: number;
   h: number;
   garments: PhotoGarment[];
-  svg: string;
+  /** PNG data URL, 1200 × 1600. */
   url: string;
   pixels: PixelSource;
 };
@@ -79,46 +83,75 @@ const LAYOUT: Record<string, { title: string; garments: PhotoGarment[]; truth: R
   },
 };
 
-/** Chamfered rectangle in pixel space — the garment silhouette used by both the SVG and the pixels. */
+/** Chamfered rectangle in pixel space — the garment silhouette used by both the PNG and the pixels. */
 export function garmentShape(box: NormBox, w = PHOTO_W, h = PHOTO_H) {
   const p = normToPixelBox(box, w, h);
   const c = Math.floor(0.12 * Math.min(p.x2 - p.x1 + 1, p.y2 - p.y1 + 1));
-  const inside = (x: number, y: number) =>
-    x >= p.x1 && x <= p.x2 && y >= p.y1 && y <= p.y2 &&
-    x - p.x1 + (y - p.y1) >= c && p.x2 - x + (y - p.y1) >= c && x - p.x1 + (p.y2 - y) >= c && p.x2 - x + (p.y2 - y) >= c;
-  const poly: [number, number][] = [
-    [p.x1 + c, p.y1], [p.x2 - c, p.y1], [p.x2, p.y1 + c], [p.x2, p.y2 - c],
-    [p.x2 - c, p.y2], [p.x1 + c, p.y2], [p.x1, p.y2 - c], [p.x1, p.y1 + c],
-  ];
-  return { pixelBox: p, inside, poly };
+  const k = Math.SQRT1_2;
+  /** Signed distance (px) from the silhouette's edge: ≥ 0 inside (0 on the edge), < 0 outside. */
+  const slack = (x: number, y: number) =>
+    Math.min(
+      x - p.x1, p.x2 - x, y - p.y1, p.y2 - y,
+      (x - p.x1 + (y - p.y1) - c) * k, (p.x2 - x + (y - p.y1) - c) * k, (x - p.x1 + (p.y2 - y) - c) * k, (p.x2 - x + (p.y2 - y) - c) * k,
+    );
+  const inside = (x: number, y: number) => slack(x, y) >= 0;
+  return { pixelBox: p, inside, slack };
 }
 
-function noise(x: number, y: number): number {
-  return ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0) % 13 - 6;
+type Shape = { rgb: Rgb; pixelBox: PixelBox; slack(x: number, y: number): number };
+
+/** A 3 px outline (1.5 px to each side of the edge) darkened by 18%, so a white shirt stays visible on the background. */
+const OUTLINE_PX = 1.5;
+const OUTLINE_SHADE = 0.82;
+
+/** Colour of one pixel: the first garment holding it, else the background; the outline band is darkened. */
+function shade(shapes: Shape[], x: number, y: number): Rgb {
+  let base: Rgb = BG;
+  let edge = false;
+  for (const s of shapes) {
+    const d = s.slack(x, y);
+    if (d >= 0) {
+      base = s.rgb;
+      edge = d < OUTLINE_PX;
+      break;
+    }
+    if (d > -OUTLINE_PX) edge = true;
+  }
+  return edge ? [Math.round(base[0] * OUTLINE_SHADE), Math.round(base[1] * OUTLINE_SHADE), Math.round(base[2] * OUTLINE_SHADE)] : base;
 }
 
-function clamp(v: number): number {
-  return v < 0 ? 0 : v > 255 ? 255 : v;
+/** photoId → PNG data URL. The layout is fixed, so each photo is encoded once per process (about 0.1 s each) and shared by every library. */
+const PNG_URLS = new Map<string, string>();
+
+function rasterize(photoId: string, shapes: Shape[], w: number, h: number): string {
+  const cached = PNG_URLS.get(photoId);
+  if (cached) return cached;
+  const data = new Uint8Array(w * h * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = BG[0]; data[i + 1] = BG[1]; data[i + 2] = BG[2]; data[i + 3] = 255;
+  }
+  // Only pixels within 2 px of a garment box can differ from the background (the outline band is 1.5 px wide).
+  for (const s of shapes) {
+    const x1 = Math.max(0, s.pixelBox.x1 - 2), x2 = Math.min(w - 1, s.pixelBox.x2 + 2);
+    const y1 = Math.max(0, s.pixelBox.y1 - 2), y2 = Math.min(h - 1, s.pixelBox.y2 + 2);
+    for (let y = y1; y <= y2; y++) {
+      for (let x = x1; x <= x2; x++) {
+        const [r, g, b] = shade(shapes, x, y);
+        const i = (y * w + x) * 4;
+        data[i] = r; data[i + 1] = g; data[i + 2] = b;
+      }
+    }
+  }
+  const url = `data:image/png;base64,${encodePng({ w, h, data }).toString('base64')}`;
+  PNG_URLS.set(photoId, url);
+  return url;
 }
 
 function buildPhoto(photoId: string): SamplePhoto {
   const L = LAYOUT[photoId];
-  const shapes = L.garments.map((g) => ({ g, rgb: role(g.role).rgb, ...garmentShape(g.box) }));
-  const pixels: PixelSource = {
-    w: PHOTO_W,
-    h: PHOTO_H,
-    rgbAt(x, y) {
-      const n = noise(x, y);
-      for (const s of shapes) if (s.inside(x, y)) return [clamp(s.rgb[0] + n), clamp(s.rgb[1] + n), clamp(s.rgb[2] + n)];
-      return [clamp(BG[0] + n), clamp(BG[1] + n), clamp(BG[2] + n)];
-    },
-  };
-  const polys = shapes
-    .map((s) => `<polygon points="${s.poly.map(([x, y]) => `${x},${y}`).join(' ')}" fill="rgb(${s.rgb.join(',')})" stroke="rgba(0,0,0,0.18)" stroke-width="3"/>`)
-    .join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PHOTO_W} ${PHOTO_H}" width="${PHOTO_W}" height="${PHOTO_H}"><rect width="${PHOTO_W}" height="${PHOTO_H}" fill="rgb(${BG.join(',')})"/>${polys}</svg>`;
-  const url = `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
-  return { photoId, title: L.title, w: PHOTO_W, h: PHOTO_H, garments: L.garments, svg, url, pixels };
+  const shapes: Shape[] = L.garments.map((g) => ({ rgb: role(g.role).rgb, ...garmentShape(g.box) }));
+  const pixels: PixelSource = { w: PHOTO_W, h: PHOTO_H, rgbAt: (x, y) => shade(shapes, x, y) };
+  return { photoId, title: L.title, w: PHOTO_W, h: PHOTO_H, garments: L.garments, url: rasterize(photoId, shapes, PHOTO_W, PHOTO_H), pixels };
 }
 
 export type PhotoLibrary = {
