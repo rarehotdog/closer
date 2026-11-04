@@ -1,14 +1,17 @@
-// Feature 2b — price evidence and hand-off drafts. Three platforms are shown side by side and never
+// Feature 2b — price evidence and hand-off drafts. Platforms are shown side by side and never
 // merged into one "market price": an asking price is not a trade, platforms differ by region and
 // currency, and unknown fees stay unknown. No platform API, scraping, listing or donation happens
 // here; the owner pastes evidence they saw, or the demo shows labelled sample rows.
 import type { IsoDate } from '../shared/dates.ts';
 import type { Item } from '../shared/wardrobe.ts';
 
-export const PLATFORMS = ['KREAM', 'KARROT', 'POSHMARK'] as const;
+/** Korean platforms first, then international ones (Meta's hackathon is global). */
+export const PLATFORMS = ['KREAM', 'KARROT', 'BUNJANG', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'VINTED'] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
-export type PlatformInfo = { name: string; region: string; currency: 'KRW' | 'USD'; notes: string[] };
+export type Currency = 'KRW' | 'USD' | 'EUR';
+export const KOREAN_PLATFORMS: readonly Platform[] = ['KREAM', 'KARROT', 'BUNJANG'];
+export type PlatformInfo = { name: string; region: string; currency: Currency; notes: string[] };
 /** Boundaries the owner should see before relying on a platform [확인 범위: Sol 11/1 탭 근거 목록]. */
 export const PLATFORM_INFO: Record<Platform, PlatformInfo> = {
   KREAM: {
@@ -25,11 +28,46 @@ export const PLATFORM_INFO: Record<Platform, PlatformInfo> = {
       'Its business OpenAPI covers ads, not used-item prices or listing',
     ],
   },
+  BUNJANG: {
+    name: 'Bunjang (번개장터)', region: 'Korea', currency: 'KRW',
+    notes: [
+      'Listings show asking prices; the final price is agreed with the buyer',
+      'Check its current fees and payment options on its own pages before relying on a net',
+    ],
+  },
   POSHMARK: {
     name: 'Poshmark', region: 'US, Canada, Australia, India', currency: 'USD',
     notes: [
       'Shipping a Korean item to its buyers is not assumed',
       'A "Sold" banner alone does not show the final traded price',
+    ],
+  },
+  EBAY: {
+    name: 'eBay (ebay.com)', region: 'US site; other countries have their own eBay sites', currency: 'USD',
+    notes: [
+      'Sold listings can show a final price; an asking price is not a trade',
+      'Fees depend on category and country; check them on eBay before relying on a net',
+    ],
+  },
+  GRAILED: {
+    name: 'Grailed', region: 'US-based, menswear and streetwear', currency: 'USD',
+    notes: [
+      'Check whether it serves sellers in your country',
+      'Check its current fees on its own pages before relying on a net',
+    ],
+  },
+  DEPOP: {
+    name: 'Depop (US site)', region: 'US site; the UK and other countries have their own', currency: 'USD',
+    notes: [
+      'Prices and fees differ by country site',
+      'Check whether it serves sellers in your country before posting',
+    ],
+  },
+  VINTED: {
+    name: 'Vinted', region: 'Europe, country sites', currency: 'EUR',
+    notes: [
+      'Prices in the local currency of each country site (EUR here)',
+      'Who pays which fee differs by country; check before relying on a net',
     ],
   },
 };
@@ -45,7 +83,7 @@ export type Evidence = {
   platform: Platform;
   priceType: PriceType;
   amount: number;
-  currency: 'KRW' | 'USD';
+  currency: Currency;
   url: string | null;
   retrievedAt: IsoDate;
   size: string | null;
@@ -65,7 +103,7 @@ export type PriceCard = {
 };
 
 export function validateEvidence(e: Partial<Evidence>): string | null {
-  if (!e.platform || !PLATFORMS.includes(e.platform)) return 'platform must be KREAM, KARROT or POSHMARK';
+  if (!e.platform || !PLATFORMS.includes(e.platform)) return `platform must be one of ${PLATFORMS.join(', ')}`;
   if (!e.priceType || !PRICE_TYPES.includes(e.priceType)) return 'priceType must be ASK or TRADE';
   if (typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount <= 0) return 'amount must be a positive number';
   if (e.currency !== PLATFORM_INFO[e.platform].currency) return `${PLATFORM_INFO[e.platform].name} prices are in ${PLATFORM_INFO[e.platform].currency}`;
@@ -92,13 +130,13 @@ export function priceCards(itemId: string, evidence: readonly Evidence[]): Price
 }
 
 export type FeeLine = { label: string; kind: 'rate' | 'fixed'; value: number | null };
-export type NetScenario = { price: number; currency: 'KRW' | 'USD'; deductions: { label: string; amount: number }[]; unknown: string[]; net: number | null; line: string };
+export type NetScenario = { price: number; currency: Currency; deductions: { label: string; amount: number }[]; unknown: string[]; net: number | null; line: string };
 
 /**
  * Net amount for a price the owner picks. A fee with an unknown value makes the net unknown:
  * it is listed by name and never counted as zero.
  */
-export function netScenario(price: number, currency: 'KRW' | 'USD', fees: readonly FeeLine[]): NetScenario {
+export function netScenario(price: number, currency: Currency, fees: readonly FeeLine[]): NetScenario {
   const deductions: { label: string; amount: number }[] = [];
   const unknown: string[] = [];
   for (const f of fees) {
@@ -114,8 +152,9 @@ export function netScenario(price: number, currency: 'KRW' | 'USD', fees: readon
   return { price, currency, deductions, unknown, net, line };
 }
 
-export function fmt(n: number, c: 'KRW' | 'USD'): string {
-  return c === 'KRW' ? `₩${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`;
+export function fmt(n: number, c: Currency): string {
+  if (c === 'KRW') return `₩${Math.round(n).toLocaleString('en-US')}`;
+  return `${c === 'EUR' ? '€' : '$'}${n.toFixed(2)}`;
 }
 
 // ---------------- hand-off drafts ----------------
@@ -165,18 +204,19 @@ function missingFacts(f: OwnerFacts): string[] {
  * A listing text the owner edits and posts themselves. Only known facts go in; anything unknown
  * stays as a [check] placeholder. Wear records are not offered as proof of condition.
  */
-export function sellDraft(item: Item, platform: Platform, f: OwnerFacts, price: { amount: number; currency: 'KRW' | 'USD' } | null): { title: string; body: string; toCheck: string[] } {
+export function sellDraft(item: Item, platform: Platform, f: OwnerFacts, price: { amount: number; currency: Currency } | null): { title: string; body: string; toCheck: string[] } {
   const toCheck = missingFacts(f);
   if (!price) toCheck.push('price');
-  if (platform === 'POSHMARK') {
+  if (!KOREAN_PLATFORMS.includes(platform)) {
+    const site = PLATFORM_INFO[platform].name;
     const name = `${f.brand ?? '[brand]'} ${item.color !== 'unknown' ? item.color : ''} ${item.type.replace('_', ' ')}`.replace(/\s+/g, ' ').trim();
     const body = [
       `${name}. Size: ${f.size ?? '[check]'}. Condition: ${f.condition ?? '[check]'}.`,
       `Measurements: [check].`,
       price ? `Price: ${fmt(price.amount, price.currency)}.` : 'Price: [check].',
-      'Check that Poshmark accepts listings and shipping from your country before posting.',
+      `Check that ${site} accepts listings and shipping from your country before posting.`,
     ].join('\n');
-    return { title: name, body, toCheck: [...toCheck, 'whether Poshmark serves your country'] };
+    return { title: name, body, toCheck: [...toCheck, `whether ${site} serves your country`] };
   }
   const name = `${f.brand ?? '[브랜드]'} ${COLOR_KO[item.color] ?? ''} ${TYPE_KO[item.type] ?? item.type}`.replace(/\s+/g, ' ').trim();
   if (platform === 'KREAM') {
@@ -191,7 +231,7 @@ export function sellDraft(item: Item, platform: Platform, f: OwnerFacts, price: 
     `사이즈: ${f.size ?? '[확인]'} / 상태: ${f.condition ?? '[확인]'}${f.purchased ? ` / 구매 시기: ${f.purchased}` : ''}`,
     '실측: [확인]',
     price ? `가격: ${fmt(price.amount, price.currency)}` : '가격: [확인]',
-    '직거래 장소·시간은 채팅으로 정해요.',
+    platform === 'BUNJANG' ? '거래 방법(택배·직거래)은 채팅으로 정해요.' : '직거래 장소·시간은 채팅으로 정해요.',
   ].join('\n');
   return { title: name, body, toCheck };
 }

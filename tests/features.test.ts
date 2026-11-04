@@ -15,7 +15,7 @@ import { createPhotoLibrary } from '../fixtures/photos.ts';
 import { closetHistory, closetItems, sampleEvidence } from '../fixtures/closet.ts';
 import { KILL_TTL_MS, PROVISIONAL_CAPS } from '../engine/caps.ts';
 import { addDays } from '../shared/dates.ts';
-import { netScenario, priceCards, validateEvidence, HANDOFF_STATES } from '../engine/market.ts';
+import { netScenario, priceCards, sellDraft, validateEvidence, HANDOFF_STATES, PLATFORMS, PLATFORM_INFO } from '../engine/market.ts';
 import { countOutfits } from '../engine/looks.ts';
 // @ts-expect-error plain browser module without type declarations; the same file the 3D screen imports
 import { buildAnatomy } from '../web/public/anatomy.js';
@@ -200,7 +200,7 @@ describe('F2 the 60-day review counts records, not guesses', () => {
 describe('F2 price cards and hand-off drafts', () => {
   it('F2-10 one card per platform; asking prices stay separate; nothing averaged', () => {
     const cards = priceCards('J1', sampleEvidence(TODAY));
-    assert.deepEqual(cards.map((c) => c.platform), ['KREAM', 'KARROT', 'POSHMARK']);
+    assert.deepEqual(cards.map((c) => c.platform), ['KREAM', 'KARROT', 'BUNJANG', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'VINTED']);
     const karrot = cards.find((c) => c.platform === 'KARROT')!;
     assert.deepEqual(karrot.entries.map((e) => e.amount).sort(), [120000, 85000].sort());
     assert.ok(karrot.entries.every((e) => e.priceType === 'ASK' && e.source === 'sample'));
@@ -214,6 +214,26 @@ describe('F2 price cards and hand-off drafts', () => {
     assert.match(validateEvidence({ platform: 'KARROT', amount: 1, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: TODAY })!, /priceType/);
     assert.match(validateEvidence({ platform: 'KARROT', priceType: 'ASK', amount: 1, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: TODAY, url: 'javascript:alert(1)' })!, /https/);
     assert.equal(validateEvidence({ platform: 'KREAM', priceType: 'TRADE', amount: 1, currency: 'KRW', matchLevel: 'SAME_ITEM', retrievedAt: TODAY, url: 'https://example.com/x' }), null);
+  });
+
+  it('F2-18 international platforms: own currency, no fee values shipped, English draft that asks to check the country', () => {
+    for (const p of PLATFORMS) {
+      assert.ok(['KRW', 'USD', 'EUR'].includes(PLATFORM_INFO[p].currency), p);
+      assert.ok(PLATFORM_INFO[p].notes.length >= 2, p);
+      // notes name what to check; they never state a fee percentage
+      for (const n of PLATFORM_INFO[p].notes) assert.doesNotMatch(n, /\d+(\.\d+)?\s*%/, `${p}: ${n}`);
+    }
+    assert.match(validateEvidence({ platform: 'VINTED', priceType: 'ASK', amount: 40, currency: 'USD', matchLevel: 'SIMILAR', retrievedAt: TODAY })!, /EUR/);
+    assert.equal(validateEvidence({ platform: 'VINTED', priceType: 'ASK', amount: 40, currency: 'EUR', matchLevel: 'SIMILAR', retrievedAt: TODAY }), null);
+    const v = netScenario(40, 'EUR', [{ label: 'Shipping', kind: 'fixed', value: null }]);
+    assert.equal(v.net, null);
+    assert.equal(netScenario(40, 'EUR', [{ label: 'Shipping', kind: 'fixed', value: 4.5 }]).line.includes('€35.50'), true);
+    const item = closetItems().find((i) => i.itemId === 'J1')!;
+    const d = sellDraft(item, 'VINTED', { brand: null, size: null, condition: null, purchased: null } as never, { amount: 40, currency: 'EUR' });
+    assert.match(d.body, /Price: €40\.00/);
+    assert.match(d.body, /Check that Vinted accepts listings and shipping from your country/);
+    const b = sellDraft(item, 'BUNJANG', { brand: null, size: null, condition: null, purchased: null } as never, null);
+    assert.match(b.body, /거래 방법/);
   });
 
   it('F2-12 an unknown fee makes the net unknown instead of zero', () => {
@@ -246,7 +266,7 @@ describe('F2 price cards and hand-off drafts', () => {
     assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: 'Fee', kind: 'rate', value: 15 }])), 'INVALID_TRANSITION');
     assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: 'Fee', kind: 'fixed', value: -1 }])), 'INVALID_TRANSITION');
     assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: '', kind: 'fixed', value: 1 }])), 'INVALID_TRANSITION');
-    assert.equal(code(t.feat.net(1000, 'EBAY' as never, [])), 'INVALID_TRANSITION');
+    assert.equal(code(t.feat.net(1000, 'NOT_A_PLATFORM' as never, [])), 'INVALID_TRANSITION');
     assert.equal(code(t.feat.net(1000, 'KARROT', Array.from({ length: 11 }, () => ({ label: 'x', kind: 'fixed', value: 1 })))), 'INVALID_TRANSITION');
   });
 

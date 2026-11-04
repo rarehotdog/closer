@@ -582,6 +582,10 @@ async function versionScreen(view) {
 
 // ---------- features 11/2: Today (keep this one) · Closet (60-day review) · Discover (looks) ----------
 const TYPE_NAME = { jacket: 'jacket', coat: 'coat', dress_shirt: 'dress shirt', knit: 'knit', tee: 'T-shirt', trousers: 'trousers', jeans: 'jeans', chinos: 'chinos', derby: 'derby shoes', sneakers: 'sneakers', track_jacket: 'track jacket', blouse: 'blouse', training_top: 'training top', skirt: 'skirt', joggers: 'joggers', shorts: 'shorts', running_shoes: 'running shoes', loafers: 'loafers' };
+// Resale platforms: Korean first, then international. Currency per platform; prices are never converted or averaged.
+const PLATFORM_OPTIONS = [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['BUNJANG', 'Bunjang (KRW)'], ['POSHMARK', 'Poshmark (USD)'], ['EBAY', 'eBay.com (USD)'], ['GRAILED', 'Grailed (USD)'], ['DEPOP', 'Depop US (USD)'], ['VINTED', 'Vinted (EUR)']];
+const PLATFORM_CURRENCY = { KARROT: 'KRW', KREAM: 'KRW', BUNJANG: 'KRW', POSHMARK: 'USD', EBAY: 'USD', GRAILED: 'USD', DEPOP: 'USD', VINTED: 'EUR' };
+function money(n, c) { return c === 'KRW' ? `₩${Math.round(n).toLocaleString('en-US')}` : `${c === 'EUR' ? '€' : '$'}${Number(n).toFixed(2)}`; }
 const itemName = (it) => (it ? `${it.color !== 'unknown' ? `${it.color} ` : ''}${TYPE_NAME[it.type] || it.type}` : '');
 
 async function closetWs() {
@@ -766,7 +770,7 @@ async function closetScreen(view) {
 
   function priceCards() {
     if (!S.market) return null;
-    const fmt = (e) => e.currency === 'KRW' ? `₩${e.amount.toLocaleString('en-US')}` : `$${e.amount.toFixed(2)}`;
+    const fmt = (e) => money(e.amount, e.currency);
     return h('div', { class: 'grid cols-3' }, S.market.cards.map((c) => h('div', { class: 'card' },
       h('div', { class: 'hd' }, c.info.name, h('span', { class: 'chip' }, c.info.currency)),
       h('div', { class: 'muted' }, c.info.region),
@@ -784,18 +788,23 @@ async function closetScreen(view) {
   const FEE_START = {
     KREAM: [['Sales fee', 'rate'], ['Inspection and shipping', 'fixed']],
     KARROT: [['Delivery or meeting cost', 'fixed']],
+    BUNJANG: [['Payment or platform fee', 'rate'], ['Shipping', 'fixed']],
     POSHMARK: [['Platform fee', 'rate'], ['Shipping to the buyer', 'fixed']],
+    EBAY: [['Final value fee', 'rate'], ['Shipping to the buyer', 'fixed']],
+    GRAILED: [['Platform fee', 'rate'], ['Payment processing', 'rate'], ['Shipping', 'fixed']],
+    DEPOP: [['Platform fee', 'rate'], ['Payment processing', 'rate'], ['Shipping', 'fixed']],
+    VINTED: [['Seller fee, if your country has one', 'rate'], ['Shipping', 'fixed']],
   };
   function calcPanel() {
     if (!S.calc) S.calc = { platform: 'KARROT', price: '', fees: FEE_START.KARROT.map(([label, kind]) => ({ label, kind, value: '' })), result: null };
     const C = S.calc;
-    const cur = C.platform === 'POSHMARK' ? 'USD' : 'KRW';
+    const cur = PLATFORM_CURRENCY[C.platform];
     const card = S.market ? S.market.cards.find((c) => c.platform === C.platform) : null;
     const plat = h('select', { id: 'calc-platform', 'aria-label': 'Platform', onchange: (e) => { C.platform = e.target.value; C.fees = FEE_START[C.platform].map(([label, kind]) => ({ label, kind, value: '' })); C.result = null; render(); } },
-      [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['POSHMARK', 'Poshmark (USD)']].map(([v, l]) => h('option', { value: v, selected: C.platform === v ? true : null }, l)));
+      PLATFORM_OPTIONS.map(([v, l]) => h('option', { value: v, selected: C.platform === v ? true : null }, l)));
     const price = h('input', { id: 'calc-price', type: 'number', min: '1', step: 'any', inputmode: 'decimal', placeholder: `Price you would ask (${cur})`, 'aria-label': 'Price', value: C.price, oninput: (e) => { C.price = e.target.value; } });
     const pick = card && card.entries.length ? h('div', { class: 'chip-row' }, h('span', { class: 'muted' }, 'Use a price you saw:'),
-      card.entries.slice(0, 4).map((e) => h('button', { type: 'button', class: 'chip', onclick: () => { C.price = String(e.amount); render(); } }, `${e.currency === 'KRW' ? '₩' + e.amount.toLocaleString('en-US') : '$' + e.amount} · ${e.priceType === 'ASK' ? 'asking' : 'traded'}${e.source === 'sample' ? ' · sample' : ''}`))) : null;
+      card.entries.slice(0, 4).map((e) => h('button', { type: 'button', class: 'chip', onclick: () => { C.price = String(e.amount); render(); } }, `${money(e.amount, e.currency)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'}${e.source === 'sample' ? ' · sample' : ''}`))) : null;
     const rows = h('div', { class: 'feegrid' }, C.fees.map((f, i) => h('div', { class: 'feerow' },
       h('input', { type: 'text', 'aria-label': `Fee ${i + 1} name`, value: f.label, maxlength: '40', oninput: (e) => { f.label = e.target.value; } }),
       h('select', { 'aria-label': `Fee ${i + 1} kind`, onchange: (e) => { f.kind = e.target.value; render(); } }, h('option', { value: 'rate', selected: f.kind === 'rate' ? true : null }, '% of price'), h('option', { value: 'fixed', selected: f.kind === 'fixed' ? true : null }, `fixed ${cur}`)),
@@ -828,13 +837,13 @@ async function closetScreen(view) {
 
   function evidenceForm() {
     const f = (id, el) => { el.id = id; return el; };
-    const plat = f('ev-platform', h('select', { 'aria-label': 'Platform' }, [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['POSHMARK', 'Poshmark (USD)']].map(([v, l]) => h('option', { value: v }, l))));
+    const plat = f('ev-platform', h('select', { 'aria-label': 'Platform' }, PLATFORM_OPTIONS.map(([v, l]) => h('option', { value: v }, l))));
     const type = f('ev-type', h('select', { 'aria-label': 'Price type' }, h('option', { value: 'ASK' }, 'Asking price'), h('option', { value: 'TRADE' }, 'Traded price')));
     const match = f('ev-match', h('select', { 'aria-label': 'Match' }, h('option', { value: 'SIMILAR' }, 'Similar item'), h('option', { value: 'SAME_ITEM' }, 'Same item'), h('option', { value: 'UNVERIFIED' }, 'Not sure')));
     const amount = f('ev-amount', h('input', { type: 'number', min: '1', step: 'any', placeholder: 'Amount', 'aria-label': 'Amount' }));
     const link = f('ev-link', h('input', { type: 'url', placeholder: 'https:// link (optional)', 'aria-label': 'Link' }));
     const add = async () => {
-      const cur = plat.value === 'POSHMARK' ? 'USD' : 'KRW';
+      const cur = PLATFORM_CURRENCY[plat.value];
       const r = await postJson(`/api/ws/${id}/evidence`, { itemId: S.open.itemId, platform: plat.value, priceType: type.value, amount: Number(amount.value), currency: cur, url: link.value || null, retrievedAt: new Date().toISOString().slice(0, 10), matchLevel: match.value });
       S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}` }, r.ok === false ? `${r.code} · ${r.detail}` : 'Price saved and read back');
       S.market = await getJson(`/api/ws/${id}/market/${S.open.itemId}`);
@@ -1034,7 +1043,7 @@ async function closet3dScreen(view) {
       h('div', { class: 'row' }, h('a', { class: 'btn small', href: `/today?lock=${itemId}` }, 'Wear it today'), h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
     const m = await getJson(`/api/ws/${id}/market/${itemId}`);
     const cards = (m && m.cards ? m.cards : []).filter((c) => c.entries.length);
-    const fmt = (e) => (e.currency === 'KRW' ? `₩${e.amount.toLocaleString('en-US')}` : `$${e.amount.toFixed(2)}`);
+    const fmt = (e) => money(e.amount, e.currency);
     evidence.replaceChildren(cards.length
       ? h('ul', { class: 'reasons' }, cards.flatMap((c) => c.entries.map((e) => h('li', null, `${c.info.name} · ${fmt(e)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'} · ${e.retrievedAt}`, e.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null))))
       : h('p', { class: 'muted' }, 'No price evidence yet. Prices come only from what you enter, one platform at a time.'),
