@@ -22,21 +22,34 @@ export class ExtrasStore {
       CREATE TABLE IF NOT EXISTS evidence (evidence_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
       CREATE TABLE IF NOT EXISTS handoffs (draft_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
       CREATE TABLE IF NOT EXISTS look_targets (workspace_id TEXT, look_id TEXT, at TEXT, PRIMARY KEY (workspace_id, look_id));
-      CREATE TABLE IF NOT EXISTS decisions (decision_id TEXT PRIMARY KEY, workspace_id TEXT, item_id TEXT, at TEXT, body TEXT);
+      CREATE TABLE IF NOT EXISTS decisions (decision_id TEXT PRIMARY KEY, workspace_id TEXT, item_id TEXT, at TEXT, body TEXT, client_key TEXT);
     `);
+    // Database files written before client_key existed get the column here; on a file that already has it the statement fails and is ignored.
+    try {
+      this.db.exec('ALTER TABLE decisions ADD COLUMN client_key TEXT');
+    } catch {
+      // column already present
+    }
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS decisions_client_key ON decisions (workspace_id, client_key) WHERE client_key IS NOT NULL');
   }
 
   // ---- keep-or-let-go decisions (insert only: a snapshot is never edited or deleted) ----
-  addDecision(ws: string, d: DecisionSnapshot): DecisionSnapshot {
+  /** A clientKey, when given, is stored once per workspace (unique index): the same key cannot insert a second row. */
+  addDecision(ws: string, d: DecisionSnapshot, clientKey: string | null = null): DecisionSnapshot {
     const body = JSON.stringify(d);
-    this.db.prepare('INSERT INTO decisions VALUES (?,?,?,?,?)').run(d.decisionId, ws, d.itemId, d.at, body);
-    const back = this.decision(ws, d.decisionId);
+    this.db.prepare('INSERT INTO decisions (decision_id, workspace_id, item_id, at, body, client_key) VALUES (?,?,?,?,?,?)').run(d.decisionId, ws, d.itemId, d.at, body, clientKey);
+    const back = clientKey === null ? this.decision(ws, d.decisionId) : this.decisionByKey(ws, clientKey);
     if (!back || JSON.stringify(back) !== body) throw new Error('READBACK_MISMATCH: decision');
     return back;
   }
 
   decision(ws: string, decisionId: string): DecisionSnapshot | null {
     const r = this.db.prepare('SELECT body FROM decisions WHERE workspace_id = ? AND decision_id = ?').get(ws, decisionId) as Row | undefined;
+    return r ? (JSON.parse(String(r.body)) as DecisionSnapshot) : null;
+  }
+
+  decisionByKey(ws: string, clientKey: string): DecisionSnapshot | null {
+    const r = this.db.prepare('SELECT body FROM decisions WHERE workspace_id = ? AND client_key = ?').get(ws, clientKey) as Row | undefined;
     return r ? (JSON.parse(String(r.body)) as DecisionSnapshot) : null;
   }
 

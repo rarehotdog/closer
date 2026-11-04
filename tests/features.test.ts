@@ -5,6 +5,7 @@ import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { SqliteLedger } from '../store/ledger.ts';
 import { ExtrasStore } from '../store/extras.ts';
 import { CloserService, type Operation } from '../engine/service.ts';
@@ -17,6 +18,7 @@ import { KILL_TTL_MS, PROVISIONAL_CAPS } from '../engine/caps.ts';
 import { addDays } from '../shared/dates.ts';
 import { netScenario, priceCards, sellDraft, validateEvidence, HANDOFF_STATES, PLATFORMS, PLATFORM_INFO } from '../engine/market.ts';
 import { countOutfits } from '../engine/looks.ts';
+import { basisOf } from '../engine/decision.ts';
 // @ts-expect-error plain browser module without type declarations; the same file the 3D screen imports
 import { buildAnatomy } from '../web/public/anatomy.js';
 import { checkIntent, INTENT_CHIPS, rulesIntent } from '../engine/intent.ts';
@@ -732,6 +734,115 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.match(c.line, /Days without a record stay unknown/);
     // The snapshots themselves did not change when the wears were recorded.
     assert.equal(t.extras.decision(t.ws, open.decision.decisionId)!.keep.wearsCounted, open.decision.keep.wearsCounted);
+  });
+});
+
+describe('F7 re-check and idempotent save: a saved position says when its facts moved, and one key saves once', () => {
+  const KEY = 'tap-0123456789ab';
+  const take = (t: ReturnType<typeof setup>, extra: { clientKey?: string; askPrice?: number } = {}, feat: FeatureService = t.feat) =>
+    feat.decide(t.ws, { itemId: 'J2', choice: 'KEEP', horizonDays: 90, platform: 'KARROT', askPrice: 60000, fees: [{ label: 'Delivery', kind: 'fixed', value: 3000 }], ...extra }, sampleEvidence(TODAY));
+
+  it('F7-01 the same clientKey twice is one row: the second call returns the saved snapshot with duplicate: true', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const a = take(t, { clientKey: KEY });
+    assert.ok(!('ok' in a), JSON.stringify(a));
+    assert.equal(a.duplicate, undefined);
+    const b = take(t, { clientKey: KEY });
+    assert.ok(!('ok' in b), JSON.stringify(b));
+    assert.equal(b.duplicate, true);
+    assert.deepEqual(b.decision, a.decision);
+    assert.equal(b.outcome.status, 'OPEN');
+    assert.equal(t.feat.decisions(t.ws, 'J2').length, 1);
+    assert.equal(t.extras.decisionByKey(t.ws, KEY)!.decisionId, a.decision.decisionId);
+  });
+
+  it('F7-02 the same key on different facts (another asking price) is refused, never saved over; a malformed key is refused', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const a = take(t, { clientKey: KEY });
+    assert.ok(!('ok' in a));
+    const b = take(t, { clientKey: KEY, askPrice: 70000 }) as { ok: false; code: string; detail: string };
+    assert.equal(b.ok, false);
+    assert.equal(b.code, 'INVALID_TRANSITION');
+    assert.match(b.detail, /already saved on different facts; open it again/);
+    assert.equal(t.feat.decisions(t.ws, 'J2').length, 1);
+    assert.equal(t.extras.decisionByKey(t.ws, KEY)!.sell.askPrice, 60000);
+    const bad = take(t, { clientKey: 'short' }) as { ok: false; code: string };
+    assert.equal(bad.code, 'INVALID_TRANSITION');
+    assert.equal(t.feat.decisions(t.ws, 'J2').length, 1);
+  });
+
+  it('F7-03 without a key, two saves are two rows as before; the basis is a stable fingerprint of the counted facts', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const a = take(t);
+    const b = take(t);
+    assert.ok(!('ok' in a) && !('ok' in b));
+    assert.notEqual(a.decision.decisionId, b.decision.decisionId);
+    assert.equal(t.feat.decisions(t.ws, 'J2').length, 2);
+    assert.match(a.decision.basis, /^[0-9a-f]{64}$/);
+    assert.equal(a.decision.basis, b.decision.basis);
+    assert.equal(basisOf(a.decision.keep, a.decision.sell), a.decision.basis);
+    const other = take(t, { askPrice: 70000 });
+    assert.ok(!('ok' in other));
+    assert.notEqual(other.decision.basis, a.decision.basis);
+  });
+
+  it('F7-04 a wear and a new price after a position are listed as moved facts; a fresh position starts clean; another horizon on screen is not a change', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const a = take(t);
+    assert.ok(!('ok' in a));
+    const v0 = t.feat.decisionView(t.ws, { itemId: 'J2', horizonDays: 30 }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in v0));
+    assert.deepEqual(v0.history[0].recheck, { needed: false, changed: [] });
+    ok(t.svc.recordPastWear(t.ws, { eventId: 'w-f7', actor: 'demo_script', expectedRevision: t.rev(), itemIds: ['J2'], occurredAt: addDays(TODAY, -1) }));
+    const e = t.feat.addEvidence(t.ws, { itemId: 'J2', platform: 'KARROT', priceType: 'ASK', amount: 55000, currency: 'KRW', retrievedAt: TODAY, matchLevel: 'SIMILAR' });
+    assert.ok(!('ok' in e));
+    const v1 = t.feat.decisionView(t.ws, { itemId: 'J2' }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in v1));
+    const r = v1.history[0].recheck;
+    assert.equal(r.needed, true);
+    assert.ok(r.changed.some((c) => c.includes('1 more confirmed wear')), JSON.stringify(r));
+    assert.ok(r.changed.some((c) => c.includes('1 new price on KARROT')), JSON.stringify(r));
+    // counted facts only: no chance, advice or estimate in the words
+    for (const c of r.changed) assert.doesNotMatch(c, /%|chance|likely|should|estimate/i);
+    // the snapshot itself did not change when the facts did
+    assert.equal(t.extras.decision(t.ws, a.decision.decisionId)!.keep.wearsCounted, 0);
+    // a fresh position an hour later (history is ordered by its saved-at time, newest first on screen)
+    const later = new FeatureService({ ledger: t.ledger, extras: t.extras, today: () => TODAY, now: () => new Date(`${TODAY}T10:00:00+09:00`) });
+    const b = take(t, {}, later);
+    assert.ok(!('ok' in b));
+    const v2 = t.feat.decisionView(t.ws, { itemId: 'J2' }, sampleEvidence(TODAY));
+    assert.ok(!('ok' in v2));
+    assert.equal(v2.history[0].decisionId, b.decision.decisionId);
+    assert.deepEqual(v2.history[0].recheck, { needed: false, changed: [] });
+    assert.equal(v2.history[1].recheck.needed, true);
+  });
+
+  it('F7-05 a database file from before client_key opens, keeps its rows, and takes keyed saves', () => {
+    const dir = join(ROOT, '.data', 'test');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `f-old-${process.pid}-${++n}.db`);
+    const raw = new DatabaseSync(path);
+    raw.exec('CREATE TABLE IF NOT EXISTS decisions (decision_id TEXT PRIMARY KEY, workspace_id TEXT, item_id TEXT, at TEXT, body TEXT)');
+    raw.prepare('INSERT INTO decisions VALUES (?,?,?,?,?)').run('d_old', 'ws-f', 'J2', '2026-10-01T00:00:00.000Z', JSON.stringify({ decisionId: 'd_old', itemId: 'J2' }));
+    raw.close();
+    const store = new ExtrasStore(path);
+    cleanups.push(() => { store.close(); for (const suf of ['', '-wal', '-shm']) rmSync(path + suf, { force: true }); });
+    assert.equal(store.decisions('ws-f').length, 1);
+    assert.equal(store.decisionByKey('ws-f', KEY), null);
+    const t = setup({ history: closetHistory(TODAY) });
+    const a = take(t);
+    assert.ok(!('ok' in a));
+    const d = { ...a.decision, decisionId: 'd_new' };
+    assert.deepEqual(store.addDecision('ws-f', d, KEY), d);
+    assert.equal(store.decisionByKey('ws-f', KEY)!.decisionId, 'd_new');
+    assert.equal(store.decisions('ws-f').length, 2);
+    // the unique index holds: a second row under the same key cannot be inserted
+    assert.throws(() => store.addDecision('ws-f', { ...d, decisionId: 'd_new2' }, KEY));
+    assert.equal(store.decisions('ws-f').length, 2);
+    // the same file opened again, now with the column, is fine too
+    const again = new ExtrasStore(path);
+    assert.equal(again.decisionByKey('ws-f', KEY)!.decisionId, 'd_new');
+    again.close();
   });
 });
 

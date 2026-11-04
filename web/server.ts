@@ -335,7 +335,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       return send(res, 200, feat.decide(wsId, {
         itemId: String(b.itemId ?? ''), choice: String(b.choice ?? ''), horizonDays: b.horizonDays === undefined ? undefined : Number(b.horizonDays),
         platform: String(b.platform ?? ''), askPrice: typeof b.askPrice === 'number' ? b.askPrice : null, fees: Array.isArray(b.fees) ? b.fees : [],
-        namedUses: b.namedUses, note: typeof b.note === 'string' ? b.note : null,
+        namedUses: b.namedUses, note: typeof b.note === 'string' ? b.note : null, clientKey: typeof b.clientKey === 'string' ? b.clientKey : null,
       }, sample));
     default:
       return send(res, 404, { ok: false, detail: 'unknown action' });
