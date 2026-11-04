@@ -289,6 +289,36 @@
       "reason": ""
     },
     {
+      "name": "GD-01 rate limiter: a burst of `limit`, then one token per window/limit, forgotten once full again",
+      "file": "tests/guard.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "GD-02 client address: socket by default; the last X-Forwarded-For entry only when the proxy is trusted",
+      "file": "tests/guard.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "GD-03 token check: equal strings only; missing, empty or different-length values never match",
+      "file": "tests/guard.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "GD-04 JSON bodies: application/json only, an object only, size-limited, parser text never echoed",
+      "file": "tests/guard.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "GD-05 response headers: a policy without unsafe-inline or unsafe-eval, nosniff, no referrer, no framing",
+      "file": "tests/guard.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
       "name": "live chip only for live + callId + 2xx",
       "file": "tests/unit.test.ts",
       "status": "PASS",
@@ -307,7 +337,7 @@
       "reason": ""
     },
     {
-      "name": "PH-02 SAM request asks for one_bit masks",
+      "name": "PH-02 SAM request sends metadata.mask_encoding only when asked (CLOSER_SAM_METADATA=1)",
       "file": "tests/photo.test.ts",
       "status": "PASS",
       "reason": ""
@@ -338,6 +368,18 @@
     },
     {
       "name": "PH-07 Spark 2 gets cut-outs only for items registered from a photo",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-08 sample photos are PNG data URLs (the image API lists no SVG) whose bytes are the pixels code measures",
+      "file": "tests/photo.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "PH-08 the store strips APP1 (Exif, XMP), APP13 and comment segments before writing and keeps the picture bytes",
       "file": "tests/photo.test.ts",
       "status": "PASS",
       "reason": ""
@@ -385,6 +427,18 @@
       "reason": ""
     },
     {
+      "name": "RT-01 visitor sweep: only visitor forks older than 24 h with no call since; every row keyed by them goes, call rows stay",
+      "file": "tests/retention.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "RT-02 a database file from before the created_at column gets the column; its rows are dated at the upgrade, not swept at once",
+      "file": "tests/retention.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
       "name": "SAM box prompt matches the doc example token; Spark 0–1000 → pixels uses floor and stays inside",
       "file": "tests/unit.test.ts",
       "status": "PASS",
@@ -393,6 +447,42 @@
     {
       "name": "SAM output parser reads the doc example records (box, frame size, mask H,W,encoding)",
       "file": "tests/unit.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SL-01 live SAM text: the official parser reads fields by name, half-open bounds come back as inclusive boxes, masks are decoded",
+      "file": "tests/sam_live.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SL-02 live SAM port: records from a 2xx body; parser diagnostics become call-line notes; a dropped record fails the id check; mock text stays on the mock path",
+      "file": "tests/sam_live.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SL-03 SAM prompt text comes from the official builder (same tokens as before); metadata only with CLOSER_SAM_METADATA=1",
+      "file": "tests/sam_live.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SL-04 strict schemas carry no maxItems/minItems/minimum/maximum; the same bounds are enforced by code",
+      "file": "tests/sam_live.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SL-05 mask-in-box: default tolerance max(8 px, 5 %); an overshoot within it is clamped and noted, beyond it fails; env override",
+      "file": "tests/sam_live.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "SL-06 service: a SAM box 2 px outside its prompt box is clamped (DRAFT, noted on the call line); a 401 names the key",
+      "file": "tests/sam_live.test.ts",
       "status": "PASS",
       "reason": ""
     },

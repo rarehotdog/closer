@@ -4,7 +4,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
 - AT test cases (variants counted separately): PASS 33 · FAIL 0 · SKIP 7 · total 40.
-- Other tests (unit, fixture answer): PASS 27 · FAIL 0 · SKIP 0 · total 27.
+- Other tests (unit, fixture answer): PASS 42 · FAIL 0 · SKIP 0 · total 42.
 
 | Test | Result | Note |
 |---|---|---|
@@ -61,15 +61,22 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | every adapters/ file carries the unverified header | PASS |  |
 | fixture colors map to their declared color family (12 named colors) | PASS |  |
 | FX-H pre-registered answer (§4-5) — A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1 | PASS |  |
+| GD-01 rate limiter: a burst of `limit`, then one token per window/limit, forgotten once full again | PASS |  |
+| GD-02 client address: socket by default; the last X-Forwarded-For entry only when the proxy is trusted | PASS |  |
+| GD-03 token check: equal strings only; missing, empty or different-length values never match | PASS |  |
+| GD-04 JSON bodies: application/json only, an object only, size-limited, parser text never echoed | PASS |  |
+| GD-05 response headers: a policy without unsafe-inline or unsafe-eval, nosniff, no referrer, no framing | PASS |  |
 | live chip only for live + callId + 2xx | PASS |  |
 | mode: mock is the default; real refuses without MODEL_API_KEY and in test processes; fetch is blocked here | PASS |  |
 | PH-01 official decoder reads the docs' own lossless example (27 × 60) | PASS |  |
-| PH-02 SAM request asks for one_bit masks | PASS |  |
+| PH-02 SAM request sends metadata.mask_encoding only when asked (CLOSER_SAM_METADATA=1) | PASS |  |
 | PH-03 PNG round trip and JPEG size header | PASS |  |
 | PH-04 photo store keeps the two copies together and maps pixels to photo coordinates | PASS |  |
 | PH-05 photo store refuses what it cannot use safely | PASS |  |
 | PH-06 cut-out thumbnail: garment pixels inside the mask, transparent outside, long side ≤ 256 | PASS |  |
 | PH-07 Spark 2 gets cut-outs only for items registered from a photo | PASS |  |
+| PH-08 sample photos are PNG data URLs (the image API lists no SVG) whose bytes are the pixels code measures | PASS |  |
+| PH-08 the store strips APP1 (Exif, XMP), APP13 and comment segments before writing and keeps the picture bytes | PASS |  |
 | read-only workspace (/w/demo-rc1): every write → SCOPE_DENIED | PASS |  |
 | reason codes: 30 verbatim (13 + 10 + 7), unique, removed codes absent | PASS |  |
 | RP-01 readUsage reads Responses, Chat and camelCase names without adding them up | PASS |  |
@@ -77,8 +84,16 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | RP-03 outputText: message parts first, then top-level output_text, then choices | PASS |  |
 | RP-04 parseJsonOutput accepts plain JSON or one fenced block, and nothing else | PASS |  |
 | RP-05 functionCalls: Responses items, object arguments, Chat tool_calls | PASS |  |
+| RT-01 visitor sweep: only visitor forks older than 24 h with no call since; every row keyed by them goes, call rows stay | PASS |  |
+| RT-02 a database file from before the created_at column gets the column; its rows are dated at the upgrade, not swept at once | PASS |  |
 | SAM box prompt matches the doc example token; Spark 0–1000 → pixels uses floor and stays inside | PASS |  |
 | SAM output parser reads the doc example records (box, frame size, mask H,W,encoding) | PASS |  |
+| SL-01 live SAM text: the official parser reads fields by name, half-open bounds come back as inclusive boxes, masks are decoded | PASS |  |
+| SL-02 live SAM port: records from a 2xx body; parser diagnostics become call-line notes; a dropped record fails the id check; mock text stays on the mock path | PASS |  |
+| SL-03 SAM prompt text comes from the official builder (same tokens as before); metadata only with CLOSER_SAM_METADATA=1 | PASS |  |
+| SL-04 strict schemas carry no maxItems/minItems/minimum/maximum; the same bounds are enforced by code | PASS |  |
+| SL-05 mask-in-box: default tolerance max(8 px, 5 %); an overshoot within it is clamped and noted, beyond it fails; env override | PASS |  |
+| SL-06 service: a SAM box 2 px outside its prompt box is clamped (DRAFT, noted on the call line); a 401 names the key | PASS |  |
 | stale expectedRevision → STALE_STATE; item IDs use the lowest free number per slot | PASS |  |
 | states (§4-1) | PASS |  |
 | transition table rows 1–13 and illegal transitions are rejected with the right code | PASS |  |
