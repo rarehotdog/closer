@@ -466,3 +466,5 @@ details.sub summary { cursor: pointer; font-weight: 600; padding: 6px 0; color: 
   label.row.muted input[type="checkbox"] { width: 22px; height: 22px; }
   .chip-row { margin: 8px 0 4px; }
 }
+.side .linksbox { margin-top: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; }
+.side .linksbox a { overflow-wrap: anywhere; }

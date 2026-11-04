@@ -938,7 +938,7 @@ async function closetScreen(view) {
   // ---- Keep or let go: one question per piece, two sides of counted facts, a position saved as a snapshot ----
   const CHOICE_LABEL = { KEEP: 'Keep', WEAR_ONCE: 'Try wearing it once', SELL_PREPARE: 'Prepare to sell', DEFER: 'Decide later' };
   async function openDecide(itemId) {
-    S.decide = { itemId, horizon: 90, view: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true };
+    S.decide = { itemId, horizon: 90, view: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true, links: null, linksBusy: false };
     await loadDecide();
     const el = document.getElementById('decide');
     if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -973,6 +973,33 @@ async function closetScreen(view) {
     const p = Number(D.price);
     D.net = p > 0 ? await postJson('/api/net', { price: p, platform: D.platform, fees: feeLines(D.fees) }) : null;
     render();
+  }
+  // Muse Wonder (or Spark, by the server's flag) searches for listings of this piece on the chosen platform. Only the links
+  // come back to the screen: the owner opens one, reads the price there and enters it as evidence. No model text is shown live.
+  async function findLinks() {
+    const D = S.decide;
+    if (!D || D.linksBusy) return;
+    const it = S.items[D.itemId];
+    D.linksBusy = true;
+    D.links = null;
+    render();
+    const r = await postJson(`/api/ws/${id}/wonder`, {
+      prompt: `Find current resale listings for a ${itemName(it)} on ${platformName(D.platform)}. Reply with the listing links only.`,
+      webSearch: PLATFORM_CURRENCY[D.platform] === 'KRW' ? { userLocation: { country: 'KR' } } : true,
+      reasoning: 'low', maxOutputTokens: 600,
+    });
+    D.linksBusy = false;
+    D.links = r.ok === false ? { error: r } : { items: r.links || [], mode: r.mode, text: r.mode === 'mock' ? r.result.text : null, chips: r.liveChips || [] };
+    render();
+  }
+  function linksBox(D) {
+    if (!D.links) return null;
+    const L = D.links;
+    if (L.error) return h('div', { class: 'linksbox' }, errChip(L.error));
+    return h('div', { class: 'linksbox', role: 'status' },
+      L.mode === 'mock' ? h('p', { class: 'muted' }, L.text) : h('p', { class: 'muted' }, L.items.length ? `${L.items.length} link${L.items.length === 1 ? '' : 's'} from the search. Open one, read the price there, and enter it as evidence yourself.` : 'The search returned no listing link. Nothing was invented in its place.'),
+      L.items.length ? h('ul', { class: 'reasons' }, L.items.map((l) => h('li', null, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.title || l.url), ` · ${l.platformName}`, l.cited ? h('span', { class: 'chip' }, 'cited') : null))) : null,
+      L.chips.length ? h('div', { class: 'chip-row' }, L.chips.map((c) => h('span', { class: 'chip ok' }, c))) : null);
   }
   async function takePosition(choice) {
     const D = S.decide;
@@ -1019,7 +1046,7 @@ async function closetScreen(view) {
     const step = cur === 'KRW' ? 1000 : 1;
     const rmin = hasRange ? Math.max(step, Math.floor((lo / 2) / step) * step) : 0;
     const rmax = hasRange ? Math.ceil((hi * 1.5) / step) * step : 0;
-    const plat = h('select', { id: 'dc-platform', 'aria-label': 'Platform', onchange: (e) => { D.platform = e.target.value; D.fees = newFees(D.platform); D.price = ''; D.net = null; render(); } },
+    const plat = h('select', { id: 'dc-platform', 'aria-label': 'Platform', onchange: (e) => { D.platform = e.target.value; D.fees = newFees(D.platform); D.price = ''; D.net = null; D.links = null; render(); } },
       PLATFORM_OPTIONS.map(([v, l]) => h('option', { value: v, selected: D.platform === v ? true : null }, l)));
     const num = h('input', { id: 'dc-price', type: 'number', min: '1', step: 'any', inputmode: 'decimal', placeholder: `Asking price to test (${cur})`, 'aria-label': 'Asking price', value: D.price, oninput: (e) => { D.price = e.target.value; if (range) range.value = e.target.value; }, onchange: recalc });
     const range = hasRange ? h('input', { id: 'dc-range', type: 'range', min: String(rmin), max: String(rmax), step: String(step), 'aria-label': 'Asking price slider', value: D.price || String(Math.round(lo / step) * step), oninput: (e) => { D.price = e.target.value; num.value = e.target.value; }, onchange: recalc }) : null;
@@ -1030,7 +1057,10 @@ async function closetScreen(view) {
       h('p', { class: 'muted' }, N ? N.line : D.net && D.net.ok === false ? D.net.detail : 'Pick a price to test. The net stays unknown until every cost line is checked.'));
     const sell = h('div', { class: 'card side' },
       h('div', { class: 'hd' }, 'If I prepare to sell'),
-      plat, seen, range, num,
+      plat, seen,
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small ghost', disabled: D.linksBusy ? true : null, onclick: findLinks }, D.linksBusy ? 'Asking the model…' : 'Find listings with Wonder')),
+      linksBox(D),
+      range, num,
       h('p', { class: 'lbl' }, 'Costs on this platform · blank = not checked, 0 = checked and free'),
       feeRows(D.fees, cur, recalc, true),
       h('button', { type: 'button', class: 'btn small ghost', onclick: () => { D.fees.push({ label: 'Other cost', kind: 'fixed', value: '' }); render(); } }, 'Add a cost line'),

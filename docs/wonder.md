@@ -30,6 +30,10 @@ The dry run prints the body with images redacted. A live run prints the answer, 
 - `CloserService.askWonder(ws, { request, sessionId })` runs the same gate as the photo loop (kill switch, app total, session and visitor-day caps at `WONDER_EST_MICRO_USD` ≈ $0.05 per call) and writes one call row per HTTP attempt with `operationId: null`. Nothing is written to the wardrobe ledger; the `stateHash` does not move.
 - Mock mode never pretends: the canned reply reads "MOCK · Muse Wonder was not called. This is a canned line from mock mode." Tests script their own replies (`MockScript.wonder`).
 
+## On screen: "Find listings with Wonder"
+
+The keep-or-let-go panel on My closet (`/closet?decide=J2`) carries one button on its sell side. It sends one search-grounded request for the piece on the chosen platform (Korean platforms add `user_location: KR`) and shows only the links that came back, sorted by platform, with a "cited" chip on the sources the answer used. The model's text is never shown on a live call, so no price enters the screen from the model; in mock mode the canned line is shown as is. Changing the platform clears the box. The call goes through `POST /api/ws/:id/wonder`, so the caps, the kill switch and the call ledger apply, and a public sample closet in real mode gets a refusal chip instead of a call.
+
 ## Links, not prices
 
 `engine/links.ts` sorts the urls a search-grounded answer cited or considered by resale platform (KREAM, Karrot, Bunjang, Poshmark, eBay, Grailed, Depop, Vinted, or the host for anything else), https only, cited sources first. A link is a place for the owner to look. No price is read from a page or from the model's text: the owner opens the link, reads the price there, and enters it as evidence themselves, with the platform's own currency and the date. That keeps the price cards and the keep-or-let-go screen on counted, owner-entered rows.
