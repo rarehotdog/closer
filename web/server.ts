@@ -24,6 +24,7 @@ import { FeatureService } from '../engine/features.ts';
 import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
 import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
 import { INTENT_CHIPS } from '../engine/intent.ts';
+import { BadRequest, RateLimiter, SECURITY_HEADERS, clientIp, readJson, tokenMatches } from './guard.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
@@ -89,24 +90,30 @@ ensureWorkspace('owner', 'real', false, OUTSIDE_PHOTO_ROLES);
 ensureWorkspace('demo-rc1', 'demo', true, FXH_ROLES.map((r) => r.role));
 
 // ---------- helpers ----------
-type Json = Record<string, unknown>;
 function send(res: ServerResponse, status: number, body: unknown, type = 'application/json; charset=utf-8') {
-  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
-async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Json> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    size += (c as Buffer).length;
-    if (size > limit) throw new Error('body too large');
-    chunks.push(c as Buffer);
-  }
-  return chunks.length ? (JSON.parse(Buffer.concat(chunks).toString('utf8')) as Json) : {};
+// Per-address limits (web/guard.ts): 30 workspace-creating POSTs and 60 model-call-starting POSTs
+// per 10 minutes. The address is the socket's unless CLOSER_TRUST_PROXY=1 (the deploy kit's Caddy
+// is then the one peer that can reach the server and writes X-Forwarded-For).
+const TRUST_PROXY = env.CLOSER_TRUST_PROXY === '1';
+const createLimit = new RateLimiter(30, 10 * 60_000);
+const callLimit = new RateLimiter(60, 10 * 60_000);
+const CALL_ACTIONS = new Set(['photo', 'propose', 'next', 'say', 'anchor', 'upload']);
+/** True (and a 429 already sent) when `bucket` has no token left for this request's address. */
+function limited(req: IncomingMessage, res: ServerResponse, bucket: RateLimiter): boolean {
+  const wait = bucket.take(clientIp(req, TRUST_PROXY));
+  if (wait === null) return false;
+  const secs = Math.max(1, Math.ceil(wait / 1000));
+  res.setHeader('Retry-After', String(secs));
+  // CALL_CAP_REACHED is the nearest of the 30 frozen reason codes (§4-3); the status line says which cap.
+  send(res, 429, { ok: false, code: 'CALL_CAP_REACHED', detail: `too many requests from this address; try again in ${secs} s` });
+  return true;
 }
 function adminAllowed(req: IncomingMessage): boolean {
   const token = env.CLOSER_ADMIN_TOKEN;
-  if (token) return req.headers['x-admin-token'] === token;
+  if (token) return tokenMatches(req.headers['x-admin-token'], token);
   return mode === 'mock'; // local mock only; real mode needs CLOSER_ADMIN_TOKEN
 }
 /**
@@ -115,8 +122,7 @@ function adminAllowed(req: IncomingMessage): boolean {
  */
 function ownerAllowed(req: IncomingMessage, ws: WorkspaceRow): boolean {
   if (ws.kind !== 'real' || mode === 'mock') return true;
-  const token = env.CLOSER_ADMIN_TOKEN;
-  return !!token && req.headers['x-admin-token'] === token;
+  return tokenMatches(req.headers['x-admin-token'], env.CLOSER_ADMIN_TOKEN);
 }
 
 function banner(ws: WorkspaceRow | null, sessionId: string | null) {
@@ -154,6 +160,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   }
   if (path === '/api/photos') return send(res, 200, { photos: publicPhotos(), chips: CHIPS, intentChips: INTENT_CHIPS, palette: NAMED_RGB, labels: LABELS, buildChip: BUILD_CHIP });
   if (path === '/api/try/start' && method === 'POST') {
+    if (limited(req, res, createLimit)) return;
     const body = await readJson(req);
     const photo = lib.get(String(body.photoId ?? ''));
     if (!photo) return send(res, 400, { ok: false, code: 'UNSUPPORTED_IMAGE', detail: 'unknown sample photo' });
@@ -167,6 +174,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (path === '/api/banner/visitor') return send(res, 200, banner({ workspaceId: 'visitor-preview', kind: 'visitor', publicReadOnly: false, seedRef: null, ledgerRevision: 0, createdOn: clock.today() }, null));
   if (path === '/api/closet/start' && method === 'POST') {
     // A private copy of the sample closet per visitor: 12 sample items and a synthetic 75-day wear history.
+    if (limited(req, res, createLimit)) return;
+    await readJson(req);
     const wsId = `closet-${randomUUID().slice(0, 8)}`;
     const since = addDays(clock.today(), -HISTORY_DAYS);
     ledger.createWorkspace({ workspaceId: wsId, kind: 'rehearsal', publicReadOnly: false, seedRef: 'sample-closet', createdOn: since }, { items: closetItems(), since });
@@ -239,6 +248,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
     return send(res, r ? 200 : 404, r ? r.response : { ok: false, detail: 'no such event' });
   }
   if (method !== 'POST') return send(res, 405, { ok: false });
+  if (CALL_ACTIONS.has(action) && limited(req, res, callLimit)) return;
   if (action === 'upload') {
     // Owner wardrobes only (visitors use the sample photos). Two copies from one canvas: JPEG for the models, PNG for pixels.
     if (ws.kind !== 'real') return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'uploads are for your own wardrobe' });
@@ -333,7 +343,10 @@ const server = createServer(async (req, res) => {
     }
     return send(res, 404, 'not found', 'text/plain');
   } catch (e) {
-    send(res, 500, { ok: false, detail: e instanceof Error ? e.message : String(e) });
+    if (e instanceof BadRequest) return send(res, e.status, { ok: false, code: 'META_REQUEST_REJECTED', detail: e.message });
+    // Logged here, not echoed: a parser or stack message is for the operator, not the caller.
+    console.error(`${new Date().toISOString()} ${req.method ?? ''} ${req.url ?? ''} failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+    send(res, 500, { ok: false, detail: 'internal error' });
   }
 });
 
