@@ -25,23 +25,32 @@ function webglOk() {
   }
 }
 
-function cardTexture(cell, fill, name) {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 320;
+/** Draws one card. With `photo` (the owner's own mask cut-out) the card shows the real garment; otherwise a code-drawn silhouette. */
+function drawCard(c, cell, fill, name, photo) {
   const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
   g.fillStyle = '#fbfaf7';
   g.fillRect(0, 0, 256, 320);
-  const pts = SHAPES[cell.slot] || SHAPES.top;
-  g.beginPath();
-  g.moveTo(pts[0][0], pts[0][1]);
-  for (const [x, y] of pts.slice(1)) g.lineTo(x, y);
-  g.closePath();
-  g.fillStyle = fill;
-  g.fill();
-  g.lineWidth = 3;
-  g.strokeStyle = 'rgba(0,0,0,0.35)';
-  g.stroke();
+  if (photo) {
+    const pw = photo.width || 1;
+    const ph = photo.height || 1;
+    const k = Math.min(236 / pw, 236 / ph);
+    const w = pw * k;
+    const h = ph * k;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(photo, (256 - w) / 2, 8 + (236 - h) / 2, w, h);
+  } else {
+    const pts = SHAPES[cell.slot] || SHAPES.top;
+    g.beginPath();
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (const [x, y] of pts.slice(1)) g.lineTo(x, y);
+    g.closePath();
+    g.fillStyle = fill;
+    g.fill();
+    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.stroke();
+  }
   g.textAlign = 'center';
   g.fillStyle = '#1d1b18';
   g.font = '700 32px system-ui, -apple-system, sans-serif';
@@ -58,9 +67,20 @@ function cardTexture(cell, fill, name) {
   g.lineWidth = cell.review === 'CANDIDATE' ? 10 : 2;
   g.strokeStyle = cell.review === 'CANDIDATE' ? '#c88a1a' : 'rgba(0,0,0,0.18)';
   g.strokeRect(5, 5, 246, 310);
+}
+
+function cardTexture(cell, fill, name, imageOf) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 320;
+  drawCard(c, cell, fill, name, null);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
+  const pending = imageOf ? imageOf(cell) : null;
+  if (pending && typeof pending.then === 'function') {
+    pending.then((photo) => { if (photo) { drawCard(c, cell, fill, name, photo); t.needsUpdate = true; } }).catch(() => {});
+  }
   return t;
 }
 
@@ -73,7 +93,7 @@ function lines(points, mat) {
  * Mounts the 3D closet into `host`. Returns null when the browser has no WebGL, so the caller can show the list instead.
  * @param {HTMLElement} host
  * @param {{layers: Array<{slot:string, items:Array<object>}>}} anatomy  result of buildAnatomy()
- * @param {{colorOf:(c:string)=>string, nameOf:(cell:object)=>string, onPick:(cell:object)=>void}} opts
+ * @param {{colorOf:(c:string)=>string, nameOf:(cell:object)=>string, onPick:(cell:object)=>void, imageOf?:(cell:object)=>Promise<CanvasImageSource|null>|null}} opts
  */
 export function mountCloset3d(host, anatomy, opts) {
   if (!webglOk()) return null;
@@ -111,7 +131,7 @@ export function mountCloset3d(host, anatomy, opts) {
     const n = layer.items.length;
     const step = n > 1 ? Math.min(0.98, (WIDTH - CARD_W) / (n - 1)) : 0;
     layer.items.forEach((cell, i) => {
-      const mat = new THREE.MeshBasicMaterial({ map: cardTexture(cell, opts.colorOf(cell.color), opts.nameOf(cell)), transparent: true, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ map: cardTexture(cell, opts.colorOf(cell.color), opts.nameOf(cell), opts.imageOf), transparent: true, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(CARD_W, CARD_H), mat);
       const x = (i - (n - 1) / 2) * step;
       mesh.position.set(x, 0, 0.05 + i * 0.004);
@@ -126,6 +146,7 @@ export function mountCloset3d(host, anatomy, opts) {
 
   let explode = 0;
   let selected = null;
+  let picked = new Set();
   const vfov = (camera.fov * Math.PI) / 180;
   function layout() {
     for (const g of groups) {
@@ -153,10 +174,19 @@ export function mountCloset3d(host, anatomy, opts) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
+  // Isolation view: once an outfit is being picked, every other card fades back.
+  function paint() {
+    for (const m of cards) {
+      const id = m.userData.cell.itemId;
+      const on = picked.size === 0 || picked.has(id) || m === selected;
+      m.material.opacity = on ? 1 : 0.22;
+      const k = m === selected ? 1.16 : picked.has(id) ? 1.1 : 1;
+      m.scale.set(k, k, k);
+    }
+  }
   function select(mesh) {
-    if (selected) selected.scale.set(1, 1, 1);
     selected = mesh;
-    if (mesh) mesh.scale.set(1.16, 1.16, 1.16);
+    paint();
   }
 
   const el = renderer.domElement;
@@ -196,6 +226,7 @@ export function mountCloset3d(host, anatomy, opts) {
     cardCount: cards.length,
     setExplode(v) { explode = Math.max(0, Math.min(1, v)); },
     select(itemId) { select(cards.find((m) => m.userData.cell.itemId === itemId) || null); },
+    setPicked(ids) { picked = new Set(ids); paint(); },
     dispose() { renderer.setAnimationLoop(null); renderer.dispose(); },
   };
 }

@@ -160,3 +160,13 @@ The owner picks sample looks on Discover as **targets** ("Add as target"). Close
 - **Not in it.** No per-garment 3D models, no closet value total, no estimated resale price. Per-garment models from photos (SAM 3D Objects) are listed under What comes next.
 - **Serving three.js.** The module is served from the installed package (`node_modules/three/build/three.module.min.js`), pinned in `package-lock.json`; it is not copied into the repository. `deploy/gce/install_remote.sh` now runs `npm ci --omit=dev`, which the deploy needed anyway for `@meta-sam/parser`.
 - **No WebGL.** The page says so and opens the list view with the same pieces.
+
+### Closet in 3D: outfit picking and photo cut-outs (11/4 night, second pass)
+
+- **Pick freely.** Any piece can go into the outfit tray, one per layer; picking another piece on the same layer replaces it. While an outfit is being picked, the other cards fade back (isolation view). "Wear these today" opens `/today?lock=…` with the picked pieces locked.
+- **Real garment where a photo exists.** A piece registered from a photo is drawn from that photo, cut out by its SAM mask. The owner's own uploads are fetched with the owner header at `/closet/3d?ws=owner`. Pieces without a photo stay code-drawn, and the legend says how many are which ("4 of 9 pieces show the photo they were registered from").
+- **Not in it.** The cut-out is a flat card in 3D space, not a reconstructed 3D garment. Per-garment 3D models stay in What comes next (SAM 3D Objects, visible-front pieces only).
+
+### Resale platforms (11/4 night)
+
+Korean platforms first (KREAM, Karrot, Bunjang), then Poshmark, eBay.com, Grailed, Depop US and Vinted (EUR). Each keeps its own currency; nothing is converted or averaged. Platform notes say what to check and carry no fee values; fee rows in the net calculator start blank, so the net stays unknown until each fee is checked. Test F2-18.

@@ -503,7 +503,7 @@ async function appScreen(view) {
   const probe = await fetch('/api/ws/owner/view', { headers: authHeaders() });
   if (probe.status === 403) { view.append(h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
   const root = h('div');
-  view.append(root);
+  view.append(h('p', null, h('a', { class: 'btn small ghost', href: '/closet/3d?ws=owner' }, 'See my wardrobe in 3D')), root);
   const ui = decisionUI(root, { wsId: 'owner', visitor: false });
   await ui.refresh();
 }
@@ -998,10 +998,54 @@ async function discoverScreen(view) {
 }
 
 // The closet by layer in 3D. Same pieces and states as My closet (anatomy.js); the canvas adds no numbers.
+// A mask cut-out of a photo, drawn once the image has loaded.
+async function cutCanvasReady(cut) {
+  const img = await loadImage(cut.url);
+  const c = document.createElement('canvas');
+  c.width = cut.mask.w;
+  c.height = cut.mask.h;
+  const ctx = c.getContext('2d');
+  ctx.translate(-cut.mask.x, -cut.mask.y);
+  ctx.clip(maskPath(cut.mask));
+  ctx.drawImage(img, 0, 0);
+  return c;
+}
+
 async function closet3dScreen(view) {
-  chrome(sampleChips());
-  document.body.append(tabbar());
-  const { id, view: v } = await closetWs();
+  // ?ws=owner opens the owner's own wardrobe (owner token required); otherwise this browser's sample closet.
+  const wsParam = new URLSearchParams(location.search).get('ws');
+  let id;
+  let v;
+  if (wsParam) {
+    chrome([]);
+    document.body.append(tabbar());
+    const r = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/view`, { headers: authHeaders() });
+    if (!r.ok) { view.append(h('h1', null, 'Closet in 3D'), ownerBar(), h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
+    id = wsParam;
+    v = await r.json();
+  } else {
+    chrome(sampleChips());
+    document.body.append(tabbar());
+    ({ id, view: v } = await closetWs());
+  }
+  // Photos this wardrobe was registered from: the public sample photos plus the owner's own uploads (fetched with the owner header).
+  const photos = META.photos.slice();
+  if (wsParam) {
+    const own = await getJson(`/api/ws/${id}/photos`).catch(() => ({ photos: [] }));
+    for (const p of own.photos || []) {
+      const b = await fetch(`/api/ws/${id}/photo/${p.photoId}`, { headers: authHeaders() });
+      if (b.ok) photos.push({ photoId: p.photoId, url: URL.createObjectURL(await b.blob()), mine: true });
+    }
+  }
+  const cuts = {};
+  for (const op of v.operations || []) {
+    if (op.kind !== 'photo' || !op.cardItemIds) continue;
+    const photo = photos.find((p) => p.photoId === op.photoId);
+    for (const c of op.cards) {
+      const itemId = op.cardItemIds[String(c.cardId)];
+      if (itemId && c.mask && photo && !cuts[itemId]) cuts[itemId] = { url: photo.url, mask: c.mask, mine: !!photo.mine };
+    }
+  }
   const review = await getJson(`/api/ws/${id}/review?window=60`);
   const { buildAnatomy, LAYER_LABEL, AVAILABILITY_LABEL } = await import('/static/anatomy.js');
   const three = await import('/static/closet3d.js').catch(() => null);
@@ -1015,14 +1059,31 @@ async function closet3dScreen(view) {
     A.layers.map((l) => [h('h3', null, `${l.label} · ${l.items.length}`),
       h('div', { class: 'chip-row' }, l.items.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => show(c.itemId) }, `${c.itemId} · ${itemName(byId[c.itemId])}${c.availability !== 'AVAILABLE' ? ` · ${AVAILABILITY_LABEL[c.availability] || c.availability}` : ''}`)))]));
   const avail = Object.entries(C.byAvailability).map(([k, n]) => h('span', { class: `chip${k === 'AVAILABLE' ? '' : ' warn'}` }, `${AVAILABILITY_LABEL[k] || k}: ${n}`));
+  const nPhoto = Object.keys(cuts).length;
   const legend = h('section', { class: 'panel' },
     h('p', null, h('b', null, `${C.total} pieces`), ` · ${A.layers.map((l) => `${l.label.toLowerCase()} ${l.items.length}`).join(' · ')}`),
     h('div', { class: 'chip-row' }, avail, h('span', { class: 'chip legend-amber' }, `Amber outline: no confirmed wear in 60 days, enough days recorded: ${C.byReview.CANDIDATE || 0}`)),
+    h('p', { class: 'muted' }, nPhoto
+      ? `${nPhoto} of ${C.total} pieces show the photo they were registered from, cut out by its mask. The rest are drawn by code.`
+      : 'Every card here is drawn by code. A piece registered from a photo shows that photo, cut out by its mask.'),
     h('p', { class: 'muted' }, A.note));
+  // Outfit tray: pick any piece, one per layer; picking another piece on the same layer replaces it.
+  const outfit = {};
+  const tray = h('section', { class: 'panel', id: 'outfit', 'aria-live': 'polite' });
+  function paintTray() {
+    const ids = A.layers.map((l) => outfit[l.slot]).filter(Boolean);
+    if (scene) scene.setPicked(ids);
+    tray.replaceChildren(h('h2', null, 'Outfit you are putting together'),
+      ids.length ? h('div', { class: 'chip-row' }, ids.map((x) => h('button', { type: 'button', class: 'chip accent', onclick: () => show(x) }, `${x} · ${itemName(byId[x])}`))) : h('p', { class: 'muted' }, 'Tap a piece, then "Add to outfit". Any piece, one per layer.'),
+      ids.length ? h('div', { class: 'row' },
+        wsParam ? h('span', { class: 'muted' }, `Picked: ${ids.join(' + ')}. Use them as locks on My wardrobe.`) : h('a', { class: 'btn small', href: `/today?lock=${ids.join(',')}` }, `Wear these today (${ids.join(' + ')})`),
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const k of Object.keys(outfit)) delete outfit[k]; paintTray(); } }, 'Clear')) : null);
+  }
   view.append(h('h1', null, 'Closet in 3D'),
     h('p', { class: 'lede' }, 'Your closet by layer: outerwear rail, tops, bottoms, shoes. Drag sideways to turn it, slide to pull the layers apart, tap a piece.'),
-    host, h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Exploded view'), slider), legend, panel, list);
-  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => itemName(byId[c.itemId]), onPick: (c) => show(c.itemId) }) : null;
+    host, h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Exploded view'), slider), tray, legend, panel, list);
+  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => itemName(byId[c.itemId]), onPick: (c) => show(c.itemId), imageOf: (c) => (cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null) }) : null;
+  paintTray();
   if (scene) scene.setExplode(0.35);
   else { host.replaceWith(h('p', { class: 'chip warn' }, 'This browser has no WebGL, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
   slider.addEventListener('input', (e) => { if (scene) scene.setExplode(Number(e.target.value) / 100); });
@@ -1032,15 +1093,20 @@ async function closet3dScreen(view) {
     const cell = A.layers.flatMap((l) => l.items).find((c) => c.itemId === itemId);
     const it = byId[itemId];
     if (!cell || !it) return;
+    const inOutfit = outfit[cell.slot] === itemId;
     const facts = h('ul', { class: 'reasons' },
       h('li', null, `${LAYER_LABEL[cell.slot]} · ${it.formality} formality`),
+      h('li', null, cuts[itemId] ? `Shown from ${cuts[itemId].mine ? 'your photo' : 'a sample photo'}, cut out by its mask` : 'Drawn by code: no photo registered for this piece'),
       h('li', null, AVAILABILITY_LABEL[cell.availability] || cell.availability),
       h('li', null, cell.wearLabel || 'no confirmed wear yet'),
       cell.lastWorn ? h('li', null, `Last confirmed wear: ${cell.lastWorn}`) : null,
       cell.reviewLine ? h('li', null, cell.reviewLine) : null);
     const evidence = h('div', null, h('p', { class: 'muted' }, 'Loading price evidence…'));
     panel.replaceChildren(h('h2', null, `${itemId} · ${itemName(it)}`), facts, h('h3', null, 'Price evidence'), evidence,
-      h('div', { class: 'row' }, h('a', { class: 'btn small', href: `/today?lock=${itemId}` }, 'Wear it today'), h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: `btn small${inOutfit ? ' ghost' : ''}`, onclick: () => { if (inOutfit) delete outfit[cell.slot]; else outfit[cell.slot] = itemId; paintTray(); show(itemId); } }, inOutfit ? 'Remove from outfit' : 'Add to outfit'),
+        wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear it today'),
+        wsParam ? null : h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
     const m = await getJson(`/api/ws/${id}/market/${itemId}`);
     const cards = (m && m.cards ? m.cards : []).filter((c) => c.entries.length);
     const fmt = (e) => money(e.amount, e.currency);
