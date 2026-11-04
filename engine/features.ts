@@ -39,7 +39,8 @@ const CLIENT_KEY_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 /** Fee lines as the owner typed them: a blank value is unknown, 0 counts only when typed. Returns a message when a line is malformed. */
 export function parseFees(fees: unknown): FeeLine[] | string {
-  if (!Array.isArray(fees) || fees.length > 10) return 'up to 10 fee lines';
+  if (!Array.isArray(fees)) return 'fees must be a list of cost lines';
+  if (fees.length > 10) return 'up to 10 fee lines';
   const lines: FeeLine[] = [];
   for (const f of fees as Partial<FeeLine>[]) {
     const label = String(f?.label ?? '').trim().slice(0, 40);
@@ -170,7 +171,7 @@ export class FeatureService {
    * Net amount for a price the owner picks. Fee lines come from the owner: a blank value means
    * "not checked yet" and keeps the net unknown; 0 counts only when the owner typed 0.
    */
-  net(price: number, platform: Platform, fees: unknown[]) {
+  net(price: number, platform: Platform, fees: unknown) {
     if (!PLATFORMS.includes(platform)) return fail('INVALID_TRANSITION', 'unknown platform');
     if (!(typeof price === 'number' && Number.isFinite(price) && price > 0)) return fail('INVALID_TRANSITION', 'price must be a positive number');
     const lines = parseFees(fees);
@@ -225,7 +226,7 @@ export class FeatureService {
    * returns the row already saved (duplicate: true) instead of a second row; the same key on
    * different facts is refused, because that position would rest on a screen the owner has not seen.
    */
-  decide(ws: string, a: { itemId: string; choice: string; horizonDays?: number; platform: string; askPrice?: number | null; fees?: unknown[]; namedUses?: unknown; note?: string | null; clientKey?: string | null }, sample: readonly Evidence[] = []): { decision: DecisionSnapshot; outcome: Outcome; duplicate?: true } | Fail {
+  decide(ws: string, a: { itemId: string; choice: string; horizonDays?: number; platform: string; askPrice?: unknown; fees?: unknown; namedUses?: unknown; note?: string | null; clientKey?: string | null }, sample: readonly Evidence[] = []): { decision: DecisionSnapshot; outcome: Outcome; duplicate?: true } | Fail {
     const deny = this.writable(ws);
     if (deny) return deny;
     const clientKey = a.clientKey === undefined || a.clientKey === null ? null : String(a.clientKey);
@@ -234,8 +235,9 @@ export class FeatureService {
     if (!(PLATFORMS as readonly string[]).includes(a.platform)) return fail('INVALID_TRANSITION', 'unknown platform');
     const horizonDays = a.horizonDays === undefined ? DEFAULT_HORIZON : a.horizonDays;
     if (!isHorizon(horizonDays)) return fail('INVALID_TRANSITION', `horizonDays must be one of ${HORIZON_DAYS.join(', ')}`);
-    const askPrice = a.askPrice === undefined || a.askPrice === null ? null : a.askPrice;
-    if (askPrice !== null && !(typeof askPrice === 'number' && Number.isFinite(askPrice) && askPrice > 0)) return fail('INVALID_TRANSITION', 'askPrice must be a positive number or blank');
+    // A price sent as text or any other shape is refused rather than dropped, so a saved position never rests on a price the owner did not see.
+    const askPrice = a.askPrice === undefined || a.askPrice === null ? null : typeof a.askPrice === 'number' && Number.isFinite(a.askPrice) && a.askPrice > 0 ? a.askPrice : undefined;
+    if (askPrice === undefined) return fail('INVALID_TRANSITION', 'askPrice must be a positive number or blank');
     const fees = parseFees(a.fees ?? []);
     if (typeof fees === 'string') return fail('INVALID_TRANSITION', fees);
     const today = this.today();

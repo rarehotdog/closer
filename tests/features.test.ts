@@ -308,6 +308,9 @@ describe('F2 price cards and hand-off drafts', () => {
     assert.equal(code(t.feat.net(1000, 'KARROT', [{ label: '', kind: 'fixed', value: 1 }])), 'INVALID_TRANSITION');
     assert.equal(code(t.feat.net(1000, 'NOT_A_PLATFORM' as never, [])), 'INVALID_TRANSITION');
     assert.equal(code(t.feat.net(1000, 'KARROT', Array.from({ length: 11 }, () => ({ label: 'x', kind: 'fixed', value: 1 })))), 'INVALID_TRANSITION');
+    // Cost lines in any other shape are refused, not read as "no cost lines".
+    assert.match((t.feat.net(1000, 'KARROT', 'x') as { detail: string }).detail, /fees must be a list/);
+    assert.match((t.feat.net(1000, 'KARROT', { label: 'Fee' }) as { detail: string }).detail, /fees must be a list/);
   });
 
   it('F2-13 a sale draft keeps [확인] placeholders; it cannot be marked reviewed until they are filled', () => {
@@ -735,6 +738,9 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.match(bad({ itemId: 'J2', choice: 'KEEP', horizonDays: 45, platform: 'KARROT' }).detail, /30, 60, 90/);
     assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'MUSINSA' }).detail, /unknown platform/);
     assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', askPrice: -5 }).detail, /askPrice/);
+    // A price or cost lines in the wrong shape are refused instead of being dropped from the saved position.
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', askPrice: '100000' }).detail, /askPrice must be a positive number or blank/);
+    assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', fees: 'x' }).detail, /fees must be a list/);
     assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', namedUses: [{ label: 'Trip', on: addDays(TODAY, -1) }] }).detail, /in the past/);
     assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', namedUses: Array.from({ length: 6 }, (_, i) => ({ label: `u${i}`, on: null })) }).detail, /up to 5/);
     assert.match(bad({ itemId: 'J2', choice: 'KEEP', platform: 'KARROT', fees: [{ label: 'Fee', kind: 'rate', value: 5 }] }).detail, /share of the price/);

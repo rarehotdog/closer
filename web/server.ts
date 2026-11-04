@@ -199,7 +199,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   }
   if (path === '/api/net' && method === 'POST') {
     const b = await readJson(req);
-    return send(res, 200, feat.net(Number(b.price), b.platform as never, Array.isArray(b.fees) ? (b.fees as never) : []));
+    return send(res, 200, feat.net(Number(b.price), b.platform as never, b.fees ?? []));
   }
   if (path === '/api/demo-clock' && method === 'POST') {
     if (!adminAllowed(req)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'demo clock is local mock or admin only' });
@@ -336,7 +336,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
     case 'decide':
       return send(res, 200, feat.decide(wsId, {
         itemId: String(b.itemId ?? ''), choice: String(b.choice ?? ''), horizonDays: b.horizonDays === undefined ? undefined : Number(b.horizonDays),
-        platform: String(b.platform ?? ''), askPrice: typeof b.askPrice === 'number' ? b.askPrice : null, fees: Array.isArray(b.fees) ? b.fees : [],
+        platform: String(b.platform ?? ''), askPrice: b.askPrice, fees: b.fees,
         namedUses: b.namedUses, note: typeof b.note === 'string' ? b.note : null, clientKey: typeof b.clientKey === 'string' ? b.clientKey : null,
       }, sample));
     default:
