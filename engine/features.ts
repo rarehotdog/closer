@@ -16,6 +16,7 @@ import {
   type DecisionChoice, type DecisionSnapshot, type EvidenceSummary, type HorizonDays, type KeepSide, type Outcome, type Recheck,
 } from './decision.ts';
 import type { DecisionContext } from '../shared/wardrobe.ts';
+import { closetLedger as buildClosetLedger, type ClosetLedger } from './ledger.ts';
 
 export type Fail = { ok: false; code: string; detail: string };
 const fail = (code: string, detail: string): Fail => ({ ok: false, code, detail });
@@ -140,6 +141,16 @@ export class FeatureService {
   coverage(ws: string, sample: readonly Evidence[] = []) {
     const ids = this.ledger.readState(ws, { fresh: true }).items.filter((i) => i.ownership === 'CONFIRMED').map((i) => i.itemId);
     return evidenceCoverage(ids, [...this.extras.evidence(ws), ...sample]);
+  }
+
+  /**
+   * The closet ledger (engine/ledger.ts): confirmed pieces, the latest price seen per piece summed
+   * per currency with owner and sample rows apart, the nets of saved positions and the 60-day wear
+   * counts. Named closetLedger because `ledger` on this class is the wear-record store.
+   */
+  closetLedger(ws: string, sample: readonly Evidence[] = []): ClosetLedger {
+    const items = this.ledger.readState(ws, { fresh: true }).items;
+    return buildClosetLedger({ items, evidence: [...this.extras.evidence(ws), ...sample], decisions: this.extras.decisions(ws), reviewRows: this.review(ws, 60).rows });
   }
 
   addEvidence(ws: string, e: Partial<Evidence>): Evidence | Fail {
