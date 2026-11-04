@@ -8,7 +8,7 @@ Closer keeps the piece you want to wear, changes only what feels off or what cha
 
 | Built during the hackathon | Third-party | Pre-existing |
 |---|---|---|
-| All code and docs in this repository. The first commit is the scaffold only. | One runtime dependency: `@meta-sam/parser` 0.1.0 (Meta, SAM License), the official decoder for SAM 3.1 mask payloads. Dev tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). | 0 |
+| All code and docs in this repository. The first commit is the scaffold only. | Two runtime dependencies: `@meta-sam/parser` 0.1.0 (Meta, SAM License), the official decoder for SAM 3.1 mask payloads, and `three` 0.170.0 (MIT) for the 3D closet view. Dev tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). | 0 |
 
 License: [MIT](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
@@ -33,6 +33,7 @@ You decide at three places: the cards (step 4), the option and the wear (step 7)
 - **Today.** The loop above. A laundry, repair or storage button re-plans only that slot, with zero model calls.
 - **My closet.** Items registered from the decision photos. The 60-day review lists a piece as "no confirmed wear in N days" only when tracking is complete and at least half of the days have a record; you choose keep, later or exempt. "Look at selling" shows the per-platform prices you entered, never an average; when a fee is unknown, the net is shown as unknown. Hand-over drafts move DRAFT → REVIEWED → OWNER_REPORTED_DONE and never invent a link.
 - **Discover.** Sample looks by occasion, rebuilt with what you own first; only the pieces you lack become optional cards, with "N more complete outfits" counted on this closet. Pick looks as **style targets**: Closer counts, piece by piece, how much of them your closet already covers ("6 of 8 pieces · 75%") and shows an item box of every piece they ask for (have it / similar / missing). The formula is printed next to the number, and the count moves only when the closet does.
+- **Closet in 3D.** `/closet/3d` draws the same pieces by layer in three.js: outerwear rail, tops, bottoms, shoes. Drag to turn it, slide for an exploded view, tap a piece for its confirmed wears, review status and per-platform price evidence. It shows the same pieces and counts as My closet and adds no numbers of its own; without WebGL it falls back to the same list.
 
 ## Verify it yourself
 
@@ -47,12 +48,12 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 | Command | What it does |
 |---|---|
 | `npm test` | Runs the keyless acceptance tests, unit tests and static checks; writes `docs/at_results.json` and `docs/at_results.md`. |
-| `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/today`, `/closet`, `/discover`, `/w/demo-rc1`, `/admin`, `/version`. |
+| `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/today`, `/closet`, `/closet/3d`, `/discover`, `/w/demo-rc1`, `/admin`, `/version`. |
 | `npm run live:check` | Owner's machine only: one real call per model with the key read from the Keychain; writes `.data/live_check.json`. Never runs inside tests. |
 | `npm run screens` | Captures the screens into `docs/screens/` with Playwright Chromium (Playwright is not a project dependency). |
 | `npm run typecheck` | Optional `tsc` check (needs TypeScript and Node type definitions installed locally). |
 
-Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`).
+Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies.
 
 Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written before any call` — not measured yet.
 
@@ -70,7 +71,7 @@ Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written b
 - A closet ledger with its denominator on screen: pieces with a price on record out of all pieces, and what each would leave in your hand, per platform.
 - Resale evidence from official platform APIs where they exist; otherwise a screenshot you paste. Never averaged across platforms.
 - Donation points near you from a public directory, using your location only when you allow it.
-- A 3D view of the closet by layer (outer, top, bottom, shoes), drawn from the same counts, in three.js.
+- A 3D model per garment from a photo, with SAM 3D Objects, only for pieces whose front is visible in the photo. Hidden pieces stay as cards.
 
 ## FAQ
 

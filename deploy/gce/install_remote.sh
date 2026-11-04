@@ -25,6 +25,8 @@ REL="/opt/closer/releases/$SHA"
 rm -rf "$REL" && mkdir -p "$REL"
 tar -xzf "/tmp/closer-$SHA.tgz" -C "$REL"
 printf '%s\n' "$SHA" > "$REL/BUILD_SHA"
+# git archive ships no node_modules: install the pinned runtime dependencies (@meta-sam/parser, three) from the lock file.
+(cd "$REL" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
 chown -R root:root "$REL" && chmod -R a+rX "$REL"
 ln -sfn "$REL" /opt/closer/current
 if [ ! -f /etc/closer/env ]; then

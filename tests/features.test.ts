@@ -17,6 +17,8 @@ import { KILL_TTL_MS, PROVISIONAL_CAPS } from '../engine/caps.ts';
 import { addDays } from '../shared/dates.ts';
 import { netScenario, priceCards, validateEvidence, HANDOFF_STATES } from '../engine/market.ts';
 import { countOutfits } from '../engine/looks.ts';
+// @ts-expect-error plain browser module without type declarations; the same file the 3D screen imports
+import { buildAnatomy } from '../web/public/anatomy.js';
 import { checkIntent, rulesIntent } from '../engine/intent.ts';
 import { factsFromState } from '../engine/rules.ts';
 import type { Item } from '../shared/wardrobe.ts';
@@ -415,6 +417,49 @@ describe('F3 style targets: a counted match and an item box, nothing estimated',
     const top = c.box.find((e) => e.slot === 'top');
     assert.ok(top && top.state !== 'FILLED');
     assert.notEqual(top.itemId, 'T1');
+  });
+});
+
+describe('F4 closet in 3D: same pieces and states as My closet, no numbers of its own', () => {
+  const anatomyOf = (t: ReturnType<typeof setup>) => {
+    const v = t.svc.view(t.ws) as unknown as { items: { itemId: string; slot: string; availability: string; wearCount: number }[] };
+    const r = t.feat.review(t.ws, 60);
+    return { v, r, a: buildAnatomy(v.items, r.rows) };
+  };
+
+  it('F4-01 every piece appears once, on its own layer, with the counts My closet shows', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const { v, r, a } = anatomyOf(t);
+    const drawn = a.layers.flatMap((l: { slot: string; items: { itemId: string; slot: string }[] }) => l.items.map((c) => { assert.equal(c.slot, l.slot); return c.itemId; }));
+    assert.equal(a.counts.total, v.items.length);
+    assert.deepEqual([...drawn].sort(), v.items.map((i) => i.itemId).sort());
+    assert.deepEqual(a.counts.unplaced, []);
+    for (const slot of ['outer', 'top', 'bottom', 'shoes']) assert.equal(a.counts.bySlot[slot], v.items.filter((i) => i.slot === slot).length);
+    const avail: Record<string, number> = {};
+    for (const i of v.items) avail[i.availability] = (avail[i.availability] ?? 0) + 1;
+    assert.deepEqual(a.counts.byAvailability, avail);
+    const rev: Record<string, number> = {};
+    for (const row of r.rows) rev[row.status] = (rev[row.status] ?? 0) + 1;
+    assert.deepEqual(a.counts.byReview, rev);
+  });
+
+  it('F4-02 the 3D view follows the closet: laundry shows on the piece, the total does not change', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const before = anatomyOf(t).a;
+    ok(t.svc.setAvailability(t.ws, { eventId: 'e-3d', actor: 'human', expectedRevision: t.rev(), itemId: 'B1', state: 'LAUNDRY' }));
+    const after = anatomyOf(t).a;
+    assert.equal(after.counts.total, before.counts.total);
+    const b1 = after.layers.flatMap((l: { items: { itemId: string; availability: string }[] }) => l.items).find((c: { itemId: string }) => c.itemId === 'B1');
+    assert.equal(b1.availability, 'LAUNDRY');
+    assert.equal(after.counts.byAvailability.LAUNDRY, (before.counts.byAvailability.LAUNDRY ?? 0) + 1);
+  });
+
+  it('F4-03 the 3D data carries no prices, values or estimates', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    const keys = new Set<string>();
+    const walk = (o: unknown) => { if (o && typeof o === 'object') for (const [k, x] of Object.entries(o)) { keys.add(k); walk(x); } };
+    walk(anatomyOf(t).a);
+    for (const k of keys) assert.doesNotMatch(k, /price|amount|value|net|estimate|worth/i, `unexpected key ${k}`);
   });
 });
 

@@ -304,7 +304,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
 }
 
 const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-const PAGES = new Set(['/', '/app', '/w/demo-rc1', '/admin', '/version', '/today', '/closet', '/discover']);
+const PAGES = new Set(['/', '/app', '/w/demo-rc1', '/admin', '/version', '/today', '/closet', '/closet/3d', '/discover']);
+/** Third-party browser modules served from the installed, version-pinned package (never copied into the repository). */
+const VENDOR: Record<string, string> = { '/static/vendor/three.module.min.js': join(ROOT, 'node_modules', 'three', 'build', 'three.module.min.js') };
 
 const server = createServer(async (req, res) => {
   try {
@@ -312,6 +314,7 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
     if (path.startsWith('/api/')) return await api(req, res, url);
     if (PAGES.has(path)) return send(res, 200, readFileSync(join(PUBLIC, 'index.html')), TYPES['.html']);
+    if (VENDOR[path]) return existsSync(VENDOR[path]) ? send(res, 200, readFileSync(VENDOR[path]), TYPES['.js']) : send(res, 404, 'run npm install', 'text/plain');
     if (path.startsWith('/static/')) {
       const file = join(PUBLIC, path.slice('/static/'.length));
       if (!file.startsWith(PUBLIC) || !existsSync(file)) return send(res, 404, 'not found', 'text/plain');

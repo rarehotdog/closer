@@ -396,3 +396,13 @@ details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
 .card.look .look-select { font: inherit; color: inherit; text-align: left; background: transparent; border: 0; padding: 0; cursor: pointer; display: grid; gap: 6px; width: 100%; }
 .card.look .look-select:hover .hd { color: var(--accent); }
 .card.look > .row.actions { margin-top: 2px; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* closet in 3D (11/4 night): canvas stage, exploded-view slider, amber legend chip */
+.stage { width: 100%; border-radius: 14px; border: 1px solid var(--line); background: radial-gradient(120% 90% at 50% 20%, var(--surface) 0%, var(--surface-2) 100%); overflow: hidden; margin: 8px 0; touch-action: pan-y; }
+.stage canvas { display: block; width: 100% !important; height: auto; cursor: grab; }
+.stage canvas:active { cursor: grabbing; }
+.explode-row { align-items: center; gap: 10px; margin: 4px 0 10px; }
+.explode-row label { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.explode-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.chip.legend-amber { border-color: #c88a1a; color: var(--ink); }
+#layer-list h3 { margin: 10px 0 4px; font-size: 14px; }

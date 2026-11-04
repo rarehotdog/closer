@@ -150,3 +150,13 @@ The owner picks sample looks on Discover as **targets** ("Add as target"). Close
 - **Box cells** are keyed by slot + kind + colour, so one navy jacket asked for by two looks is one cell. States: `FILLED` (same item), `PARTIAL` (similar item), `EMPTY`. An `EMPTY` cell carries `outfitsAdded`, the same counted number as the gap card. `nextUp` lists at most three `EMPTY` cells, ordered by how many target looks they fill, then outfits added.
 - The count moves only when the closet does (laundry, repair, a new photo, a removed target). Tests F3-06 … F3-10 in `tests/features.test.ts` pin the count, the merge, the empty state, the refusals and the laundry drop.
 - Words on screen: "have it", "similar", "missing", "N of M pieces · P%". No "score".
+
+## Closet in 3D (added 11/4 night)
+
+`/closet/3d` (link "See the closet in 3D" on My closet) draws the closet by layer in three.js 0.170.0: outerwear rail, tops shelf, bottoms shelf, shoe rack, inside a wireframe frame.
+
+- **Same data, no new numbers.** `web/public/anatomy.js` groups the items from `GET /api/ws/:id/view` with the rows from `GET /api/ws/:id/review?window=60`. The canvas and the list view both draw from that one result. Tests F4-01 … F4-03 check that every piece appears once on its own layer, that the counts per layer, per availability and per review status equal My closet's, that a laundry change shows up, and that the data has no price, value or estimate fields.
+- **On screen.** Cards show the piece's colour and kind (code-drawn, like the rest of the sample closet), its ID and name. Pieces that are not available are washed out with their state; an amber outline marks "no confirmed wear in 60 days" only where enough days were recorded (the review rule). Drag sideways to turn, slide for an exploded view, tap a piece for its facts and the price evidence entered per platform (never averaged).
+- **Not in it.** No per-garment 3D models, no closet value total, no estimated resale price. Per-garment models from photos (SAM 3D Objects) are listed under What comes next.
+- **Serving three.js.** The module is served from the installed package (`node_modules/three/build/three.module.min.js`), pinned in `package-lock.json`; it is not copied into the repository. `deploy/gce/install_remote.sh` now runs `npm ci --omit=dev`, which the deploy needed anyway for `@meta-sam/parser`.
+- **No WebGL.** The page says so and opens the list view with the same pieces.

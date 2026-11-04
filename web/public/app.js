@@ -742,7 +742,8 @@ async function closetScreen(view) {
   const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
   view.append(h('h1', null, 'My closet'),
-    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose. Days without any record count as unknown. You decide what happens next; Closer does not post, sell or donate anything.'), root);
+    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose. Days without any record count as unknown. You decide what happens next; Closer does not post, sell or donate anything.'),
+    h('p', null, h('a', { class: 'btn small ghost', href: '/closet/3d' }, 'See the closet in 3D')), root);
 
   async function load() { S.review = await getJson(`/api/ws/${id}/review?window=${S.window}`); render(); }
   async function act(itemId, action) {
@@ -987,6 +988,60 @@ async function discoverScreen(view) {
   render();
 }
 
+// The closet by layer in 3D. Same pieces and states as My closet (anatomy.js); the canvas adds no numbers.
+async function closet3dScreen(view) {
+  chrome(sampleChips());
+  document.body.append(tabbar());
+  const { id, view: v } = await closetWs();
+  const review = await getJson(`/api/ws/${id}/review?window=60`);
+  const { buildAnatomy, LAYER_LABEL, AVAILABILITY_LABEL } = await import('/static/anatomy.js');
+  const three = await import('/static/closet3d.js').catch(() => null);
+  const A = buildAnatomy(v.items, review.rows);
+  const byId = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
+  const C = A.counts;
+  const host = h('div', { class: 'stage', role: 'img', 'aria-label': `Closet in 3D: ${C.total} pieces on four layers` });
+  const panel = h('section', { class: 'panel', id: 'piece', 'aria-live': 'polite' }, h('p', { class: 'muted' }, 'Tap a piece, or pick one from the list, to see what Closer records about it.'));
+  const slider = h('input', { type: 'range', id: 'explode', min: '0', max: '100', value: '35', 'aria-label': 'Exploded view' });
+  const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List view · the same ${C.total} pieces`),
+    A.layers.map((l) => [h('h3', null, `${l.label} · ${l.items.length}`),
+      h('div', { class: 'chip-row' }, l.items.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => show(c.itemId) }, `${c.itemId} · ${itemName(byId[c.itemId])}${c.availability !== 'AVAILABLE' ? ` · ${AVAILABILITY_LABEL[c.availability] || c.availability}` : ''}`)))]));
+  const avail = Object.entries(C.byAvailability).map(([k, n]) => h('span', { class: `chip${k === 'AVAILABLE' ? '' : ' warn'}` }, `${AVAILABILITY_LABEL[k] || k}: ${n}`));
+  const legend = h('section', { class: 'panel' },
+    h('p', null, h('b', null, `${C.total} pieces`), ` · ${A.layers.map((l) => `${l.label.toLowerCase()} ${l.items.length}`).join(' · ')}`),
+    h('div', { class: 'chip-row' }, avail, h('span', { class: 'chip legend-amber' }, `Amber outline: no confirmed wear in 60 days, enough days recorded: ${C.byReview.CANDIDATE || 0}`)),
+    h('p', { class: 'muted' }, A.note));
+  view.append(h('h1', null, 'Closet in 3D'),
+    h('p', { class: 'lede' }, 'Your closet by layer: outerwear rail, tops, bottoms, shoes. Drag sideways to turn it, slide to pull the layers apart, tap a piece.'),
+    host, h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Exploded view'), slider), legend, panel, list);
+  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => itemName(byId[c.itemId]), onPick: (c) => show(c.itemId) }) : null;
+  if (scene) scene.setExplode(0.35);
+  else { host.replaceWith(h('p', { class: 'chip warn' }, 'This browser has no WebGL, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
+  slider.addEventListener('input', (e) => { if (scene) scene.setExplode(Number(e.target.value) / 100); });
+
+  async function show(itemId) {
+    if (scene) scene.select(itemId);
+    const cell = A.layers.flatMap((l) => l.items).find((c) => c.itemId === itemId);
+    const it = byId[itemId];
+    if (!cell || !it) return;
+    const facts = h('ul', { class: 'reasons' },
+      h('li', null, `${LAYER_LABEL[cell.slot]} · ${it.formality} formality`),
+      h('li', null, AVAILABILITY_LABEL[cell.availability] || cell.availability),
+      h('li', null, cell.wearLabel || 'no confirmed wear yet'),
+      cell.lastWorn ? h('li', null, `Last confirmed wear: ${cell.lastWorn}`) : null,
+      cell.reviewLine ? h('li', null, cell.reviewLine) : null);
+    const evidence = h('div', null, h('p', { class: 'muted' }, 'Loading price evidence…'));
+    panel.replaceChildren(h('h2', null, `${itemId} · ${itemName(it)}`), facts, h('h3', null, 'Price evidence'), evidence,
+      h('div', { class: 'row' }, h('a', { class: 'btn small', href: `/today?lock=${itemId}` }, 'Wear it today'), h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
+    const m = await getJson(`/api/ws/${id}/market/${itemId}`);
+    const cards = (m && m.cards ? m.cards : []).filter((c) => c.entries.length);
+    const fmt = (e) => (e.currency === 'KRW' ? `₩${e.amount.toLocaleString('en-US')}` : `$${e.amount.toFixed(2)}`);
+    evidence.replaceChildren(cards.length
+      ? h('ul', { class: 'reasons' }, cards.flatMap((c) => c.entries.map((e) => h('li', null, `${c.info.name} · ${fmt(e)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'} · ${e.retrievedAt}`, e.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null))))
+      : h('p', { class: 'muted' }, 'No price evidence yet. Prices come only from what you enter, one platform at a time.'),
+      h('p', { class: 'muted' }, 'Per platform, never averaged. What you would receive stays unknown until every fee is checked in My closet.'));
+  }
+}
+
 (async function main() {
   META = await getJson('/api/photos');
   const view = $('#view');
@@ -998,6 +1053,7 @@ async function discoverScreen(view) {
   else if (p === '/version') await versionScreen(view);
   else if (p === '/today') await todayScreen(view);
   else if (p === '/closet') await closetScreen(view);
+  else if (p === '/closet/3d') await closet3dScreen(view);
   else if (p === '/discover') await discoverScreen(view);
   document.body.dataset.ready = '1';
 })();
