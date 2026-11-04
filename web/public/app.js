@@ -143,6 +143,17 @@ function showBanner(b) {
   el.className = `banner ${b.kind}`;
   el.replaceChildren(...[h('strong', null, b.text), b.capLine ? h('div', { class: 'sub' }, b.capLine) : null, b.ifLive ? h('div', { class: 'sub' }, b.ifLive) : null].filter(Boolean));
 }
+/** Proof of tooling from the server's own call records: the live chip strings as served (one per live 2xx call), and a grey chip per mock call read from its call line. */
+function callChips(op) {
+  const live = (op.liveChips || []).map((l) => h('span', { class: 'chip ok' }, l));
+  const mock = (op.callLines || []).filter((l) => l.includes('(mock')).map((l) => { const p = l.split(' · '); return h('span', { class: 'chip' }, `Mock · ${p[1]} · ${p[3]}`); });
+  return [...live, ...mock];
+}
+/** Spark 2's own contribution on an option: how many mask cut-outs it was sent and which IDs it named as a visual match (validated by code). */
+function visualChip(o) {
+  if (o.cutoutsSeen === undefined) return null;
+  return h('span', { class: 'chip' }, `Spark 2: ${o.cutoutsSeen} cut-out${o.cutoutsSeen === 1 ? '' : 's'} seen · visual match: ${o.visualMatch && o.visualMatch.length ? o.visualMatch.join(', ') : 'none named'}`);
+}
 
 // ---------- save flow (§3-6 ⑤): write → fresh read → compare → label ----------
 async function saveFlow(wsId, action, body, matches, okLabel) {
@@ -402,7 +413,7 @@ function decisionUI(root, cfg) {
     if (op.sentence) parts.push(h('p', { class: 'muted' }, `“${op.sentence}”`));
     if (op.callLines.length) parts.push(h('ul', { class: 'calls', id: 'calls' }, op.callLines.map((l) => h('li', null, l))));
     else if (op.kind !== 'photo') parts.push(h('ul', { class: 'calls' }, h('li', null, 'model calls: 0')));
-    const chips = [...op.labels.map((l) => h('span', { class: 'chip' }, l)), ...op.reasonCodes.map((c) => h('span', { class: 'chip bad' }, c))];
+    const chips = [...callChips(op), ...op.labels.map((l) => h('span', { class: 'chip' }, l)), ...op.reasonCodes.map((c) => h('span', { class: 'chip bad' }, c))];
     if (chips.length) parts.push(h('div', { class: 'chip-row' }, chips));
 
     if (op.kind === 'photo' && op.cards.length) {
@@ -426,6 +437,7 @@ function decisionUI(root, cfg) {
         h('div', { class: 'option base' }, h('h3', null, op.kind === 'replan' ? 'Locked before' : 'Now'), flatlay(base, [], cuts, items)),
         op.options.map((o, i) => h('div', { class: 'option' },
           h('h3', null, `${o.label}${o.source === 'code' && op.kind !== 'replan' ? ' · code' : ''}`),
+          visualChip(o),
           flatlay(o.outfit, o.changedSlots, cuts, items),
           o.reasonLines.length ? h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))) : null,
           op.state === 'PROPOSED' ? h('button', { class: 'btn small', type: 'button', 'data-pick': String(i), disabled: S.busy, onclick: () => pick(op, i) }, 'Pick this') : null))));
@@ -571,12 +583,14 @@ async function versionScreen(view) {
       h('dt', null, 'built at'), h('dd', null, v.builtAt),
       h('dt', null, 'mode'), h('dd', null, v.mode),
       h('dt', null, 'runtime'), h('dd', null, `Node.js ${v.node}`),
+      h('dt', null, 'Live model calls so far'), h('dd', { id: 'live-calls' }, `${v.liveCalls} (live calls answered 2xx, counted on this server)`),
       h('dt', null, '/w/demo-rc1 stateHash'), h('dd', { class: 'mono' }, v.demoRc1StateHash))),
     h('section', { class: 'panel' }, h('h2', null, 'Verify it yourself'),
       h('ol', null,
         h('li', null, 'Open /w/demo-rc1 and /version in a private window; compare stateHash and sha.'),
         h('li', null, 'Compare git rev-parse HEAD of the code you have with the sha above: same release.'),
-        h('li', null, 'Turn K1 on in /admin and check that a button re-plan still works.'))));
+        h('li', null, 'Turn K1 on in /admin and check that a button re-plan still works.'),
+        h('li', null, 'This page shows the mode and the number of live model calls recorded on this server; each live call also appears as a chip next to its result.'))));
 }
 
 
@@ -697,6 +711,8 @@ async function todayScreen(view) {
       h('div', { class: 'chip-row' }, (META.intentChips || []).map((c) => h('button', { type: 'button', class: 'chip', onclick: () => say(c) }, c))),
       box, h('button', { class: 'btn small', type: 'button', id: 'say-go', onclick: () => box.value.trim() && say(box.value) }, 'Read my sentence'),
       S.op && S.op.intent ? h('div', { class: 'row' }, h('span', { class: 'chip accent' }, `Understood: keep ${S.op.intent.anchors.join(' + ')}${S.op.intent.direction !== 'none' ? ` · ${S.op.intent.direction.replace('_', ' ')}` : ''}${S.op.intent.rain ? ' · rain' : ''}`)) : null,
+      S.op && (S.op.callLines || []).length ? h('div', { class: 'chip-row', id: 'say-calls' }, callChips(S.op)) : null,
+      S.op && (S.op.callLines || []).length ? h('ul', { class: 'calls' }, S.op.callLines.map((l) => h('li', null, l))) : null,
       S.op && (S.op.labels || []).length ? h('p', { class: 'muted' }, S.op.labels.join(' · ')) : null);
     const parts = [
       sayPanel,

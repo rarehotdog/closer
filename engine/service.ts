@@ -69,6 +69,9 @@ export type OptionView = {
   reasonFactIds: string[];
   reasonLines: string[];
   source: 'model' | 'code';
+  /** Spark 2 only: cut-out IDs the model named as a visual match (validated), and how many cut-outs it was sent. */
+  visualMatch?: string[];
+  cutoutsSeen?: number;
 };
 
 export type Operation = StoredOperation & {
@@ -472,7 +475,7 @@ export class CloserService {
       return this.hold(op, ws.kind, [verdict.code], q);
     }
     const opts = [...verdict.options].sort((x, y) => x.changedSlots.length - y.changedSlots.length);
-    op.options = opts.map((o, i) => this.optionView(i, o.outfit, o.changedSlots, formalitySum(o.outfit, facts), o.reasonFactIds, allFacts, 'model'));
+    op.options = opts.map((o, i) => this.optionView(i, o.outfit, o.changedSlots, formalitySum(o.outfit, facts), o.reasonFactIds, allFacts, 'model', { visualMatch: o.visualMatch, cutoutsSeen: req.thumbnails.length }));
     op.labels.push(ctx.offenders.length > 0 ? LABELS.checkedByCode : LABELS.checkedByCodeDirection);
     return this.propose_(op, ws.kind);
   }
@@ -504,10 +507,10 @@ export class CloserService {
     return out;
   }
 
-  private optionView(i: number, outfit: Outfit, changed: Slot[], sum: number | null, reasonFactIds: string[], all: ReturnType<typeof buildFacts>, source: 'model' | 'code'): OptionView {
+  private optionView(i: number, outfit: Outfit, changed: Slot[], sum: number | null, reasonFactIds: string[], all: ReturnType<typeof buildFacts>, source: 'model' | 'code', seen: { visualMatch: string[]; cutoutsSeen: number } | null = null): OptionView {
     return {
       index: i, label: i === 0 ? 'Fewer changes' : 'Closer to what you said', outfit, changedSlots: changed, sum,
-      reasonFactIds, reasonLines: renderReasons(reasonFactIds, all), source,
+      reasonFactIds, reasonLines: renderReasons(reasonFactIds, all), source, ...(seen ?? {}),
     };
   }
 

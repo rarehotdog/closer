@@ -26,6 +26,8 @@ Every screen runs the same loop: the model proposes, code checks, you decide.
 | 6 | Model `muse-spark-1.3` | Picks at most two edits through one function-tool turn. | Code re-checks every item, slot and rule. The locked piece is never swapped. |
 | 7 | You | Pick an option, confirm the wear. | Shown as saved only after a fresh read from the server matches the screen. |
 
+Step 6 in detail: Spark 2 chooses among candidates that code built (step 5) and sees mask cut-outs of them; each option shows how many cut-outs it was sent and which IDs it named as a visual match. With `spark2Mode: 'code'` the app runs without it (options from the code solver, labelled "Reason by code"). In the recorded run its choice differed from the code solver's first option in — of — proposals (filled in from the real call ledger once a live run is recorded; blank until then).
+
 You decide at four places: the cards (step 4), the option and the wear (step 7), whether a piece stays or goes (the keep-or-let-go question on My closet), and anything that leaves the app, such as posting a listing or handing a piece over. Closer drafts; you post.
 
 ## What it does
@@ -41,6 +43,7 @@ You decide at four places: the cards (step 4), the option and the wear (step 7),
 1. Open `/w/demo-rc1` and `/version` in a private window and compare the stateHash and sha.
 2. Compare `git rev-parse HEAD` of the code you have with the sha on `/version`: they must be the same release.
 3. Turn K1 on in `/admin` and check that a button re-plan still works while model calls are off.
+4. `/version` shows the mode and the number of live model calls recorded on this server (live calls answered 2xx, counted from the call ledger). On `/app` and `/today`, every live call shows as a chip next to its result; in mock mode the same place shows a grey mock chip.
 
 ## Current state
 

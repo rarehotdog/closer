@@ -150,7 +150,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   const path = url.pathname;
   const method = req.method ?? 'GET';
   if (path === '/api/version') {
-    return send(res, 200, { sha: SHA, builtAt: STARTED_AT, mode, node: process.version, demoRc1StateHash: ledger.stateHash('demo-rc1'), buildChip: BUILD_CHIP });
+    return send(res, 200, { sha: SHA, builtAt: STARTED_AT, mode, node: process.version, demoRc1StateHash: ledger.stateHash('demo-rc1'), buildChip: BUILD_CHIP, liveCalls: ledger.countLiveCalls() });
   }
   if (path === '/api/photos') return send(res, 200, { photos: publicPhotos(), chips: CHIPS, intentChips: INTENT_CHIPS, palette: NAMED_RGB, labels: LABELS, buildChip: BUILD_CHIP });
   if (path === '/api/try/start' && method === 'POST') {
