@@ -195,7 +195,13 @@ function decisionUI(root, cfg) {
     render();
   }
   const flash = (r) => { S.flash = [r]; };
-  const busy = async (fn) => { S.busy = true; render(); try { await fn(); } finally { S.busy = false; await refresh(); } };
+  /** Runs an action with the controls disabled, re-reads the view, and brings the result on screen (phones: the result renders below the fold). */
+  const busy = async (fn, revealSel) => {
+    S.busy = true; render();
+    try { await fn(); } finally { S.busy = false; await refresh(); }
+    const d = revealSel ? root.querySelector(revealSel) || root.querySelector('#decision') : null;
+    if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   async function run() {
     await busy(async () => {
@@ -209,7 +215,7 @@ function decisionUI(root, cfg) {
       const op = await postJson(`/api/ws/${S.wsId}/photo`, own ? { photoId: S.photoId, sentence: S.sentence.trim() } : { photoId: S.photoId, chipId: S.chipId });
       if (op.ok === false) flash({ chip: `${op.code} · ${op.detail}`, cls: 'bad' });
       S.ran = true;
-    });
+    }, '#decision');
   }
 
   function inputs() {
@@ -348,7 +354,7 @@ function decisionUI(root, cfg) {
       const r = await postJson(`/api/ws/${S.wsId}/propose`, { operationId: op.operationId });
       if (r.ok === false) flash({ chip: `${r.code} · ${r.detail}`, cls: 'bad' });
       else S.flash = [];
-    });
+    }, '#options');
   }
   async function pick(op, i) {
     await busy(async () => {
@@ -369,14 +375,14 @@ function decisionUI(root, cfg) {
     await busy(async () => {
       await postJson(`/api/ws/${S.wsId}/answer`, { operationId: op.operationId, formality: { [id]: val } });
       await postJson(`/api/ws/${S.wsId}/propose`, { operationId: op.operationId });
-    });
+    }, '#options');
   }
   async function setAvail(item, state) {
     await busy(async () => {
       const r = await saveFlow(S.wsId, 'availability', { itemId: item.itemId, state, eventId: uuid(), expectedRevision: S.view.revision },
         (v) => v.items.some((i) => i.itemId === item.itemId && i.availability === state), `${item.itemId} → ${state.toLowerCase()} · read back ✓`);
       flash(r);
-    });
+    }, '#options');
   }
   async function wore(plan) {
     await busy(async () => {
@@ -398,7 +404,7 @@ function decisionUI(root, cfg) {
       await postJson('/api/demo-clock', { days: 1 });
       const r = await postJson(`/api/ws/${S.wsId}/next`, { fromPlanId: plan.planId });
       S.flash = r.ok === false ? [{ chip: `${r.code} · ${r.detail}`, cls: 'bad' }] : [{ chip: META.labels.demoClockPlusOne, cls: 'warn' }];
-    });
+    }, '#decision');
   }
 
   function decisionPanel(op) {
@@ -651,20 +657,34 @@ async function todayScreen(view) {
   chrome(sampleChips());
   const { id, view: v } = await closetWs();
   const params = new URLSearchParams(location.search);
-  const S = { locks: new Set((params.get('lock') || '').split(',').filter(Boolean)), direction: 'none', rain: false, op: null, msg: null, saved: null, view: v };
+  const known = new Set(v.items.map((i) => i.itemId));
+  // ?lock=J1,B2 comes from Discover, My closet, the keep-or-let-go question and the 3D tray: only pieces of this closet count.
+  const wanted = (params.get('lock') || '').split(',').filter((x) => known.has(x));
+  const S = { locks: new Set(wanted), direction: 'none', rain: false, op: null, msg: null, saved: null, picked: null, gridOpen: false, view: v };
   const byId = () => Object.fromEntries(S.view.items.map((i) => [i.itemId, i]));
   const root = h('div');
   view.append(h('h1', null, 'What do you want to wear today?'),
-    h('p', { class: 'lede' }, 'Tap the piece you want. Closer keeps it and completes the rest from what you own and have available. Nothing is saved until you pick.'), root);
+    h('p', { class: 'lede' }, wanted.length ? `Keeping ${wanted.join(' + ')}, as you picked. Closer completes the rest from what you own and have available; nothing is saved until you choose.` : 'Tap the piece you want. Closer keeps it and completes the rest from what you own and have available. Nothing is saved until you pick.'), root);
 
-  async function run() {
-    S.msg = null;
+  /** Brings the answer on screen: the options, or the question Closer asks back. */
+  function reveal() {
+    const t = root.querySelector('.options, .question, .flash .chip.bad');
+    const sec = t && t.closest('section.panel');
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  async function run(keepMsg) {
+    if (keepMsg !== true) S.msg = null;
+    S.picked = null;
+    S.gridOpen = false;
     S.op = await postJson(`/api/ws/${id}/anchor`, { anchorItemIds: [...S.locks], direction: S.direction, rainPct: S.rain ? 80 : null });
     render();
+    reveal();
   }
   async function say(sentence) {
     S.msg = null;
     S.saved = null;
+    S.picked = null;
+    S.gridOpen = false;
     S.op = await postJson(`/api/ws/${id}/say`, { sentence });
     if (S.op && S.op.intent) {
       S.locks = new Set(S.op.intent.anchors);
@@ -672,6 +692,7 @@ async function todayScreen(view) {
       S.rain = S.op.intent.rain;
     }
     render();
+    reveal();
   }
   async function pick(i) {
     const before = S.view.revision;
@@ -679,6 +700,7 @@ async function todayScreen(view) {
       (vv) => vv.plans.some((p) => p.planId === S.op.planId && p.state === 'LOCKED' && sameOutfit(p.slots, S.op.options[i].outfit)), 'Saved and read back');
     if (r.view) S.view = r.view;
     S.saved = r.ok ? S.op.options[i].outfit : null;
+    S.picked = r.ok ? i : null;
     S.planId = r.ok ? S.op.planId : null;
     S.worn = false;
     S.msg = h('span', { class: `chip ${r.cls}` }, r.chip);
@@ -708,7 +730,7 @@ async function todayScreen(view) {
     if (!r.ok) { S.msg = h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`); render(); return; }
     S.msg = h('span', { class: 'chip warn' }, `${itemId} is in the laundry now. Your kept pieces stay; the rest is re-planned.`);
     S.saved = null;
-    await run();
+    await run(true);
   }
 
   function render() {
@@ -733,30 +755,29 @@ async function todayScreen(view) {
       S.op && (S.op.callLines || []).length ? h('div', { class: 'chip-row', id: 'say-calls' }, callChips(S.op)) : null,
       S.op && (S.op.callLines || []).length ? h('ul', { class: 'calls' }, S.op.callLines.map((l) => h('li', null, l))) : null,
       S.op && (S.op.labels || []).length ? h('p', { class: 'muted' }, S.op.labels.join(' · ')) : null);
-    const parts = [
-      sayPanel,
-      h('section', { class: 'panel' }, h('h2', null, 'Or tap what you want to keep'), grid),
-      h('section', { class: 'panel' }, h('h2', null, 'Anything else?'), h('div', { class: 'row' }, dir), rain, h('div', { class: 'spacer' }),
-        h('button', { class: 'btn', type: 'button', id: 'complete', disabled: S.locks.size === 0 ? true : null, onclick: run }, S.locks.size ? `Keep ${[...S.locks].join(' + ')} and complete the rest` : 'Tap a piece to keep first')),
-    ];
+    // The answer comes right after the sentence panel; the 12-piece grid folds away once there is one (it reopens when you tap it or a piece).
+    const flashAt = (where) => (S.msg && where === (S.picked !== null && S.saved ? 'option' : 'top') ? h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg) : null);
+    const parts = [sayPanel];
     if (S.op) {
       const op = S.op;
-      if (op.ok === false) parts.push(h('section', { class: 'panel' }, h('span', { class: 'chip bad' }, `${op.code} · ${op.detail}`)));
+      if (op.ok === false) parts.push(h('section', { class: 'panel' }, h('div', { class: 'flash' }, h('span', { class: 'chip bad' }, `${op.code} · ${op.detail}`))));
       else if (op.state === 'HOLD') {
         const q = op.questions[0];
         parts.push(h('section', { class: 'panel' }, h('h2', null, 'Closer needs you'), h('p', { class: 'question' }, q ? q.text : op.detail),
           h('div', { class: 'row' }, (q ? q.choices : []).map((c) => c === 'discover' ? h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover')
             : items[c] ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => { S.locks = new Set([c]); run(); } }, `${c} · ${itemName(items[c])}`)
-            : h('span', { class: 'chip' }, c)))));
+            : h('span', { class: 'chip' }, c))), flashAt('top')));
       } else {
         parts.push(h('section', { class: 'panel' }, h('h2', null, `${op.options.length === 1 ? 'One outfit' : 'Two outfits'} with what you kept`),
-          h('div', { class: 'options' }, op.options.map((o, i) => h('div', { class: 'option' }, h('h3', null, o.label),
+          flashAt('top'),
+          h('div', { class: 'options' }, op.options.map((o, i) => h('div', { class: `option${S.picked === i ? ' picked' : ''}` }, h('h3', null, o.label),
             h('div', { class: 'flatlay' }, SLOTS.map((s) => tile(items[o.outfit[s]], { label: s, empty: !o.outfit[s], badge: S.locks.has(o.outfit[s]) ? 'kept' : null }))),
             h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))),
-            h('button', { class: 'btn', type: 'button', onclick: () => pick(i) }, 'Wear this')))),
+            S.picked === i ? h('span', { class: 'chip ok' }, 'Your pick for today') : h('button', { class: 'btn', type: 'button', onclick: () => pick(i) }, 'Wear this'),
+            S.picked === i ? flashAt('option') : null))),
           h('p', { class: 'muted' }, `${(op.labels || []).join(' · ')}`)));
       }
-    }
+    } else if (S.msg) parts.push(flashAt('top'));
     if (S.saved && !S.worn) {
       const loose = SLOTS.map((s) => S.saved[s]).filter((x) => x && !S.locks.has(x));
       parts.push(h('section', { class: 'panel' }, h('h2', null, 'Did you wear it?'),
@@ -768,10 +789,14 @@ async function todayScreen(view) {
         h('div', { class: 'row' }, loose.map((x) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => laundry(x) }, `${x} is in the laundry`)))));
     }
     if (S.worn) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Recorded'), h('p', null, 'This outfit now counts as worn today.'), h('a', { class: 'btn ghost', href: '/closet' }, 'See My closet')));
-    if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
-    keepFocus(root, () => root.replaceChildren(...parts));
+    parts.push(h('details', { class: 'panel', id: 'pieces', open: !S.op || S.gridOpen ? true : null, ontoggle: (e) => { S.gridOpen = e.target.open; } },
+      h('summary', null, `Or tap what you want to keep (${S.view.items.length} pieces)`), grid,
+      h('h2', { style: 'margin-top:14px' }, 'Anything else?'), h('div', { class: 'row' }, dir), rain, h('div', { class: 'spacer' }),
+      h('div', { class: 'cta' }, h('button', { class: 'btn', type: 'button', id: 'complete', disabled: S.locks.size === 0 ? true : null, onclick: () => run() }, S.locks.size ? `Keep ${[...S.locks].join(' + ')} and complete the rest` : 'Tap a piece to keep first'))));
+    keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
   render();
+  if (wanted.length) await run();
 }
 
 async function closetScreen(view) {
@@ -802,10 +827,11 @@ async function closetScreen(view) {
     await load();
   }
 
+  /** Platforms with a saved price first; the empty ones fold into one line and a closed details, so the first input is not eight cards down. */
   function priceCards() {
     if (!S.market) return null;
     const fmt = (e) => money(e.amount, e.currency);
-    return h('div', { class: 'grid cols-3' }, S.market.cards.map((c) => h('div', { class: 'card' },
+    const card = (c) => h('div', { class: 'card' },
       h('div', { class: 'hd' }, c.info.name, h('span', { class: 'chip' }, c.info.currency)),
       h('div', { class: 'muted' }, c.info.region),
       c.entries.length ? h('ul', { class: 'reasons' }, c.entries.map((e) => h('li', null, `${fmt(e)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'} · ${e.matchLevel.toLowerCase().replace('_', ' ')} · ${e.retrievedAt}`, e.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)))
@@ -815,7 +841,13 @@ async function closetScreen(view) {
         const price = S.calc && S.calc.platform === c.platform && S.calc.result && S.calc.result.ok !== false ? S.calc.result.price : null;
         S.draft = await postJson(`/api/ws/${id}/draft`, { itemId: S.open.itemId, kind: 'SELL', platform: c.platform, price });
         render();
-      } }, `Draft a ${c.info.name} listing`))));
+      } }, `Draft a ${c.info.name} listing`));
+    const withPrices = S.market.cards.filter((c) => c.entries.length);
+    const rest = S.market.cards.filter((c) => !c.entries.length);
+    return h('div', { id: 'price-cards' },
+      withPrices.length ? h('div', { class: 'grid cols-3' }, withPrices.map(card)) : null,
+      rest.length ? h('p', { class: 'muted' }, `No prices saved yet for ${rest.map((c) => c.info.name).join(', ')}. Add one above.`) : null,
+      rest.length ? h('details', { class: 'sub' }, h('summary', null, 'Platform notes and listing drafts'), h('div', { class: 'grid cols-3', style: 'margin-top:10px' }, rest.map(card))) : null);
   }
 
   // Fee line names to start from. Values stay blank (unknown) until the owner checks the platform's own page.
@@ -1007,11 +1039,13 @@ async function closetScreen(view) {
     const add = async () => {
       const cur = PLATFORM_CURRENCY[plat.value];
       const r = await postJson(`/api/ws/${id}/evidence`, { itemId: S.open.itemId, platform: plat.value, priceType: type.value, amount: Number(amount.value), currency: cur, url: link.value || null, retrievedAt: new Date().toISOString().slice(0, 10), matchLevel: match.value });
-      S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}` }, r.ok === false ? `${r.code} · ${r.detail}` : 'Price saved and read back');
+      S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}`, 'data-at': 'evidence' }, r.ok === false ? `${r.code} · ${r.detail}` : 'Price saved and read back');
       S.market = await getJson(`/api/ws/${id}/market/${S.open.itemId}`);
       render();
     };
-    return h('div', null, h('h2', { style: 'margin-top:14px' }, 'Add a price you saw'), h('div', { class: 'evform' }, plat, type, match, amount, link, h('button', { class: 'btn small', type: 'button', onclick: add }, 'Save price')));
+    // The result of "Save price" shows next to the button, not at the end of the page.
+    return h('div', null, h('h2', { style: 'margin-top:14px' }, 'Add a price you saw'), h('div', { class: 'evform' }, plat, type, match, amount, link, h('button', { class: 'btn small', type: 'button', onclick: add }, 'Save price')),
+      S.msg && S.msg.dataset.at === 'evidence' ? h('div', { class: 'flash', role: 'status' }, S.msg) : null);
   }
 
   function draftPanel() {
@@ -1022,8 +1056,8 @@ async function closetScreen(view) {
     ta.value = d.body;
     const move = async (to) => {
       const r = await postJson(`/api/ws/${id}/draftmove`, { draftId: d.draftId, to, body: ta.value });
-      if (r.ok === false) S.msg = h('span', { class: 'chip warn' }, r.code === 'NEEDS_CHECK' ? 'Fill every [check] / [확인] part first' : `${r.code} · ${r.detail}`);
-      else { S.draft = r; S.msg = h('span', { class: 'chip ok' }, r.state === 'REVIEWED' ? 'Reviewed and read back' : 'Marked done by you'); }
+      if (r.ok === false) S.msg = h('span', { class: 'chip warn', 'data-at': 'draft' }, r.code === 'NEEDS_CHECK' ? 'Fill every [check] / [확인] part first' : `${r.code} · ${r.detail}`);
+      else { S.draft = r; S.msg = h('span', { class: 'chip ok', 'data-at': 'draft' }, r.state === 'REVIEWED' ? 'Reviewed and read back' : 'Marked done by you'); }
       render();
     };
     return h('section', { class: 'panel' }, h('h2', null, d.kind === 'SELL' ? `Listing draft · ${d.platform}` : 'Donation checklist'),
@@ -1031,7 +1065,8 @@ async function closetScreen(view) {
       ta,
       h('div', { class: 'row' },
         d.state === 'DRAFT' ? h('button', { class: 'btn small', type: 'button', onclick: () => move('REVIEWED') }, 'I checked it') : null,
-        d.state === 'REVIEWED' ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => move('OWNER_REPORTED_DONE') }, d.kind === 'SELL' ? 'I posted it myself' : 'I handed it over') : null),
+        d.state === 'REVIEWED' ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => move('OWNER_REPORTED_DONE') }, d.kind === 'SELL' ? 'I posted it myself' : 'I handed it over') : null,
+        S.msg && S.msg.dataset.at === 'draft' ? S.msg : null),
       h('p', { class: 'muted' }, 'Copy the text into the platform yourself. Closer never posts, messages, books a pickup or records a sale.'));
   }
 
@@ -1059,13 +1094,13 @@ async function closetScreen(view) {
               actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
     ];
     parts.push(decidePanel());
-    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel' }, h('h2', null, `Price evidence for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), priceCards(), evidenceForm(), calcPanel()));
+    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel', id: 'selling' }, h('h2', null, `Prices you saw for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), evidenceForm(), calcPanel(), priceCards()));
     if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
     parts.push(draftPanel());
     parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),
       h('table', { class: 't' }, h('tbody', null, others.map((x) => h('tr', null, h('td', { class: 'mono' }, x.itemId), h('td', null, x.status.toLowerCase().replace('_', ' ')), h('td', null, x.line),
         h('td', null, h('button', { class: 'btn small ghost', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'))))))));
-    if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
+    if (S.msg && !S.msg.dataset.at) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
     keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
   await load();
@@ -1078,7 +1113,7 @@ async function discoverScreen(view) {
   const { id, view: v } = await closetWs();
   const items = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const L = await getJson('/api/looks');
-  const S = { cat: 'wedding_guest', look: null, match: null, col: null, msg: null };
+  const S = { cat: 'wedding_guest', look: null, match: null, col: null, msg: null, hidden: new Set() };
   const root = h('div');
   view.append(h('h1', null, 'Discover looks'),
     h('p', { class: 'lede' }, 'Sample looks drawn for the demo. Pick the looks you want to be able to wear as targets; Closer counts, piece by piece, how much of each one your closet already covers, and rebuilds it with what you own first.'), root);
@@ -1143,15 +1178,15 @@ async function discoverScreen(view) {
           h('td', null, p.itemId ? `${p.itemId} · ${itemName(items[p.itemId])}` : '—'), h('td', { class: 'muted' }, p.why))))),
         h('div', { class: 'spacer' }),
         own.length ? h('a', { class: 'btn', href: `/today?lock=${own.join(',')}`, role: 'button' }, `Wear it with mine (${own.join(' + ')})`) : null));
-      if (m.gaps.length) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Pieces you do not have'),
-        h('div', { class: 'grid' }, m.gaps.map((g) => h('div', { class: 'card' },
+      const gaps = m.gaps.filter((g) => !S.hidden.has(g.piece.label));
+      if (gaps.length) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Pieces you do not have'),
+        h('div', { class: 'grid' }, gaps.map((g) => h('div', { class: 'card' },
           h('div', { class: 'hd' }, g.piece.label, placeholder(g.piece.color)),
           h('p', null, g.outfitsAdded > 0 ? `Adding it gives ${g.outfitsAdded} more complete outfits from this closet.` : 'It adds no new complete outfits to this closet.'),
           h('p', { class: 'muted' }, m.basis),
           h('div', { class: 'row' },
             g.alternatives.length ? h('a', { class: 'btn small ghost', href: `/today?lock=${[...own, g.alternatives[0]].join(',')}` }, `Use my ${g.alternatives[0]}`) : null,
-            h('button', { class: 'btn small ghost', type: 'button', onclick: (e) => { e.target.textContent = 'Skipped'; } }, 'Skip it'),
-            h('button', { class: 'btn small ghost', type: 'button', onclick: (e) => { e.target.textContent = 'Saved for later'; } }, 'Later'),
+            h('button', { class: 'btn small ghost', type: 'button', onclick: () => { S.hidden.add(g.piece.label); S.msg = h('span', { class: 'chip' }, 'Hidden for this visit · nothing saved'); render(); } }, 'Hide for now'),
             h('button', { class: 'btn small', type: 'button', disabled: g.piece.shop.url ? null : true }, g.piece.shop.url ? 'Open product page' : 'No checked product link yet')))))));
       parts.push(h('details', { class: 'panel' }, h('summary', null, 'Buy the whole look instead'),
         h('ul', { class: 'reasons' }, m.fullLook.map((p) => h('li', null, `${p.label} · ${p.shop.url ? `${p.shop.match === 'SAME_ITEM' ? 'same item' : 'similar item'} · ${p.shop.price || 'price not checked'}` : 'no checked product link yet'}`))),
@@ -1219,7 +1254,8 @@ async function closet3dScreen(view) {
   const C = A.counts;
   const host = h('div', { class: 'stage', role: 'img', 'aria-label': `Closet in 3D: ${C.total} pieces on four layers` });
   const panel = h('section', { class: 'panel', id: 'piece', 'aria-live': 'polite' }, h('p', { class: 'muted' }, 'Tap a piece, or pick one from the list, to see what Closer records about it.'));
-  const slider = h('input', { type: 'range', id: 'explode', min: '0', max: '100', value: '35', 'aria-label': 'Exploded view' });
+  const slider = h('input', { type: 'range', id: 'explode', min: '0', max: '100', value: '35', 'aria-label': 'Pull the layers apart' });
+  const resetBtn = h('button', { type: 'button', class: 'btn small ghost', id: 'reset-view', onclick: () => { if (scene) scene.reset(); slider.value = '35'; } }, 'Reset view');
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List view · the same ${C.total} pieces`),
     A.layers.map((l) => [h('h3', null, `${l.label} · ${l.items.length}`),
       h('div', { class: 'chip-row' }, l.items.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => show(c.itemId) }, `${c.itemId} · ${itemName(byId[c.itemId])}${c.availability !== 'AVAILABLE' ? ` · ${AVAILABILITY_LABEL[c.availability] || c.availability}` : ''}`)))]));
@@ -1246,8 +1282,11 @@ async function closet3dScreen(view) {
   }
   view.append(h('h1', null, 'Closet in 3D'),
     h('p', { class: 'lede' }, 'Your closet by layer: outerwear rail, tops, bottoms, shoes. Drag sideways to turn it, slide to pull the layers apart, tap a piece.'),
-    host, h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Exploded view'), slider), tray, legend, panel, list);
-  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => itemName(byId[c.itemId]), onPick: (c) => show(c.itemId), imageOf: (c) => (cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null) }) : null;
+    host, h('p', { class: 'muted hint' }, 'Drag sideways to turn · tap a piece for its record'),
+    h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Pull the layers apart'), slider, resetBtn), panel, tray, legend, list);
+  // On a phone a card is about 45 px wide on screen, so only the ID is drawn on it; the tap panel carries the name.
+  const phone = window.matchMedia('(max-width: 760px)').matches;
+  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => (phone ? '' : itemName(byId[c.itemId])), onPick: (c) => show(c.itemId), imageOf: (c) => (cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null) }) : null;
   paintTray();
   if (scene) scene.setExplode(0.35);
   else { host.replaceWith(h('p', { class: 'chip warn' }, 'This browser has no WebGL, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
@@ -1273,6 +1312,7 @@ async function closet3dScreen(view) {
         wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear it today'),
         wsParam ? null : h('a', { class: 'btn small ghost', href: `/closet?decide=${itemId}` }, 'Keep or let go?'),
         wsParam ? null : h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
+    panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     const m = await getJson(`/api/ws/${id}/market/${itemId}`);
     const cards = (m && m.cards ? m.cards : []).filter((c) => c.entries.length);
     const fmt = (e) => money(e.amount, e.currency);
