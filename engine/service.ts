@@ -62,7 +62,7 @@ export type Card = {
 
 export type OptionView = {
   index: number;
-  label: 'Fewer changes' | 'Closer to what you said' | 'Re-plan' | 'Keep as is';
+  label: 'Fewer changes' | 'Closer to what you said' | 'A gentler step' | 'Re-plan' | 'Keep as is';
   outfit: Outfit;
   changedSlots: Slot[];
   sum: number | null;

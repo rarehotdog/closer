@@ -52,9 +52,9 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 | `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/today`, `/closet`, `/closet/3d`, `/discover`, `/w/demo-rc1`, `/admin`, `/version`. |
 | `npm run live:check` | Owner's machine only: one real call per model with the key read from the Keychain; writes `.data/live_check.json`. Never runs inside tests. |
 | `npm run screens` | Captures the screens into `docs/screens/` with Playwright Chromium (Playwright is not a project dependency). |
-| `npm run typecheck` | Optional `tsc` check (needs TypeScript and Node type definitions installed locally). |
+| `npm run typecheck` | `tsc` type check. TypeScript and the Node type definitions are devDependencies, so `npm install` is enough. |
 
-Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies.
+Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies and the two type-check tools.
 
 Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written before any call` — not measured yet.
 
