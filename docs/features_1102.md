@@ -170,7 +170,7 @@ The owner picks sample looks on Discover as **targets** ("Add as target"). Close
 
 ### Resale platforms (11/4 night)
 
-Korean platforms first (KREAM, Karrot, Bunjang), then Poshmark, eBay.com, Grailed, Depop US and Vinted (EUR). Each keeps its own currency; nothing is converted or averaged. Platform notes say what to check and carry no fee values; fee rows in the net calculator start blank, so the net stays unknown until each fee is checked. Test F2-18.
+Korean platforms first (KREAM, Karrot, Bunjang, Musinsa Used), then Poshmark, eBay.com, Grailed, Depop US, StockX and Vinted (EUR). Each keeps its own currency; nothing is converted or averaged. Platform notes say what to check and carry no fee values; fee rows in the net calculator start blank, so the net stays unknown until each fee is checked. Tests F2-18 and F2-19.
 
 ## Keep or let go (added 11/4 night, third pass)
 
