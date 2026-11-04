@@ -11,3 +11,6 @@ node_modules/
 *.log
 .DS_Store
 .closer/
+
+# tool scratch: parallel work trees created by the build assistant (all merged by branch, never committed)
+.claude/worktrees/
