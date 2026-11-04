@@ -202,7 +202,7 @@ describe('F2 the 60-day review counts records, not guesses', () => {
 describe('F2 price cards and hand-off drafts', () => {
   it('F2-10 one card per platform; asking prices stay separate; nothing averaged', () => {
     const cards = priceCards('J1', sampleEvidence(TODAY));
-    assert.deepEqual(cards.map((c) => c.platform), ['KREAM', 'KARROT', 'BUNJANG', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'VINTED']);
+    assert.deepEqual(cards.map((c) => c.platform), ['KREAM', 'KARROT', 'BUNJANG', 'MUSINSA_USED', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'STOCKX', 'VINTED']);
     const karrot = cards.find((c) => c.platform === 'KARROT')!;
     assert.deepEqual(karrot.entries.map((e) => e.amount).sort(), [120000, 85000].sort());
     assert.ok(karrot.entries.every((e) => e.priceType === 'ASK' && e.source === 'sample'));
@@ -236,6 +236,43 @@ describe('F2 price cards and hand-off drafts', () => {
     assert.match(d.body, /Check that Vinted accepts listings and shipping from your country/);
     const b = sellDraft(item, 'BUNJANG', { brand: null, size: null, condition: null, purchased: null } as never, null);
     assert.match(b.body, /거래 방법/);
+  });
+
+  it('F2-19 Musinsa Used (KRW) and StockX (USD): own currency only, notes without fee values, a Korean and an English draft, blank costs stay unknown', () => {
+    assert.deepEqual([...PLATFORMS], ['KREAM', 'KARROT', 'BUNJANG', 'MUSINSA_USED', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'STOCKX', 'VINTED']);
+    assert.deepEqual([PLATFORM_INFO.MUSINSA_USED.currency, PLATFORM_INFO.STOCKX.currency], ['KRW', 'USD']);
+    assert.match(validateEvidence({ platform: 'MUSINSA_USED', priceType: 'ASK', amount: 50, currency: 'USD', matchLevel: 'SIMILAR', retrievedAt: TODAY })!, /KRW/);
+    assert.equal(validateEvidence({ platform: 'MUSINSA_USED', priceType: 'ASK', amount: 70000, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: TODAY }), null);
+    assert.match(validateEvidence({ platform: 'STOCKX', priceType: 'TRADE', amount: 70000, currency: 'KRW', matchLevel: 'SAME_ITEM', retrievedAt: TODAY })!, /USD/);
+    assert.match(validateEvidence({ platform: 'STOCKX', priceType: 'TRADE', amount: 90, currency: 'EUR', matchLevel: 'SAME_ITEM', retrievedAt: TODAY })!, /USD/);
+    assert.equal(validateEvidence({ platform: 'STOCKX', priceType: 'TRADE', amount: 90, currency: 'USD', matchLevel: 'SAME_ITEM', retrievedAt: TODAY }), null);
+    for (const p of ['MUSINSA_USED', 'STOCKX'] as const) {
+      assert.equal(PLATFORM_INFO[p].notes.length, 2, p);
+      for (const n of PLATFORM_INFO[p].notes) {
+        assert.doesNotMatch(n, /\d+(\.\d+)?\s*%/, `${p}: ${n}`);
+        assert.doesNotMatch(n, /%/, `${p}: ${n}`);
+      }
+    }
+    const cards = priceCards('J1', sampleEvidence(TODAY));
+    assert.equal(cards.length, 10);
+    assert.equal(cards.find((c) => c.platform === 'MUSINSA_USED')!.status, 'NO_EVIDENCE');
+    assert.equal(cards.find((c) => c.platform === 'STOCKX')!.status, 'NO_EVIDENCE');
+    const item = closetItems().find((i) => i.itemId === 'J1')!;
+    const facts = { brand: null, size: null, condition: null, purchased: null } as never;
+    const m = sellDraft(item, 'MUSINSA_USED', facts, { amount: 70000, currency: 'KRW' });
+    assert.match(m.body, /가격: ₩70,000/);
+    assert.match(m.body, /사이즈: \[확인\] \/ 상태: \[확인\]/);
+    assert.match(m.body, /거래 방법.*\[확인\]/);
+    assert.ok(m.toCheck.includes('whether Musinsa Used accepts this item'));
+    const s = sellDraft(item, 'STOCKX', facts, { amount: 90, currency: 'USD' });
+    assert.match(s.body, /Price: \$90\.00/);
+    assert.match(s.body, /Check that StockX accepts listings and shipping from your country/);
+    assert.ok(s.toCheck.includes('whether StockX serves your country'));
+    const t = setup();
+    const r = t.feat.net(90, 'STOCKX', [{ label: 'Transaction fee', kind: 'rate', value: null }, { label: 'Payment processing', kind: 'rate', value: null }, { label: 'Shipping to the buyer', kind: 'fixed', value: null }]) as { net: number | null; unknown: string[]; currency: string };
+    assert.deepEqual({ currency: r.currency, net: r.net, unknown: r.unknown }, { currency: 'USD', net: null, unknown: ['Transaction fee', 'Payment processing', 'Shipping to the buyer'] });
+    const k = t.feat.net(70000, 'MUSINSA_USED', [{ label: 'Sales fee', kind: 'rate', value: null }, { label: 'Shipping', kind: 'fixed', value: null }]) as { net: number | null; unknown: string[]; currency: string };
+    assert.deepEqual({ currency: k.currency, net: k.net, unknown: k.unknown }, { currency: 'KRW', net: null, unknown: ['Sales fee', 'Shipping'] });
   });
 
   it('F2-12 an unknown fee makes the net unknown instead of zero', () => {

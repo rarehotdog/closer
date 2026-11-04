@@ -198,6 +198,9 @@ describe('W Muse Wonder: one general call, the same honesty as the rest', () => 
     assert.equal(platformOfUrl('https://www.grailed.com/listings/5')!.platform, 'GRAILED');
     assert.equal(platformOfUrl('https://www.depop.com/products/6')!.platform, 'DEPOP');
     assert.equal(platformOfUrl('https://www.vinted.fr/items/7')!.platform, 'VINTED');
+    assert.equal(platformOfUrl('https://www.musinsa.com/used/products/8')!.platform, 'MUSINSA_USED');
+    assert.equal(platformOfUrl('https://store.musinsa.com/app/goods/9')!.platform, 'MUSINSA_USED');
+    assert.equal(platformOfUrl('https://stockx.com/some-sneaker')!.platform, 'STOCKX');
     assert.equal(platformOfUrl('https://example.com/x')!.platform, 'OTHER');
     assert.equal(platformOfUrl('http://kream.co.kr/x'), null);
     assert.equal(platformOfUrl('not a url'), null);

@@ -655,8 +655,8 @@ async function versionScreen(view) {
 // ---------- features 11/2: Today (keep this one) · Closet (60-day review) · Discover (looks) ----------
 const TYPE_NAME = { jacket: 'jacket', coat: 'coat', dress_shirt: 'dress shirt', knit: 'knit', tee: 'T-shirt', trousers: 'trousers', jeans: 'jeans', chinos: 'chinos', derby: 'derby shoes', sneakers: 'sneakers', track_jacket: 'track jacket', blouse: 'blouse', training_top: 'training top', skirt: 'skirt', joggers: 'joggers', shorts: 'shorts', running_shoes: 'running shoes', loafers: 'loafers' };
 // Resale platforms: Korean first, then international. Currency per platform; prices are never converted or averaged.
-const PLATFORM_OPTIONS = [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['BUNJANG', 'Bunjang (KRW)'], ['POSHMARK', 'Poshmark (USD)'], ['EBAY', 'eBay.com (USD)'], ['GRAILED', 'Grailed (USD)'], ['DEPOP', 'Depop US (USD)'], ['VINTED', 'Vinted (EUR)']];
-const PLATFORM_CURRENCY = { KARROT: 'KRW', KREAM: 'KRW', BUNJANG: 'KRW', POSHMARK: 'USD', EBAY: 'USD', GRAILED: 'USD', DEPOP: 'USD', VINTED: 'EUR' };
+const PLATFORM_OPTIONS = [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], ['BUNJANG', 'Bunjang (KRW)'], ['MUSINSA_USED', 'Musinsa Used (KRW)'], ['POSHMARK', 'Poshmark (USD)'], ['EBAY', 'eBay.com (USD)'], ['GRAILED', 'Grailed (USD)'], ['DEPOP', 'Depop US (USD)'], ['STOCKX', 'StockX (USD)'], ['VINTED', 'Vinted (EUR)']];
+const PLATFORM_CURRENCY = { KARROT: 'KRW', KREAM: 'KRW', BUNJANG: 'KRW', MUSINSA_USED: 'KRW', POSHMARK: 'USD', EBAY: 'USD', GRAILED: 'USD', DEPOP: 'USD', STOCKX: 'USD', VINTED: 'EUR' };
 function money(n, c) { return c === 'KRW' ? `₩${Math.round(n).toLocaleString('en-US')}` : `${c === 'EUR' ? '€' : '$'}${Number(n).toFixed(2)}`; }
 const itemName = (it) => (it ? `${it.color !== 'unknown' ? `${it.color} ` : ''}${TYPE_NAME[it.type] || it.type}` : '');
 /** 2026-09-07 → 'Sep 7' (same date, friendlier; the ISO form stays in the data). */
@@ -898,10 +898,12 @@ async function closetScreen(view) {
     KREAM: [['Sales fee', 'rate'], ['Inspection and shipping', 'fixed']],
     KARROT: [['Delivery or meeting cost', 'fixed']],
     BUNJANG: [['Payment or platform fee', 'rate'], ['Shipping', 'fixed']],
+    MUSINSA_USED: [['Sales fee', 'rate'], ['Shipping', 'fixed']],
     POSHMARK: [['Platform fee', 'rate'], ['Shipping to the buyer', 'fixed']],
     EBAY: [['Final value fee', 'rate'], ['Shipping to the buyer', 'fixed']],
     GRAILED: [['Platform fee', 'rate'], ['Payment processing', 'rate'], ['Shipping', 'fixed']],
     DEPOP: [['Platform fee', 'rate'], ['Payment processing', 'rate'], ['Shipping', 'fixed']],
+    STOCKX: [['Transaction fee', 'rate'], ['Payment processing', 'rate'], ['Shipping to the buyer', 'fixed']],
     VINTED: [['Seller fee, if your country has one', 'rate'], ['Shipping', 'fixed']],
   };
   const platformName = (p) => (PLATFORM_OPTIONS.find(([v]) => v === p) || [p, p])[1].replace(/ \((KRW|USD|EUR)\)$/, '');

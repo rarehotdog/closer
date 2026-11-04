@@ -36,7 +36,7 @@ The keep-or-let-go panel on My closet (`/closet?decide=J2`) carries one button o
 
 ## Links, not prices
 
-`engine/links.ts` sorts the urls a search-grounded answer cited or considered by resale platform (KREAM, Karrot, Bunjang, Poshmark, eBay, Grailed, Depop, Vinted, or the host for anything else), https only, cited sources first. A link is a place for the owner to look. No price is read from a page or from the model's text: the owner opens the link, reads the price there, and enters it as evidence themselves, with the platform's own currency and the date. That keeps the price cards and the keep-or-let-go screen on counted, owner-entered rows.
+`engine/links.ts` sorts the urls a search-grounded answer cited or considered by resale platform (KREAM, Karrot, Bunjang, Musinsa Used, Poshmark, eBay, Grailed, Depop, StockX, Vinted, or the host for anything else), https only, cited sources first. A link is a place for the owner to look. No price is read from a page or from the model's text: the owner opens the link, reads the price there, and enters it as evidence themselves, with the platform's own currency and the date. That keeps the price cards and the keep-or-let-go screen on counted, owner-entered rows.
 
 ## Cost and limits in this build
 
