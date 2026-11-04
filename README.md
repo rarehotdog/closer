@@ -2,15 +2,28 @@
 
 Closer keeps the piece you want to wear, changes only what feels off or what changed, using clothes you already own, and counts only the wears you confirm.
 
-- Live URL: not deployed yet.
-- Watch the recorded run: `/w/demo-rc1` (read-only, same state hash as the recorded run). Not recorded yet.
-- Built Oct 27–Nov 4 ET. Models: `muse-spark-1.3` and `sam-3.1` through the Meta Model API (Responses API), called directly from `adapters/`.
+Track: Indie Developer · Theme: Build for Your World — built for one closet first, in Seoul: Korean and English sentences, Korean resale platforms first and then the international ones, each in its own currency.
+
+- Built Oct 27–Nov 4 ET. Models: `muse-spark-1.3` and `sam-3.1` through the Meta Model API (Responses API), called directly from `adapters/`; `muse-wonder-1.0` reachable through the same adapter layer for the owner's own prompts ([docs/wonder.md](docs/wonder.md)).
+- Where things stand (live link, recording, live calls): see [Current state](#current-state).
 
 | Built during the hackathon | Third-party | Pre-existing |
 |---|---|---|
 | All code and docs in this repository. The first commit is the scaffold only. | Two runtime dependencies: `@meta-sam/parser` 0.1.0 (Meta, SAM License), the official decoder for SAM 3.1 mask payloads, and `three` 0.170.0 (MIT) for the 3D closet view. Dev tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). | 0 |
 
 License: [MIT](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+## Run it (2 minutes)
+
+Needs Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`); check with `node --version`.
+
+```
+npm install
+npm run ui        # http://localhost:8787 · mock mode: no key, no network
+npm test
+```
+
+Then open `/today`, `/closet`, `/closet/3d` and `/discover`; the photo loop is on the Try page (`/try`).
 
 ## The loop
 
@@ -36,6 +49,17 @@ You decide at four places: the cards (step 4), the option and the wear (step 7),
 - **Discover.** Sample looks by occasion, rebuilt with what you own first; only the pieces you lack become optional cards, with "N more complete outfits" counted on this closet. Pick looks as **style targets**: Closer counts, piece by piece, how much of them your closet already covers ("6 of 8 pieces · 75%") and shows an item box of every piece they ask for (have it / similar / missing). The formula is printed next to the number, and the count moves only when the closet does.
 - **Closet in 3D.** `/closet/3d` draws the same pieces by layer in three.js: outerwear rail, tops, bottoms, shoes. Drag to turn it, slide for an exploded view, tap a piece for its confirmed wears, review status and per-platform price evidence. Pick any pieces into an outfit, one per layer; the rest fade back, and "Wear these today" opens Today with them locked. A piece registered from a photo shows that photo cut out by its mask; the owner's wardrobe opens at `/closet/3d?ws=owner`. It shows the same pieces and counts as My closet and adds no numbers of its own; without WebGL it falls back to the same list.
 
+## What Closer does differently
+
+| Closer does | Closer does not |
+|---|---|
+| Starts from the piece you chose and edits only what feels off | Generate a whole outfit from scratch |
+| Counts only wears you confirmed, with the recorded days next to the count | Call a piece unused because records are missing |
+| Shows prices per platform in that platform's currency | Average or convert them |
+| Shows a net only after you checked every cost line | Count an unknown fee as zero |
+| Asks one question per piece with a date, and saves your position as a snapshot | Put a probability or a value on a piece it cannot count |
+| Drafts listings and donation checklists | Post, pay, book, or mark anything sold |
+
 ## Verify it yourself
 
 1. Open `/w/demo-rc1` and `/version` in a private window and compare the stateHash and sha.
@@ -46,6 +70,10 @@ You decide at four places: the cards (step 4), the option and the wear (step 7),
 
 This repository runs in **mock mode** by default: no Meta model is called and no key exists anywhere in the repository. The Meta adapters are written from the documentation examples and stay marked unverified until a live run is recorded in `.data/` on the owner's machine. Status, test results and next steps: [docs/status.md](docs/status.md) · [docs/at_results.md](docs/at_results.md) · [docs/features_1102.md](docs/features_1102.md).
 
+- Live URL: not deployed yet (the kit is in [deploy/](deploy/README.md)).
+- Demo video: not recorded yet; the script is [docs/demo_script.md](docs/demo_script.md). `/w/demo-rc1` shows the read-only sample run with its state hash.
+- Live model calls recorded in this repository: 0.
+
 | Command | What it does |
 |---|---|
 | `npm test` | Runs the keyless acceptance tests, unit tests and static checks; writes `docs/at_results.json` and `docs/at_results.md`. |
@@ -53,12 +81,25 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 | `npm run live:check` | Owner's machine only, key read from the Keychain: the model list, one Spark intent call, one Spark 2 call and, with `--image`, one Spark photo call and one SAM call. Every answer goes through the code checks; writes `.data/live_check.json` (statuses, timings, code checks; no text). Never runs inside tests. |
 | `npm run screens` | Captures the screens into `docs/screens/` with Playwright Chromium (Playwright is not a project dependency). |
 | `npm run typecheck` | `tsc` type check. TypeScript and the Node type definitions are devDependencies, so `npm install` is enough. |
+| `npm run wonder -- --prompt "…" [--search] [--image x.jpg]` | Owner's machine only, key read from the Keychain: one direct Muse Wonder call (or Spark with `--model muse-spark-1.3`). `node scripts/wonder.ts --prompt "…"` without the script is a dry run that prints the request and sends nothing. Records statuses, timings, usage and cost in `.data/wonder_calls.jsonl`, never the prompt or the answer. [docs/wonder.md](docs/wonder.md). |
 
 Requires Node.js 22.18 or newer (built-in TypeScript type stripping and `node:sqlite`). Run `npm install` once for the two runtime dependencies and the two type-check tools.
 
 CI: `.github/workflows/ci.yml` runs `npm ci`, `npm run typecheck`, `npm test` and the static check (`scripts/static_check.ts`) on every push and pull request, on Node 22.18.
 
 Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written before any call` — not measured yet.
+
+## Meta models: where and how
+
+| Step | Model | API feature used | Request builder | Code check before anything is saved |
+|---|---|---|---|---|
+| Photo + sentence → garment boxes, the kept piece, the pieces that feel off | `muse-spark-1.3` | Responses API, `input_image` as a data URL, `text.format` json_schema strict | `adapters/spark1.ts` | `engine/validate.ts` `validateSpark1` |
+| Sentence → locks, direction, rain | `muse-spark-1.3` | json_schema whose `keep` enum is the wardrobe's own item IDs | `adapters/intent.ts` | `engine/intent.ts` `checkIntent` |
+| Garment boxes → masks | `sam-3.1` | box prompts (at most 16) built with the official parser's prompt builder, non-streamed; masks decoded by `@meta-sam/parser` | `adapters/sam.ts`, `engine/coords.ts`, `adapters/samDecoder.ts` | `validateSam` (frame, ids, a small mask tolerance) and `engine/color.ts` `maskColor` re-measuring the colour from the mask pixels |
+| Candidates → at most two edits | `muse-spark-1.3` | function tools `propose_edit` / `ask_owner`, strict, `parallel_tool_calls: false`, `tool_choice` omitted, up to 8 PNG cut-outs | `adapters/spark2.ts` | `validateSpark2` (IDs, slots, rules; the locked piece never moves) |
+| The owner's own prompt, optional | `muse-wonder-1.0` (or `muse-spark-1.3` by flag) | text, images, json_schema, function tools, `web_search` grounding with `url_citation` annotations, `previous_response_id` | `adapters/wonder.ts` · `scripts/wonder.ts` · `POST /api/ws/:id/wonder` | caps and the kill switch in `CloserService.askWonder`; `engine/links.ts` sorts cited links by platform and reads no price from any page |
+
+Muse Wonder is in preview and, per dev.meta.ai/docs/models (read 2026-11-04), not available in South Korea on the Model API; every Wonder request runs unchanged on Spark with the model flag. Live calls recorded in this repository: 0 (the line above is updated from `.data/live_check.json` when the owner runs `npm run live:check`).
 
 ## Known limits
 

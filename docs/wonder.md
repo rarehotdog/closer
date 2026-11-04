@@ -1,6 +1,6 @@
 # Muse Wonder: a direct line, with the same rules
 
-Added 11/5 00:30 KST. Muse Wonder (`muse-wonder-1.0`, preview) is reachable from three places, all through the one request builder in `adapters/wonder.ts`: the command line, the server (`POST /api/ws/:id/wonder`) and the engine (`CloserService.askWonder`). The model id is a parameter, because the docs say Spark and Wonder "take the same requests on the same endpoints".
+Added 11/4 23:40 KST. Muse Wonder (`muse-wonder-1.0`, preview) is reachable from three places, all through the one request builder in `adapters/wonder.ts`: the command line, the server (`POST /api/ws/:id/wonder`) and the engine (`CloserService.askWonder`). The model id is a parameter, because the docs say Spark and Wonder "take the same requests on the same endpoints".
 
 ## What the docs say (dev.meta.ai, read 2026-11-04 KST evening)
 
