@@ -7,7 +7,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { officialMaskDecoder } from '../adapters/samDecoder.ts';
 import { decodePng, encodePng, jpegSize } from '../engine/png.ts';
-import { PhotoStore } from '../store/photos.ts';
+import { PhotoStore, stripJpegMetadata } from '../store/photos.ts';
 import { cutoutPng } from '../engine/thumbs.ts';
 import { encodeMockRle } from '../engine/coords.ts';
 import { buildSamBody } from '../adapters/sam.ts';
@@ -71,6 +71,35 @@ test('PH-05 photo store refuses what it cannot use safely', () => {
   assert.throws(() => store.save('owner', fakeJpeg(2000, 1000), solidPng(800, 400, [0, 0, 0]), 't'), /long side over 1600/);
   assert.throws(() => store.save('owner', fakeJpeg(1200, 1600), solidPng(800, 800, [0, 0, 0]), 't'), /different shapes/);
   assert.equal(store.get('../../etc/passwd'), null);
+});
+
+test('PH-08 the store strips APP1 (Exif, XMP), APP13 and comment segments before writing and keeps the picture bytes', () => {
+  const seg = (marker: number, body: Buffer) => Buffer.concat([Buffer.from([0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 255]), body]);
+  const soi = Buffer.from([0xff, 0xd8]);
+  const app0 = seg(0xe0, Buffer.from('JFIF\0\x01\x02\0\0\x01\0\x01\0\0', 'latin1'));
+  const exif = seg(0xe1, Buffer.from('Exif\0\0MM\0*\0\0\0\x08 gps and camera fields', 'latin1'));
+  const xmp = seg(0xe1, Buffer.from('http://ns.adobe.com/xap/1.0/\0<x:xmpmeta/>', 'latin1'));
+  const iptc = seg(0xed, Buffer.from('Photoshop 3.0\u00008BIM caption', 'latin1'));
+  const com = seg(0xfe, Buffer.from('a comment', 'latin1'));
+  const dqt = seg(0xdb, Buffer.alloc(65, 1));
+  const sof = seg(0xc0, Buffer.from([0x08, 1600 >> 8, 1600 & 255, 1200 >> 8, 1200 & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]));
+  const scan = Buffer.concat([seg(0xda, Buffer.from([1, 1, 0, 0, 63, 0])), Buffer.from([0x12, 0xff, 0x00, 0x34, 0xff, 0xd9])]); // entropy data with a stuffed byte, then EOI
+  const dirty = Buffer.concat([soi, app0, exif, xmp, iptc, dqt, com, sof, scan]);
+  const clean = stripJpegMetadata(dirty);
+  assert.ok(clean.equals(Buffer.concat([soi, app0, dqt, sof, scan])), 'exactly the picture segments, in order');
+  for (const needle of ['Exif\0\0', 'xmpmeta', 'Photoshop', 'a comment']) assert.ok(!clean.includes(Buffer.from(needle, 'latin1')), needle);
+  assert.deepEqual(jpegSize(clean), { w: 1200, h: 1600 });
+  assert.ok(stripJpegMetadata(clean).equals(clean), 'a clean file is returned unchanged');
+  assert.ok(stripJpegMetadata(Buffer.from('not a jpeg')).equals(Buffer.from('not a jpeg')));
+  // Through the store: what reaches the disk and the data URL the models get has no Exif segment.
+  mkdirSync(dir, { recursive: true });
+  const store = new PhotoStore(dir);
+  const m = store.save('owner', dirty, solidPng(600, 800, [1, 2, 3]), '2026-11-04T00:00:00Z');
+  const onDisk = store.jpegBytes(m.photoId)!;
+  assert.ok(onDisk.equals(clean));
+  assert.ok(!onDisk.includes(Buffer.from('Exif\0\0', 'latin1')));
+  assert.ok(!Buffer.from(store.get(m.photoId)!.url.split(',')[1], 'base64').includes(Buffer.from('Exif\0\0', 'latin1')));
+  assert.equal(store.delete('owner', m.photoId), true);
 });
 
 test('PH-06 cut-out thumbnail: garment pixels inside the mask, transparent outside, long side ≤ 256', () => {
