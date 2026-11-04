@@ -685,6 +685,7 @@ function niceStep(x, cur) {
   return Math.max(floor, (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow);
 }
 const PRICE_RANGES = [['30', '30d'], ['90', '90d'], ['all', 'All']];
+let PC_SEQ = 0;
 const MATCH_WORDS = { SAME_ITEM: 'same item', SIMILAR: 'similar item', UNVERIFIED: 'not sure' };
 const priceWord = (p) => (p.priceType === 'ASK' ? 'asking' : 'traded');
 /**
@@ -744,6 +745,15 @@ function priceChart(series, cur, opts) {
         : svgEl('text', { class: 'pc-axis', x: gutter - 4, y: Y(v) + 4, 'text-anchor': 'end' }, labels[i])));
     svg.append(svgEl('text', { class: 'pc-axis', x: x0, y: H - 6 }, fmtDate(isoOfDay(tStart))),
       svgEl('text', { class: 'pc-axis', x: x1, y: H - 6, 'text-anchor': 'end' }, fmtDate(isoOfDay(tEnd))));
+    // Like an exchange chart: a soft area under the highlighted platform's line (its own seen points only, nothing filled in between days it was not seen).
+    if (focus && focus.points.length >= 2) {
+      const gid = `pcg${++PC_SEQ}`;
+      svg.append(svgEl('defs', null, svgEl('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' },
+        svgEl('stop', { class: 'pc-stop-top', offset: '0%' }), svgEl('stop', { class: 'pc-stop-bottom', offset: '100%' }))));
+      const pts = focus.points.map((p) => `${X(p.retrievedAt).toFixed(1)},${Y(p.amount).toFixed(1)}`);
+      const first = focus.points[0], lastP = focus.points[focus.points.length - 1];
+      svg.append(svgEl('polygon', { class: 'pc-area', fill: `url(#${gid})`, points: [`${X(first.retrievedAt).toFixed(1)},${y1}`, ...pts, `${X(lastP.retrievedAt).toFixed(1)},${y1}`].join(' ') }));
+    }
     // Faded platforms first, the highlighted one on top.
     for (const s of [...shown.filter((s) => s !== focus), focus]) {
       const cls = s === focus ? 'is-focus' : 'is-other';
@@ -761,6 +771,8 @@ function priceChart(series, cur, opts) {
           svgEl('circle', { class: `pc-dot ${cls} ${p.priceType === 'ASK' ? 'ask' : 'trade'}${p.source === 'sample' ? ' is-sample' : ''}${picked ? ' is-picked' : ''}`, cx: X(p.retrievedAt), cy: Y(p.amount), r: picked ? 6 : s === focus ? 4.5 : 3.5 })));
       }
     }
+    // The latest price seen on the highlighted platform, marked like a market's last trade (a soft halo; still while reduced motion is on).
+    if (focus) { const L = last(focus); svg.append(svgEl('circle', { class: 'pc-now', cx: X(L.retrievedAt), cy: Y(L.amount), r: 9, 'aria-hidden': 'true' })); }
     return svg;
   };
 
@@ -1255,7 +1267,7 @@ async function closetScreen(view) {
       h('p', { class: 'muted' }, N ? N.line : D.net && D.net.ok === false ? D.net.detail : 'Pick a price to test. The net stays unknown until every cost line is checked.'));
     const sell = h('div', { class: 'card side' },
       h('div', { class: 'hd' }, 'If I prepare to sell'),
-      plat, seen, chart,
+      plat, seen,
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small ghost', disabled: D.linksBusy ? true : null, onclick: findLinks }, D.linksBusy ? 'Asking the model…' : 'Find listings with Wonder')),
       linksBox(D),
       range, num,
@@ -1280,6 +1292,8 @@ async function closetScreen(view) {
     return h('section', { class: 'panel decide', id: 'decide' },
       h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Keep or let go? · ${D.itemId} · ${itemName(S.items[D.itemId])}`), h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.decide = null; render(); } }, 'Close')),
       h('p', { class: 'ask' }, K.question), hz,
+      // The market view of this piece, full width like an exchange chart: prices seen over time in the sell side's currency.
+      chart ? h('div', { class: 'decide-chart' }, h('p', { class: 'lbl' }, `Prices seen over time · ${cur} · ${platformName(D.platform)} highlighted`), chart) : null,
       h('div', { class: 'grid cols-2 sides' }, keep, sell),
       pos, hist,
       h('p', { class: 'muted' }, V.note));

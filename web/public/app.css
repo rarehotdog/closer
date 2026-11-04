@@ -508,3 +508,14 @@ details.sub summary { cursor: pointer; font-weight: 600; padding: 6px 0; color: 
 .side .pc-sub { font-size: 12px; }
 .side .pc-legend { font-size: 12px; gap: 4px 10px; }
 @media (max-width: 430px) { .pc-range { width: 100%; } }
+
+/* Keep or let go: the price chart spans both sides, under the question */
+.decide-chart { margin: 12px 0 4px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.decide-chart > .lbl { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+/* Price chart, exchange look: soft area under the highlighted line, a halo on the latest price */
+.pc-stop-top { stop-color: var(--accent); stop-opacity: 0.22; }
+.pc-stop-bottom { stop-color: var(--accent); stop-opacity: 0; }
+.pc-area { pointer-events: none; }
+.pc-now { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0.55; pointer-events: none; transform-box: fill-box; transform-origin: center; animation: pc-pulse 2.4s ease-out infinite; }
+@keyframes pc-pulse { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pc-now { animation: none; } }
