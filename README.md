@@ -123,7 +123,7 @@ Muse Wonder is in preview and, per dev.meta.ai/docs/models (read 2026-11-04), no
 ## What comes next (not built)
 
 - Import your order history as a file you export yourself, so each piece carries what you paid and when.
-- A closet ledger with its denominator on screen: pieces with a price on record out of all pieces, and what each would leave in your hand, per platform.
+- What each piece would leave in your hand on each platform, in the closet ledger itself (today the ledger shows a net only for positions you saved with every cost line checked).
 - Resale evidence from official platform APIs where they exist; otherwise a screenshot you paste. Never averaged across platforms.
 - Donation points near you from a public directory, using your location only when you allow it.
 - A 3D model per garment from a photo, with SAM 3D Objects, only for pieces whose front is visible in the photo. Hidden pieces stay as cards.

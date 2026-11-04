@@ -4,7 +4,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
 - AT test cases (variants counted separately): PASS 33 · FAIL 0 · SKIP 7 · total 40.
-- Other tests (unit, fixture answer): PASS 42 · FAIL 0 · SKIP 0 · total 42.
+- Other tests (unit, fixture answer): PASS 46 · FAIL 0 · SKIP 0 · total 46.
 
 | Test | Result | Note |
 |---|---|---|
@@ -96,4 +96,8 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | SL-06 service: a SAM box 2 px outside its prompt box is clamped (DRAFT, noted on the call line); a 401 names the key | PASS |  |
 | stale expectedRevision → STALE_STATE; item IDs use the lowest free number per slot | PASS |  |
 | states (§4-1) | PASS |  |
+| TH-01 text pairs reach 4.5:1 and control edges 3:1 in light and dark | PASS |  |
+| TH-02 champagne brass is ornament: no text colour is set in --brass or --trim | PASS |  |
+| TH-03 the two dark blocks define the same tokens with the same values | PASS |  |
+| TH-04 nothing loads from outside the app, and the browser bar has a theme colour for both schemes | PASS |  |
 | transition table rows 1–13 and illegal transitions are rejected with the right code | PASS |  |

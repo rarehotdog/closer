@@ -154,11 +154,12 @@ The owner picks sample looks on Discover as **targets** ("Add as target"). Close
 
 ## Closet in 3D (added 11/4 night)
 
-`/closet/3d` (link "See it in 3D" under the asset board on My closet) draws the closet by layer in three.js 0.170.0: outerwear rail, tops shelf, bottoms shelf, shoe rack, inside a wireframe frame.
+`/closet/3d` (link "See it in 3D" under the asset board on My closet) draws the closet by layer in three.js 0.170.0: outerwear rail, tops rail, bottoms shelf, shoe shelf. Since 11/5 early morning (KST) it is drawn as a white walk-in closet — white lacquer cabinetry, brass rails and hangers, glass towers, lit shelves, a marble floor and island — with every texture drawn by code (`web/public/closet3d.js`).
 
 - **Same data, no new numbers.** `web/public/anatomy.js` groups the items from `GET /api/ws/:id/view` with the rows from `GET /api/ws/:id/review?window=60`. The canvas and the list view both draw from that one result. Tests F4-01 … F4-03 check that every piece appears once on its own layer, that the counts per layer, per availability and per review status equal My closet's, that a laundry change shows up, and that the data has no price, value or estimate fields.
 - **On screen.** Cards show the piece's colour and kind (code-drawn, like the rest of the sample closet), its ID and name. Pieces that are not available are washed out with their state; an amber outline marks "no confirmed wear in 60 days" only where enough days were recorded (the review rule). Drag sideways to turn, slide for an exploded view, tap a piece for its facts and the price evidence entered per platform (never averaged).
-- **Not in it.** No per-garment 3D models, no closet value total, no estimated resale price. Per-garment models from photos (SAM 3D Objects) are listed under What comes next.
+- **Prices in it come from the closet ledger.** The boutique price tags show a piece's latest price row as it is, the owner's own row before a sample one (amount in its own currency, platform, asking or traded, Sample), and the numbers over the top-left are the ledger's per-currency totals with their denominators (`overlayRows` in `anatomy.js`, test F4-04): the same numbers My closet shows. The layer data from `buildAnatomy` still carries no price, value or estimate fields.
+- **Not in it.** No per-garment 3D models, no value of its own, no estimated resale price. Per-garment models from photos (SAM 3D Objects) are listed under What comes next.
 - **Serving three.js.** The module is served from the installed package (`node_modules/three/build/three.module.min.js`), pinned in `package-lock.json`; it is not copied into the repository. `deploy/gce/install_remote.sh` now runs `npm ci --omit=dev`, which the deploy needed anyway for `@meta-sam/parser`.
 - **No WebGL.** The page says so and opens the list view with the same pieces.
 
@@ -185,7 +186,7 @@ The screen the team's reviews converged on: not a closet list but the place wher
 - **Find listings with Wonder.** One button on the sell side asks Muse Wonder (or Spark, by the server's model flag) for listing links of this piece on the chosen platform through `POST /api/ws/:id/wonder`; only the links come back to the screen, sorted by platform, and the owner enters any price they read there as evidence themselves. Details in [wonder.md](wonder.md).
 - **Browser check (390 px).** My closet → J2 → "Look at selling" and B3 → "Look at selling" open with a clean console (the `money` initialisation error reported on cc09bfe is fixed: the panel's local formatter shadowed the shared one). "Keep or let go?" renders the two sides side by side, the slider moves the net, a typed 0 turns "unknown" into an amount, a position shows "Saved and read back · d_…", and the history survives a reload.
 
-## Closet ledger at a glance (added 11/5 night)
+## Closet ledger at a glance (added 11/5 early morning KST)
 
 The asset board at the top of My closet and on the landing page: the closet's prices as counted numbers, one big number per currency.
 

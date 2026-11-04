@@ -499,6 +499,30 @@
       "reason": ""
     },
     {
+      "name": "TH-01 text pairs reach 4.5:1 and control edges 3:1 in light and dark",
+      "file": "tests/theme.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "TH-02 champagne brass is ornament: no text colour is set in --brass or --trim",
+      "file": "tests/theme.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "TH-03 the two dark blocks define the same tokens with the same values",
+      "file": "tests/theme.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "TH-04 nothing loads from outside the app, and the browser bar has a theme colour for both schemes",
+      "file": "tests/theme.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
       "name": "transition table rows 1–13 and illegal transitions are rejected with the right code",
       "file": "tests/unit.test.ts",
       "status": "PASS",
