@@ -1,5 +1,5 @@
 'use strict';
-// Closer UI — five screens (/, /app, /w/demo-rc1, /admin, /version). No framework, no build step.
+// Closer UI — / (landing), /try, /app, /w/demo-rc1, /admin, /version, /today, /closet, /closet/3d, /discover. No framework, no build step.
 // Status labels come from result objects: a save label only after the fresh read-back matches.
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -132,12 +132,11 @@ function thumb(item, cuts) {
 
 // ---------- chrome ----------
 function chrome(extra) {
-  for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.path === location.pathname);
+  for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.path === location.pathname || (a.dataset.path === '/closet' && location.pathname.startsWith('/closet')));
   const row = $('#chips');
   row.replaceChildren(h('span', { class: 'chip accent' }, META.buildChip), h('span', { class: 'chip warn' }, META.labels.demoScenario), ...(extra || []));
 }
-function showBanner(b) {
-  const el = $('#banner');
+function showBanner(b, el = $('#banner')) {
   if (!b) { el.hidden = true; return; }
   el.hidden = false;
   el.className = `banner ${b.kind}`;
@@ -496,6 +495,24 @@ function decisionUI(root, cfg) {
 }
 
 // ---------- screens ----------
+/** '/': what Closer does, in one fold, with the three product screens one tap away. Numbers on this page come only from the same APIs the screens use. */
+async function landingScreen(view) {
+  chrome([]);
+  const card = (href, title, line) => h('a', { class: 'card land', href }, h('div', { class: 'hd' }, title), h('p', { class: 'muted' }, line));
+  const bn = h('div', { class: 'banner', id: 'banner-landing', hidden: true });
+  view.append(
+    h('h1', null, 'Keep the piece you love. Change only what feels off.'),
+    h('p', { class: 'lede' }, 'Closer finishes today’s outfit from the clothes you already own, counts only the wears you confirm, and drafts the listing when a piece should go. It never posts, pays or sends anything.'),
+    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/today', id: 'start' }, 'Start with today'), h('a', { class: 'muted', href: '/try', id: 'try-link' }, 'Try the loop on three sample photos')),
+    h('div', { class: 'grid cols-3' },
+      card('/today', 'Today', 'Keep one piece; Closer completes up to two outfits from what you own and have available.'),
+      card('/closet', 'My closet', 'See which pieces have no confirmed wear, with the days recorded next to the count.'),
+      card('/discover', 'Discover', 'Pick looks you want; see how many of their pieces you already have.')),
+    bn);
+  const vb = await getJson('/api/banner/visitor');
+  showBanner(vb, bn);
+}
+
 async function tryScreen(view) {
   chrome([h('span', { class: 'chip sample' }, META.labels.samplePhoto)]);
   view.append(h('h1', null, 'Try it on three sample outfits'),
@@ -590,7 +607,8 @@ async function versionScreen(view) {
         h('li', null, 'Open /w/demo-rc1 and /version in a private window; compare stateHash and sha.'),
         h('li', null, 'Compare git rev-parse HEAD of the code you have with the sha above: same release.'),
         h('li', null, 'Turn K1 on in /admin and check that a button re-plan still works.'),
-        h('li', null, 'This page shows the mode and the number of live model calls recorded on this server; each live call also appears as a chip next to its result.'))));
+        h('li', null, 'This page shows the mode and the number of live model calls recorded on this server; each live call also appears as a chip next to its result.'))),
+    h('p', { class: 'muted' }, 'Owner pages: ', h('a', { href: '/app' }, 'My wardrobe'), ' · ', h('a', { href: '/admin' }, 'Admin'), ' · ', h('a', { href: '/w/demo-rc1' }, 'Read-only run')));
 }
 
 
@@ -614,9 +632,11 @@ async function closetWs() {
   return { id: s.workspaceId, view: await getJson(`/api/ws/${s.workspaceId}/view`), fresh: true };
 }
 
+/** One tab bar on every page (shown on phones, where the top nav is hidden). */
 function tabbar() {
-  const tabs = [['/today', 'Today'], ['/closet', 'My closet'], ['/discover', 'Discover']];
-  return h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, tabs.map(([href, label]) => h('a', { href, class: location.pathname === href ? 'on' : null, 'aria-current': location.pathname === href ? 'page' : null }, label)));
+  const tabs = [['/today', 'Today'], ['/closet', 'My closet'], ['/discover', 'Discover'], ['/try', 'Photo']];
+  const on = (href) => (href === '/closet' ? location.pathname.startsWith('/closet') : location.pathname === href);
+  return h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, tabs.map(([href, label]) => h('a', { href, class: on(href) ? 'on' : null, 'aria-current': on(href) ? 'page' : null }, label)));
 }
 
 function sampleChips() {
@@ -629,7 +649,6 @@ function tile(it, opts = {}) {
 
 async function todayScreen(view) {
   chrome(sampleChips());
-  document.body.append(tabbar());
   const { id, view: v } = await closetWs();
   const params = new URLSearchParams(location.search);
   const S = { locks: new Set((params.get('lock') || '').split(',').filter(Boolean)), direction: 'none', rain: false, op: null, msg: null, saved: null, view: v };
@@ -757,7 +776,6 @@ async function todayScreen(view) {
 
 async function closetScreen(view) {
   chrome(sampleChips());
-  document.body.append(tabbar());
   const { id, view: v } = await closetWs();
   const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
@@ -1057,7 +1075,6 @@ async function closetScreen(view) {
 
 async function discoverScreen(view) {
   chrome(sampleChips());
-  document.body.append(tabbar());
   const { id, view: v } = await closetWs();
   const items = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const L = await getJson('/api/looks');
@@ -1168,14 +1185,12 @@ async function closet3dScreen(view) {
   let v;
   if (wsParam) {
     chrome([]);
-    document.body.append(tabbar());
     const r = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/view`, { headers: authHeaders() });
     if (!r.ok) { view.append(h('h1', null, 'Closet in 3D'), ownerBar(), h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
     id = wsParam;
     v = await r.json();
   } else {
     chrome(sampleChips());
-    document.body.append(tabbar());
     ({ id, view: v } = await closetWs());
   }
   // Photos this wardrobe was registered from: the public sample photos plus the owner's own uploads (fetched with the owner header).
@@ -1270,9 +1285,11 @@ async function closet3dScreen(view) {
 
 (async function main() {
   META = await getJson('/api/photos');
+  document.body.append(tabbar());
   const view = $('#view');
   const p = location.pathname;
-  if (p === '/') await tryScreen(view);
+  if (p === '/') await landingScreen(view);
+  else if (p === '/try') await tryScreen(view);
   else if (p === '/app') await appScreen(view);
   else if (p === '/w/demo-rc1') await demoScreen(view);
   else if (p === '/admin') await adminScreen(view);

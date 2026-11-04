@@ -325,6 +325,12 @@ button.card.look:hover, .card.look:hover { border-color: var(--accent); }
 button.card.look > .row, .card.look .look-select > .row { padding: 6px 8px; background: var(--surface); border-radius: 8px; border: 1px solid var(--line); width: fit-content; }
 button.card.look svg, .card.look .look-select svg { width: 22px; height: 30px; }
 button.chip { cursor: pointer; font: inherit; transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease; }
+/* landing: the three product screens as link cards */
+a.card.land { text-decoration: none; color: inherit; display: grid; gap: 4px; align-content: start; background: var(--surface); transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+a.card.land:hover { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+a.card.land .hd { color: var(--accent); font-size: 15px; }
+a.card.land p { margin: 0; }
+#banner-landing { margin-top: 16px; }
 button.chip:hover { border-color: var(--accent); color: var(--accent); }
 .card .hd svg { width: 22px; height: 30px; flex-shrink: 0; }
 details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }

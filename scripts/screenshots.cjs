@@ -45,7 +45,7 @@ async function waitForServer() {
     const flashHas = (text) => page.waitForFunction((t) => (document.querySelector('#flash')?.textContent || '').includes(t), text);
 
     // 1 · Try
-    await page.goto(`${BASE}/`);
+    await page.goto(`${BASE}/try`);
     await ready();
     await shot('01-try-pick.png');
     await page.click('#run');
@@ -98,7 +98,7 @@ async function waitForServer() {
     await page.waitForSelector('#kill-state');
     await page.waitForFunction(() => document.querySelector('#kill-state')?.textContent.startsWith('on'));
     await shot('10-admin-k1-on.png');
-    await page.goto(`${BASE}/`);
+    await page.goto(`${BASE}/try`);
     await ready();
     await page.click('#run');
     await page.waitForFunction(() => document.querySelector('#op-state')?.textContent === 'HOLD');
@@ -112,7 +112,7 @@ async function waitForServer() {
 
     // Phone width check (Try)
     const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
-    await phone.goto(`${BASE}/`);
+    await phone.goto(`${BASE}/try`);
     await phone.waitForSelector('body[data-ready="1"]');
     const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     await phone.screenshot({ path: path.join(OUT, '13-try-phone.png'), fullPage: true });
