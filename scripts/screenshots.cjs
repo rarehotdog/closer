@@ -45,7 +45,7 @@ async function waitForServer() {
     const flashHas = (text) => page.waitForFunction((t) => (document.querySelector('#flash')?.textContent || '').includes(t), text);
 
     // 1 · Try
-    await page.goto(`${BASE}/`);
+    await page.goto(`${BASE}/try`);
     await ready();
     await shot('01-try-pick.png');
     await page.click('#run');
@@ -53,21 +53,21 @@ async function waitForServer() {
     await page.waitForTimeout(200);
     await shot('02-try-masks-cards.png');
     await page.click('#confirm');
-    await flashHas('read back');
+    await flashHas('checked against');
     await page.click('#propose');
     await page.waitForSelector('#options');
     await page.waitForTimeout(300);
     await shot('03-try-options.png');
     await page.click('[data-pick="0"]');
-    await flashHas('Selection saved');
+    await flashHas('not worn yet');
     await page.click('button[data-item="B2"][data-state="LAUNDRY"]');
     await page.waitForFunction(() => document.querySelector('#decision h2')?.textContent.includes('re-plan'));
     await page.waitForTimeout(300);
     await shot('04-try-laundry-replan.png');
     await page.click('[data-pick="0"]');
-    await flashHas('Selection saved');
+    await flashHas('not worn yet');
     await page.click('#wore');
-    await flashHas('+1 wear');
+    await flashHas('Wear recorded');
     await page.click('#wore');
     await flashHas('Already recorded');
     await page.waitForTimeout(200);
@@ -98,10 +98,10 @@ async function waitForServer() {
     await page.waitForSelector('#kill-state');
     await page.waitForFunction(() => document.querySelector('#kill-state')?.textContent.startsWith('on'));
     await shot('10-admin-k1-on.png');
-    await page.goto(`${BASE}/`);
+    await page.goto(`${BASE}/try`);
     await ready();
     await page.click('#run');
-    await page.waitForFunction(() => document.querySelector('#op-state')?.textContent === 'HOLD');
+    await page.waitForFunction(() => document.querySelector('#op-state')?.dataset.state === 'HOLD');
     await shot('11-try-k1-held.png');
     await fetch(`${BASE}/api/admin/kill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"on":false}' });
 
@@ -112,7 +112,7 @@ async function waitForServer() {
 
     // Phone width check (Try)
     const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
-    await phone.goto(`${BASE}/`);
+    await phone.goto(`${BASE}/try`);
     await phone.waitForSelector('body[data-ready="1"]');
     const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     await phone.screenshot({ path: path.join(OUT, '13-try-phone.png'), fullPage: true });

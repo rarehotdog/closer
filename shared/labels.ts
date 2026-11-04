@@ -9,10 +9,10 @@ export const PRODUCT_NOUN = 'wardrobe assistant';
 export const BUILD_CHIP = 'Built Oct 27–Nov 4 ET · muse-spark-1.3 · sam-3.1';
 
 export const LABELS = {
-  selectionSaved: 'Selection saved · read back ✓ · wear not confirmed yet',
-  wearSaved: '+1 wear · read back ✓',
+  selectionSaved: 'Saved · checked against the server · not worn yet',
+  wearSaved: 'Wear recorded · checked against the server',
   alreadyRecorded: 'Already recorded',
-  ledgerZeroUntilConfirm: 'Ledger: +0 until you confirm',
+  ledgerZeroUntilConfirm: 'Nothing is recorded until you confirm',
   sampleItem: 'Sample item',
   samplePhoto: 'Sample photo · code-drawn placeholder',
   demoScenario: 'Demo scenario',
@@ -22,12 +22,12 @@ export const LABELS = {
   replayAndLedger: 'Replay & ledger mode',
   noConfirmedWearYet: 'no confirmed wear yet',
   needsReplan: 'Needs re-plan',
-  checkedByCode: 'Checked by code: owned · available · pinned item kept · only flagged slots changed',
+  checkedByCode: 'Checked by code: you own it · it is available · the kept piece stayed · only flagged slots changed',
   /** Same check without flagged slots (next plan without a photo, sentence path): direction is what was checked. */
-  checkedByCodeDirection: 'Checked by code: owned · available · pinned item kept · direction met',
-  mockBanner: 'Mock mode · no Meta calls · sample data only',
+  checkedByCodeDirection: 'Checked by code: you own it · it is available · the kept piece stayed · direction met',
+  mockBanner: 'Model calls: mock · no Meta calls · sample data only',
   killBanner: 'Model calls off (K1) · button re-plans and read-back still work',
-  readOnly: 'Read-only · writes return SCOPE_DENIED',
+  readOnly: 'Read-only sample · nothing can be changed here',
   notRecordedYet: 'No recorded run yet · this read-only page shows the sample wardrobe',
   uploadOff: 'Photo upload needs admin sign-in · off in mock mode',
   wearNotConfirmed: 'wear not confirmed yet',
@@ -55,7 +55,7 @@ export function offendersChip(slots: readonly Slot[]): string {
   return `Spark: ${slots.join(', ')} feel off`;
 }
 export function livePerception(callsLeft: number): string {
-  return `Live perception: on, about ${callsLeft} photo runs left in the cap`;
+  return `Model calls: live · about ${callsLeft} photo decisions left in the cap`;
 }
 export function callPanel(c: Pick<CallRow, 'callId' | 'latencyMs' | 'costMicroUsd' | 'estLiveCostMicroUsd' | 'source' | 'model' | 'http'>): string {
   const usd = (m: number) => `$${(m / 1_000_000).toFixed(4)}`;

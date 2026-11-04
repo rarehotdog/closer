@@ -124,7 +124,7 @@ export function priceCards(itemId: string, evidence: readonly Evidence[]): Price
       info: PLATFORM_INFO[p],
       status: entries.length > 0 ? 'HAS_EVIDENCE' : 'NO_EVIDENCE',
       entries,
-      emptyLine: entries.length > 0 ? null : 'No price evidence yet. Paste one you saw, or leave this platform out.',
+      emptyLine: entries.length > 0 ? null : 'No price saved yet for this platform.',
     };
   });
 }

@@ -26,7 +26,7 @@
 | `adapters/` | Every file starts with `// 미검증 — 문서 예시 기반, 실호출 0`. `spark1.ts`, `sam.ts`, `spark2.ts` build Responses-API bodies from the doc examples (store:false, reasoning.effort low, max_output_tokens 4000, text.format json_schema, function tools with parallel_tool_calls:false and no tool_choice). `transport.ts`: mock is default; real refuses without `MODEL_API_KEY` and always refuses in test processes. `mock/transport.ts` returns doc-shaped JSON so the same builders/parsers run. | §3-3, §3-4 |
 | `fixtures/` | `fxh.ts` (FX-H 9 roles, O0, intent), `edge.ts` (FX-E1…E8, E3 archived), `photos.ts` (3 code-drawn sample photos holding the 9 roles 4·3·2, each flagged 'Sample photo · code-drawn placeholder' / 'Sample item'; ground truth written in the file before any call). | §4-5 L260–274 |
 | `tests/` | Keyless ATs (mock), static AT-17/18 (repo scope), unit tests, reporter → `docs/at_results.json` → `docs/at_results.md`. Tests block `fetch` and set `CLOSER_FORBID_REAL=1`. | §4-4 |
-| `web/` | `server.ts` (`node:http`, mock by default) + `public/` vanilla JS UI: `/` Try, `/app`, `/w/demo-rc1`, `/admin`, `/version`. | §3-7 L157 |
+| `web/` | `server.ts` (`node:http`, mock by default) + `public/` vanilla JS UI: `/` landing, `/try` Try, `/app`, `/w/demo-rc1`, `/admin`, `/version`, `/today`, `/closet`, `/closet/3d`, `/discover`. | §3-7 L157 |
 | `scripts/` | `static_check.ts` (AT-17/18 scanner), `at_report.ts`, `screenshots.cjs` (Playwright). | — |
 | `docs/screens/` | 13 PNGs (see §7). | — |
 

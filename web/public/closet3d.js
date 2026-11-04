@@ -53,10 +53,16 @@ function drawCard(c, cell, fill, name, photo) {
   }
   g.textAlign = 'center';
   g.fillStyle = '#1d1b18';
-  g.font = '700 32px system-ui, -apple-system, sans-serif';
-  g.fillText(cell.itemId, 128, 278);
-  g.font = '600 22px system-ui, -apple-system, sans-serif';
-  g.fillText(name.length > 20 ? `${name.slice(0, 19)}…` : name, 128, 306);
+  if (name) {
+    g.font = '700 32px system-ui, -apple-system, sans-serif';
+    g.fillText(cell.itemId, 128, 278);
+    g.font = '600 22px system-ui, -apple-system, sans-serif';
+    g.fillText(name.length > 20 ? `${name.slice(0, 19)}…` : name, 128, 306);
+  } else {
+    // No name (phones): the ID alone, large enough to read on a card a few dozen pixels wide.
+    g.font = '700 56px system-ui, -apple-system, sans-serif';
+    g.fillText(cell.itemId, 128, 300);
+  }
   if (cell.availability !== 'AVAILABLE') {
     g.fillStyle = 'rgba(251,250,247,0.6)';
     g.fillRect(0, 0, 256, 248);
@@ -169,7 +175,8 @@ export function mountCloset3d(host, anatomy, opts) {
   }
   function resize() {
     const w = Math.max(280, host.clientWidth || 360);
-    const h = Math.round(Math.min(540, Math.max(380, w * 1.2)));
+    // Phones get a taller stage so the four layers and the cards stay readable.
+    const h = Math.round(w < 480 ? Math.min(620, w * 1.45) : Math.min(540, Math.max(380, w * 1.2)));
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -225,6 +232,8 @@ export function mountCloset3d(host, anatomy, opts) {
   return {
     cardCount: cards.length,
     setExplode(v) { explode = Math.max(0, Math.min(1, v)); },
+    /** Back to the opening view: the same turn and spread the page starts with. */
+    reset() { root.rotation.set(0.1, -0.42, 0); explode = 0.35; },
     select(itemId) { select(cards.find((m) => m.userData.cell.itemId === itemId) || null); },
     setPicked(ids) { picked = new Set(ids); paint(); },
     dispose() { renderer.setAnimationLoop(null); renderer.dispose(); },

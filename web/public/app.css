@@ -4,7 +4,7 @@
   --surface-2: #faf8f4;
   --ink: #1f1d1a;
   --ink-2: #5c574f;
-  --ink-3: #8a847a;
+  --ink-3: #6f6962;
   --line: #e4ded4;
   --accent: #2d4a7a;
   --accent-ink: #ffffff;
@@ -69,6 +69,9 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 .nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 8px; align-items: center; }
+#chips:empty { display: none; }
+#chips { margin: 0 0 12px; }
+.build { margin: 18px 0 0; font-size: 12px; }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -100,6 +103,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 }
 .banner strong { display: block; }
 .banner .sub { color: var(--ink-2); font-size: 12.5px; margin-top: 3px; }
+.banner details { margin-top: 4px; }
+.banner summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); }
 .banner.kill { background: var(--bad-soft); color: var(--bad); border-left-color: var(--bad); }
 
 h1 { font-size: 24px; letter-spacing: -0.02em; margin: 6px 0 6px; line-height: 1.25; }
@@ -182,7 +187,7 @@ button.btn, a.btn {
   transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
 }
 button.btn:active:not(:disabled), a.btn:active { transform: scale(0.98); }
-button.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+button.btn:disabled { opacity: 1; cursor: not-allowed; background: var(--accent-soft); color: var(--accent); }
 button.btn.ghost, a.btn.ghost { background: var(--surface); color: var(--accent); border-color: var(--line); }
 button.btn.ghost:hover:not(:disabled), a.btn.ghost:hover { border-color: var(--accent); background: var(--accent-soft); }
 button.btn.small, a.btn.small { padding: 6px 11px; font-size: 13px; border-radius: 8px; }
@@ -210,6 +215,8 @@ button.btn.small, a.btn.small { padding: 6px 11px; font-size: 13px; border-radiu
 .option:not(.base) { background: var(--surface); }
 .option.base { opacity: 0.85; }
 .option h3 { margin: 0; font-size: 14px; }
+.option.picked { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+.option .flash { margin: 0; }
 .option > button.btn { margin-top: auto; }
 .flatlay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .cell {
@@ -320,14 +327,26 @@ textarea.draft {
   resize: vertical;
 }
 #say-go { margin-top: 2px; }
+textarea#say { font-family: inherit; font-size: 16px; }
+.calls-block { margin-top: 12px; }
+.calls-block h3 { margin: 0 0 6px; font-size: 13px; color: var(--ink-2); }
+.chip .mono.muted { font-size: 11px; }
 button.card.look, .card.look { font: inherit; color: inherit; text-align: left; display: grid; gap: 8px; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
 button.card.look:hover, .card.look:hover { border-color: var(--accent); }
 button.card.look > .row, .card.look .look-select > .row { padding: 6px 8px; background: var(--surface); border-radius: 8px; border: 1px solid var(--line); width: fit-content; }
 button.card.look svg, .card.look .look-select svg { width: 22px; height: 30px; }
 button.chip { cursor: pointer; font: inherit; transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease; }
+/* landing: the three product screens as link cards */
+a.card.land { text-decoration: none; color: inherit; display: grid; gap: 4px; align-content: start; background: var(--surface); transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+a.card.land:hover { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+a.card.land .hd { color: var(--accent); font-size: 15px; }
+a.card.land p { margin: 0; }
+#banner-landing { margin-top: 16px; }
 button.chip:hover { border-color: var(--accent); color: var(--accent); }
 .card .hd svg { width: 22px; height: 30px; flex-shrink: 0; }
 details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+details.sub summary { cursor: pointer; font-weight: 600; padding: 6px 0; color: var(--ink-2); }
+.hint { margin: 0 0 6px; }
 .t .chip { white-space: nowrap; }
 .evform { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; }
 .evform select, .evform input { font: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; }
@@ -369,6 +388,8 @@ details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
   .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .kv dt { font-size: 12px; margin-top: 6px; }
   .kv dt:first-child { margin-top: 0; }
+  /* Today: the completing button stays reachable above the tab bar while you tap pieces in the grid */
+  .cta { position: sticky; bottom: 84px; background: var(--surface); padding: 8px 0; z-index: 5; }
 }
 
 @media (max-width: 430px) {
@@ -432,3 +453,16 @@ details.panel summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
 .side .netbox .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; font-size: 13px; }
 .decide .row.actions { margin-top: 12px; flex-wrap: wrap; gap: 8px; }
 .t td:last-child .btn { white-space: nowrap; }
+
+/* Phone touch targets (design brief: 44 px) for the controls the thumb meets first */
+@media (max-width: 760px) {
+  .seg button { min-height: 44px; }
+  button.chip { min-height: 40px; padding: 8px 12px; }
+  button.btn.small, a.btn.small { min-height: 40px; }
+  details.panel summary { min-height: 44px; display: flex; align-items: center; }
+  .brand { padding: 9px 0; }
+  .explode-row input[type="range"] { height: 44px; }
+  label.row.muted { min-height: 44px; }
+  label.row.muted input[type="checkbox"] { width: 22px; height: 22px; }
+  .chip-row { margin: 8px 0 4px; }
+}

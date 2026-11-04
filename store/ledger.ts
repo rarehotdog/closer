@@ -193,6 +193,12 @@ export class SqliteLedger {
     return (this.db.prepare('SELECT * FROM calls ORDER BY created_at DESC, rowid DESC LIMIT ?').all(limit) as Row[]).map(toCall);
   }
 
+  /** Live model calls that came back 2xx (the same rows the live chips are made from). Counted, never estimated. */
+  countLiveCalls(): number {
+    const r = this.db.prepare("SELECT COUNT(*) AS n FROM calls WHERE source = 'live' AND http BETWEEN 200 AND 299").get() as Row | undefined;
+    return Number(r?.n ?? 0);
+  }
+
   callsForOperation(operationId: string): CallRow[] {
     return (this.db.prepare('SELECT * FROM calls WHERE operation_id = ? ORDER BY rowid').all(operationId) as Row[]).map(toCall);
   }
