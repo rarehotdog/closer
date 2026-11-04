@@ -43,6 +43,24 @@ export function buildAnatomy(items, reviewRows) {
   return {
     layers,
     counts: { total, bySlot, byAvailability, byReview, unplaced },
-    note: 'Same pieces and states as My closet. This view draws them in 3D and adds no numbers of its own.',
+    note: 'Same pieces and states as My closet. The prices over the closet are the ones My closet shows; this view computes nothing else.',
   };
+}
+
+/**
+ * The rows of the asset overlay over the 3D stage, one per currency of the closet ledger: the owner's own total when the
+ * owner has entered a price in that currency, otherwise the sample total marked as sample. The two are never added.
+ * No evidence, no rows. Pure, so tests import it the way the 3D screen does.
+ */
+export function overlayRows(L) {
+  if (!L || !L.withEvidence || !Array.isArray(L.byCurrency)) return [];
+  const rows = [];
+  for (const c of L.byCurrency) {
+    const own = !!(c.owner && c.owner.pieces > 0);
+    const side = own ? c.owner : c.sample;
+    if (!side || !side.pieces) continue;
+    const kinds = [side.ask ? `${side.ask} asking` : null, side.trade ? `${side.trade} traded` : null].filter(Boolean);
+    rows.push({ currency: c.currency, total: side.total, pieces: side.pieces, of: L.pieces, sample: !own, kinds, seen: `latest price seen on ${side.pieces} of ${L.pieces} pieces` });
+  }
+  return rows;
 }

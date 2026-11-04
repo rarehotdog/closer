@@ -1542,7 +1542,7 @@ async function discoverScreen(view) {
   render();
 }
 
-// The closet by layer in 3D. Same pieces and states as My closet (anatomy.js); the canvas adds no numbers.
+// The closet by layer in 3D. Same pieces and states as My closet (anatomy.js); the prices on it come from the closet ledger, as on My closet.
 // A mask cut-out of a photo, drawn once the image has loaded.
 async function cutCanvasReady(cut) {
   const img = await loadImage(cut.url);
@@ -1554,6 +1554,29 @@ async function cutCanvasReady(cut) {
   ctx.clip(maskPath(cut.mask));
   ctx.drawImage(img, 0, 0);
   return c;
+}
+
+/* luxe 3D: the closet ledger (GET /api/ws/:id/ledger) on the 3D stage. Price tags and the asset overlay show only
+   what the ledger returns; no ledger (404 or offline) means no tags and no overlay. */
+async function closetLedger(id) {
+  const r = await fetch(`/api/ws/${encodeURIComponent(id)}/ledger`, { headers: authHeaders() }).catch(() => null);
+  return r && r.ok ? r.json().catch(() => null) : null;
+}
+// Over the stage's top-left: per currency, the owner's total (or the sample total with a Sample chip when the
+// owner side is empty), its denominator, and the rule that currencies never mix. No evidence, no overlay.
+function assetOverlay(L, overlayRows) {
+  const picked = overlayRows(L);
+  if (!picked.length) return null;
+  const said = picked.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, ${[r.seen, ...r.kinds].join(' · ')}`);
+  const rows = picked.map((r) => h('div', { class: 'ao-cur' },
+    h('div', { class: 'ao-amount' }, h('span', { class: 'ao-num' }, money(r.total, r.currency)), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null),
+    h('div', { class: 'ao-line' }, r.seen, r.kinds.map((k) => [' · ', h('span', { class: 'ao-kind' }, k)]))));
+  const note = 'Each currency stands alone · nothing converted · asking prices are not sales';
+  const el = h('div', { class: 'asset-overlay' },
+    h('div', { class: 'ao-eyebrow' }, `This closet · ${L.pieces} pieces`),
+    h('div', { class: 'ao-grid' }, rows),
+    h('div', { class: 'ao-note' }, note));
+  return { el, text: `${said.join('; ')}. ${note}.` };
 }
 
 async function closet3dScreen(view) {
@@ -1589,16 +1612,19 @@ async function closet3dScreen(view) {
       if (itemId && c.mask && photo && !cuts[itemId]) cuts[itemId] = { url: photo.url, mask: c.mask, mine: !!photo.mine };
     }
   }
+  const ledgerP = closetLedger(id);
   const review = await getJson(`/api/ws/${id}/review?window=60`);
-  const { buildAnatomy, LAYER_LABEL, AVAILABILITY_LABEL } = await import('/static/anatomy.js');
+  const L = await ledgerP;
+  const { buildAnatomy, LAYER_LABEL, AVAILABILITY_LABEL, overlayRows } = await import('/static/anatomy.js');
   const three = await import('/static/closet3d.js').catch(() => null);
   const A = buildAnatomy(v.items, review.rows);
   const byId = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const C = A.counts;
-  const host = h('div', { class: 'stage', role: 'img', 'aria-label': `Closet in 3D: ${C.total} pieces on four layers` });
+  const overlay = assetOverlay(L, overlayRows);
+  const host = h('div', { class: 'stage stage-luxe' }, overlay ? overlay.el : null);
   const panel = h('section', { class: 'panel', id: 'piece', 'aria-live': 'polite' }, h('p', { class: 'muted' }, 'Tap a piece, or pick one from the list, to see what Closer records about it.'));
-  const slider = h('input', { type: 'range', id: 'explode', min: '0', max: '100', value: '35', 'aria-label': 'Pull the layers apart' });
-  const resetBtn = h('button', { type: 'button', class: 'btn small ghost', id: 'reset-view', onclick: () => { if (scene) scene.reset(); slider.value = '35'; } }, 'Reset view');
+  const slider = h('input', { type: 'range', id: 'explode', min: '0', max: '100', value: '0', 'aria-label': 'Pull the layers apart' });
+  const resetBtn = h('button', { type: 'button', class: 'btn small ghost', id: 'reset-view', onclick: () => { if (scene) scene.reset(); slider.value = '0'; } }, 'Reset view');
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List view · the same ${C.total} pieces`),
     A.layers.map((l) => [h('h3', null, `${l.label} · ${l.items.length}`),
       h('div', { class: 'chip-row' }, l.items.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => show(c.itemId) }, `${c.itemId} · ${itemName(byId[c.itemId])}${c.availability !== 'AVAILABLE' ? ` · ${AVAILABILITY_LABEL[c.availability] || c.availability}` : ''}`)))]));
@@ -1610,7 +1636,8 @@ async function closet3dScreen(view) {
     h('p', { class: 'muted' }, nPhoto
       ? `${nPhoto} of ${C.total} pieces show the photo they were registered from, cut out by its mask. The rest are drawn by code.`
       : 'Every card here is drawn by code. A piece registered from a photo shows that photo, cut out by its mask.'),
-    h('p', { class: 'muted' }, A.note));
+    h('p', { class: 'muted' }, A.note),
+    L && L.lines && L.withEvidence ? h('p', { class: 'muted' }, `Prices here come from the closet ledger, the same numbers My closet shows. ${L.lines.evidence} ${L.note}`) : null);
   // Outfit tray: pick any piece, one per layer; picking another piece on the same layer replaces it.
   const outfit = {};
   const tray = h('section', { class: 'panel', id: 'outfit', 'aria-live': 'polite' });
@@ -1629,10 +1656,10 @@ async function closet3dScreen(view) {
     h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Pull the layers apart'), slider, resetBtn), panel, tray, legend, list);
   // On a phone a card is about 45 px wide on screen, so only the ID is drawn on it; the tap panel carries the name.
   const phone = window.matchMedia('(max-width: 760px)').matches;
-  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => (phone ? '' : itemName(byId[c.itemId])), onPick: (c) => show(c.itemId), imageOf: (c) => (cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null) }) : null;
+  const scene = three ? three.mountCloset3d(host, A, { colorOf: rgbOf, nameOf: (c) => (phone ? '' : itemName(byId[c.itemId])), onPick: (c) => show(c.itemId), imageOf: (c) => (cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null),
+    tags: L ? L.tags : null, money, overlay: overlay ? overlay.el : null, label: `Closet in 3D: ${C.total} pieces on four layers.${overlay ? ` ${overlay.text}` : ''}` }) : null;
   paintTray();
-  if (scene) scene.setExplode(0.35);
-  else { host.replaceWith(h('p', { class: 'chip warn' }, 'This browser has no WebGL, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
+  if (!scene) { host.replaceWith(h('p', { class: 'chip warn' }, 'This browser has no WebGL, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
   slider.addEventListener('input', (e) => { if (scene) scene.setExplode(Number(e.target.value) / 100); });
 
   async function show(itemId) {

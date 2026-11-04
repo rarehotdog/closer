@@ -641,3 +641,26 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
   .evform select, .evform input, .ownerbar input.tok, .feerow input, .feerow select, .calc select, .calc input, .side select, .side input:not([type="range"]) { min-height: 44px; }
   .side input[type="range"] { height: 44px; }
 }
+
+/* luxe 3D (11/5): the white closet stage, the asset overlay over its top-left, and the 3D page.
+   The room stays white in both themes; the overlay keeps its own light colours because it sits on that room. */
+.stage.stage-luxe { position: relative; border-radius: 16px; border: 1px solid #e9e4db; background: linear-gradient(180deg, #fbfaf8 0%, #f1eee8 100%); box-shadow: 0 1px 2px rgba(28, 25, 21, 0.05), 0 12px 32px rgba(28, 25, 21, 0.07); }
+.stage.stage-luxe canvas { border: 0; border-radius: 0; background: transparent; }
+.asset-overlay { position: absolute; left: 0; right: 0; top: 0; z-index: 1; padding: 12px 14px 10px; background: rgba(251, 250, 248, 0.9); border-bottom: 1px solid rgba(201, 182, 146, 0.55); color: #1c1a17; pointer-events: none; }
+.asset-overlay .ao-eyebrow { font-size: 12px; font-weight: 600; line-height: 1.3; letter-spacing: 0.16em; text-transform: uppercase; color: #625c53; }
+.asset-overlay .ao-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px 14px; margin-top: 2px; }
+.asset-overlay .ao-cur { min-width: 0; }
+.asset-overlay .ao-amount { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.asset-overlay .ao-num { font-family: var(--font-display); font-size: 24px; line-height: 1.15; font-weight: 400; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; white-space: nowrap; }
+.asset-overlay .chip.sample { flex: none; font-size: 12px; line-height: 1.3; padding: 0 7px; min-height: 0; background: transparent; color: #625c53; border-color: #b3a58b; }
+.asset-overlay .ao-line { font-size: 12.5px; line-height: 1.3; color: #4b463f; }
+.asset-overlay .ao-kind { white-space: nowrap; }
+.asset-overlay .ao-note { margin-top: 5px; font-size: 12px; line-height: 1.3; color: #575148; }
+@media (min-width: 761px) {
+  .asset-overlay { left: 20px; top: 20px; right: auto; width: 290px; padding: 16px 18px 14px; border: 1px solid rgba(201, 182, 146, 0.6); border-radius: 4px; box-shadow: 0 10px 30px rgba(28, 25, 21, 0.08); }
+  .asset-overlay .ao-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 8px; }
+  .asset-overlay .ao-num { font-size: 34px; }
+  .asset-overlay .chip.sample { font-size: 12px; padding: 1px 8px; }
+  .asset-overlay .ao-line { font-size: 12.5px; }
+  .asset-overlay .ao-note { font-size: 12.5px; margin-top: 8px; }
+}

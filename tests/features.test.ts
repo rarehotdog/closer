@@ -480,7 +480,7 @@ describe('F3 style targets: a counted match and an item box, nothing estimated',
   });
 });
 
-describe('F4 closet in 3D: same pieces and states as My closet, no numbers of its own', () => {
+describe('F4 closet in 3D: same pieces and states as My closet, nothing computed of its own', () => {
   const anatomyOf = (t: ReturnType<typeof setup>) => {
     const v = t.svc.view(t.ws) as unknown as { items: { itemId: string; slot: string; availability: string; wearCount: number }[] };
     const r = t.feat.review(t.ws, 60);
@@ -951,5 +951,29 @@ describe('Money caps: a sample closet is a public copy, counted and gated like a
     const own = asOp(await t.svc.startPhoto(t.ws, { photoId: 'p1', sentence: CHIPS[0].text, sessionId: t.ws }));
     assert.ok(!own.reasonCodes.includes('CALL_CAP_REACHED'), own.detail);
     assert.ok(own.modelCalls >= 1);
+  });
+});
+
+describe('F4b the asset overlay on the 3D stage: owner totals first, sample apart, never added', () => {
+  const side = (total: number, pieces: number, ask = pieces, trade = 0) => ({ total, pieces, ask, trade });
+  const none = side(0, 0, 0, 0);
+  it('F4-04 owner total alone with no sample mark; the sample total only when the owner side is empty; nothing added; no evidence, no rows', async () => {
+    // @ts-expect-error plain browser module without type declarations; the same file the 3D screen imports
+    const { overlayRows } = await import('../web/public/anatomy.js');
+    const L = {
+      pieces: 12, withEvidence: 3,
+      byCurrency: [
+        { currency: 'KRW', owner: side(90000, 1, 0, 1), sample: side(178000, 2) },
+        { currency: 'USD', owner: none, sample: side(68, 1) },
+      ],
+    };
+    const rows = overlayRows(L);
+    assert.deepEqual(rows.map((r: { currency: string; total: number; sample: boolean }) => [r.currency, r.total, r.sample]), [['KRW', 90000, false], ['USD', 68, true]]);
+    assert.equal(rows[0].seen, 'latest price seen on 1 of 12 pieces');
+    assert.deepEqual(rows[0].kinds, ['1 traded']);
+    assert.ok(rows.every((r: { total: number }) => r.total !== 90000 + 178000), 'owner and sample never added');
+    assert.deepEqual(overlayRows({ pieces: 12, withEvidence: 0, byCurrency: [] }), []);
+    assert.deepEqual(overlayRows(null), []);
+    assert.doesNotMatch(JSON.stringify(rows), /"(average|median|estimate|value|worth|probability)"/);
   });
 });
