@@ -33,7 +33,8 @@ if [ ! -f /etc/closer/env ]; then
   umask 077
   # CLOSER_VISITOR_DAY_USD=3 lets a judge trigger live calls from the public sample closets (about 84 photo runs a day at the plan estimates).
   # Set it to 0 outside the judging window. It is $0 from 2026-11-19 00:00 KST whatever the value.
-  { echo "CLOSER_MODE=real"; echo "CLOSER_DB_PATH=/var/lib/closer/closer.db"; echo "CLOSER_PORT=8787"; echo "CLOSER_VISITOR_DAY_USD=3"; echo "CLOSER_APP_TOTAL_USD=20"; echo "CLOSER_ADMIN_TOKEN=$(openssl rand -hex 24)"; } > /etc/closer/env
+  # CLOSER_TRUST_PROXY=1: Caddy is the one peer that can reach 127.0.0.1:8787, so the per-address rate limits read its X-Forwarded-For.
+  { echo "CLOSER_MODE=real"; echo "CLOSER_DB_PATH=/var/lib/closer/closer.db"; echo "CLOSER_PORT=8787"; echo "CLOSER_TRUST_PROXY=1"; echo "CLOSER_VISITOR_DAY_USD=3"; echo "CLOSER_APP_TOTAL_USD=20"; echo "CLOSER_ADMIN_TOKEN=$(openssl rand -hex 24)"; } > /etc/closer/env
 fi
 chmod 600 /etc/closer/env
 cat > /etc/systemd/system/closer.service <<UNIT

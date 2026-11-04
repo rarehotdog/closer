@@ -1,6 +1,7 @@
 // 미검증 — 문서 예시 기반, 실호출 0
 // Mock transport (default mode). Answers with Responses-API-shaped JSON like the doc examples so the
 // same request builders and parsers run as in real mode. No network. Scriptable per test.
+import { randomUUID } from 'node:crypto';
 import { chooseOptions } from '../../engine/solver.ts';
 import { pickReasonFacts } from '../../engine/facts.ts';
 import { encodeMockRle, type PixelBox } from '../../engine/coords.ts';
@@ -32,7 +33,10 @@ export type MockLogEntry = { kind: 'spark1' | 'sam' | 'spark2' | 'intent' | 'won
 export type MockTransport = Transport & { log: MockLogEntry[] };
 
 let seq = 0;
-const nextId = (kind: string) => `resp_mock_${kind}_${(++seq).toString(36).padStart(4, '0')}`;
+// Response ids become call ids in the ledger (calls.call_id is unique), and a ledger file outlives a
+// server process: a per-process tag keeps the second process's first mock call from colliding.
+const TAG = randomUUID().slice(0, 6);
+const nextId = (kind: string) => `resp_mock_${kind}_${TAG}_${(++seq).toString(36).padStart(4, '0')}`;
 
 export function textResponse(model: string, text: string, kind: string): MockReply {
   return {

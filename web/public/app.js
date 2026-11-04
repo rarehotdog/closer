@@ -8,6 +8,7 @@ function h(tag, attrs, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = String(v); // through the CSSOM: a style attribute would be refused by the page's Content-Security-Policy
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? '' : String(v));
   }
@@ -205,7 +206,17 @@ function decisionUI(root, cfg) {
 
   async function refresh() {
     if (S.wsId) S.view = await getJson(`/api/ws/${S.wsId}/view`);
+    if (S.wsId && !cfg.visitor && !cfg.readOnly) await listUploads();
     render();
+  }
+  /** Photos uploaded to this wardrobe earlier, fetched with the owner header, so each can be picked or deleted after a reload. */
+  async function listUploads() {
+    const own = await getJson(`/api/ws/${S.wsId}/photos`).catch(() => ({ photos: [] }));
+    for (const p of own.photos || []) {
+      if (META.photos.some((q) => q.photoId === p.photoId)) continue;
+      const b = await fetch(`/api/ws/${S.wsId}/photo/${p.photoId}`, { headers: authHeaders() });
+      if (b.ok) META.photos.unshift({ photoId: p.photoId, title: 'Your photo', url: URL.createObjectURL(await b.blob()), w: p.w, h: p.h, count: 0, mine: true });
+    }
   }
   const flash = (r) => { S.flash = [r]; };
   /** Runs an action with the controls disabled, re-reads the view, and brings the result on screen (phones: the result renders below the fold). */
@@ -257,6 +268,14 @@ function decisionUI(root, cfg) {
       h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '1'), cfg.visitor ? 'Pick a sample outfit' : 'Outfit photo'),
         cfg.visitor ? null : h('div', { class: 'row', style: 'margin-bottom:10px' }, fileInput,
           h('button', { class: 'btn ghost small', type: 'button', id: 'upload', disabled: S.busy || !S.wsId ? true : null, onclick: () => fileInput.click() }, 'Upload or take a photo'),
+          (META.photos.find((p) => p.photoId === S.photoId) || {}).mine ? h('button', { class: 'btn ghost small', type: 'button', id: 'photo-delete', disabled: S.busy ? true : null, onclick: () => busy(async () => {
+            const photoId = S.photoId;
+            const r = await postJson(`/api/ws/${S.wsId}/photodelete`, { photoId });
+            if (!r.ok) { flash({ chip: 'Could not delete this photo', cls: 'bad' }); return; }
+            META.photos.splice(META.photos.findIndex((p) => p.photoId === photoId), 1);
+            S.photoId = META.photos.length ? META.photos[0].photoId : null;
+            flash({ chip: 'Photo deleted from your server: JPEG, pixel copy and metadata.', cls: 'ok' });
+          }) }, 'Delete this photo') : null,
           h('span', { class: 'muted' }, 'Reading your own photo needs real mode (a Meta key on the server). Mock mode reads the sample photos only.')),
         photos),
       h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '2'), 'Pick a sentence'),
@@ -549,7 +568,7 @@ async function tryScreen(view) {
 
 async function appScreen(view) {
   chrome([h('span', { class: 'chip sample' }, 'Sample photos · drawn by code')]);
-  view.append(h('h1', null, 'My wardrobe'), ownerBar(), h('p', { class: 'lede' }, 'Owner view of the same loop. In real mode, sign in with the owner token first. Photos you upload stay on your server.'));
+  view.append(h('h1', null, 'My wardrobe'), ownerBar(), h('p', { class: 'lede' }, 'Owner view of the same loop. In real mode, sign in with the owner token first. Photos are stored only on your server. A reading sends the photo to the Meta Model API (to muse-spark-1.3, to sam-3.1, and mask cut-outs of it to the edit step), each request with store:false; Closer keeps no copy elsewhere. Delete any photo at any time.'));
   const probe = await fetch('/api/ws/owner/view', { headers: authHeaders() });
   if (probe.status === 403) { view.append(h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
   const root = h('div');

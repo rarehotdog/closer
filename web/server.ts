@@ -27,6 +27,7 @@ import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fix
 import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
 import { INTENT_CHIPS } from '../engine/intent.ts';
 import { maskToleranceFromEnv } from '../engine/validate.ts';
+import { BadRequest, RateLimiter, SECURITY_HEADERS, clientIp, readJson, tokenMatches } from './guard.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
@@ -58,6 +59,7 @@ let mode: 'mock' | 'real';
 let svc: CloserService;
 let ledger: SqliteLedger;
 let feat: FeatureService;
+let extras: ExtrasStore;
 let uploads: PhotoStore;
 try {
   const p = createPortsFromEnv(env, lib, {
@@ -77,7 +79,8 @@ try {
   const photoSource = { get: (id: string) => uploads.get(id) ?? lib.get(id) };
   // CLOSER_MASK_TOLERANCE_PX fixes the mask-in-box tolerance; unset → max(8 px, 5 % of the box side).
   svc = new CloserService({ ledger, ports: p.ports, clock, photos: photoSource, mode, maskTolerancePx: maskToleranceFromEnv(env) });
-  feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now, revision: SHA });
+  extras = new ExtrasStore(DB_PATH);
+  feat = new FeatureService({ ledger, extras, today: clock.today, now: clock.now, revision: SHA });
 } catch (e) {
   if (e instanceof RealModeRefused) {
     console.error(`Refusing to start: ${e.message}`);
@@ -94,24 +97,30 @@ ensureWorkspace('owner', 'real', false, OUTSIDE_PHOTO_ROLES);
 ensureWorkspace('demo-rc1', 'demo', true, FXH_ROLES.map((r) => r.role));
 
 // ---------- helpers ----------
-type Json = Record<string, unknown>;
 function send(res: ServerResponse, status: number, body: unknown, type = 'application/json; charset=utf-8') {
-  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
-async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Json> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    size += (c as Buffer).length;
-    if (size > limit) throw new Error('body too large');
-    chunks.push(c as Buffer);
-  }
-  return chunks.length ? (JSON.parse(Buffer.concat(chunks).toString('utf8')) as Json) : {};
+// Per-address limits (web/guard.ts): 30 workspace-creating POSTs and 60 model-call-starting POSTs
+// per 10 minutes. The address is the socket's unless CLOSER_TRUST_PROXY=1 (the deploy kit's Caddy
+// is then the one peer that can reach the server and writes X-Forwarded-For).
+const TRUST_PROXY = env.CLOSER_TRUST_PROXY === '1';
+const createLimit = new RateLimiter(30, 10 * 60_000);
+const callLimit = new RateLimiter(60, 10 * 60_000);
+const CALL_ACTIONS = new Set(['photo', 'propose', 'next', 'say', 'anchor', 'upload']);
+/** True (and a 429 already sent) when `bucket` has no token left for this request's address. */
+function limited(req: IncomingMessage, res: ServerResponse, bucket: RateLimiter): boolean {
+  const wait = bucket.take(clientIp(req, TRUST_PROXY));
+  if (wait === null) return false;
+  const secs = Math.max(1, Math.ceil(wait / 1000));
+  res.setHeader('Retry-After', String(secs));
+  // CALL_CAP_REACHED is the nearest of the 30 frozen reason codes (§4-3); the status line says which cap.
+  send(res, 429, { ok: false, code: 'CALL_CAP_REACHED', detail: `too many requests from this address; try again in ${secs} s` });
+  return true;
 }
 function adminAllowed(req: IncomingMessage): boolean {
   const token = env.CLOSER_ADMIN_TOKEN;
-  if (token) return req.headers['x-admin-token'] === token;
+  if (token) return tokenMatches(req.headers['x-admin-token'], token);
   return mode === 'mock'; // local mock only; real mode needs CLOSER_ADMIN_TOKEN
 }
 /**
@@ -120,8 +129,7 @@ function adminAllowed(req: IncomingMessage): boolean {
  */
 function ownerAllowed(req: IncomingMessage, ws: WorkspaceRow): boolean {
   if (ws.kind !== 'real' || mode === 'mock') return true;
-  const token = env.CLOSER_ADMIN_TOKEN;
-  return !!token && req.headers['x-admin-token'] === token;
+  return tokenMatches(req.headers['x-admin-token'], env.CLOSER_ADMIN_TOKEN);
 }
 
 function banner(ws: WorkspaceRow | null, sessionId: string | null) {
@@ -159,19 +167,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   }
   if (path === '/api/photos') return send(res, 200, { photos: publicPhotos(), chips: CHIPS, intentChips: INTENT_CHIPS, palette: NAMED_RGB, labels: LABELS, buildChip: BUILD_CHIP });
   if (path === '/api/try/start' && method === 'POST') {
+    if (limited(req, res, createLimit)) return;
     const body = await readJson(req);
     const photo = lib.get(String(body.photoId ?? ''));
     if (!photo) return send(res, 400, { ok: false, code: 'UNSUPPORTED_IMAGE', detail: 'unknown sample photo' });
     const wsId = `try-${randomUUID().slice(0, 8)}`;
     const sessionId = `sess-${randomUUID().slice(0, 8)}`;
     const roles = rolesOutside(photo.photoId);
-    ledger.createWorkspace({ workspaceId: wsId, kind: 'visitor', publicReadOnly: false, seedRef: `fx-h/${photo.photoId}`, createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() });
+    ledger.createWorkspace({ workspaceId: wsId, kind: 'visitor', publicReadOnly: false, seedRef: `fx-h/${photo.photoId}`, createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() }, clock.now().toISOString());
     sessions.set(wsId, sessionId);
     return send(res, 200, { workspaceId: wsId, sessionId, seededLabel: sampleWardrobe(roles.length) });
   }
   if (path === '/api/banner/visitor') return send(res, 200, banner({ workspaceId: 'visitor-preview', kind: 'visitor', publicReadOnly: false, seedRef: null, ledgerRevision: 0, createdOn: clock.today() }, null));
   if (path === '/api/closet/start' && method === 'POST') {
     // A private copy of the sample closet per visitor: 12 sample items and a synthetic 75-day wear history.
+    if (limited(req, res, createLimit)) return;
+    await readJson(req);
     const wsId = `closet-${randomUUID().slice(0, 8)}`;
     const since = addDays(clock.today(), -HISTORY_DAYS);
     ledger.createWorkspace({ workspaceId: wsId, kind: 'rehearsal', publicReadOnly: false, seedRef: 'sample-closet', createdOn: since }, { items: closetItems(), since });
@@ -248,6 +259,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
     return send(res, r ? 200 : 404, r ? r.response : { ok: false, detail: 'no such event' });
   }
   if (method !== 'POST') return send(res, 405, { ok: false });
+  if (CALL_ACTIONS.has(action) && limited(req, res, callLimit)) return;
   if (action === 'upload') {
     // Owner wardrobes only (visitors use the sample photos). Two copies from one canvas: JPEG for the models, PNG for pixels.
     if (ws.kind !== 'real') return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'uploads are for your own wardrobe' });
@@ -349,9 +361,32 @@ const server = createServer(async (req, res) => {
     }
     return send(res, 404, 'not found', 'text/plain');
   } catch (e) {
-    send(res, 500, { ok: false, detail: e instanceof Error ? e.message : String(e) });
+    if (e instanceof BadRequest) return send(res, e.status, { ok: false, code: 'META_REQUEST_REJECTED', detail: e.message });
+    // Logged here, not echoed: a parser or stack message is for the operator, not the caller.
+    console.error(`${new Date().toISOString()} ${req.method ?? ''} ${req.url ?? ''} failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+    send(res, 500, { ok: false, detail: 'internal error' });
   }
 });
+
+// Try forks (kind 'visitor') are disposable: 24 hours after creation their ledger rows, side-table
+// rows and photos go; call rows stay (money ledger). Runs at startup and hourly; the timer never
+// keeps the process alive. Owner, demo and sample-closet copies are not touched.
+const VISITOR_TTL_MS = 24 * 3600_000;
+function sweepVisitorWorkspaces(): number {
+  const cutoff = new Date(clock.now().getTime() - VISITOR_TTL_MS).toISOString();
+  let n = 0;
+  for (const id of ledger.staleVisitorWorkspaces(cutoff)) {
+    if (!ledger.deleteVisitorWorkspace(id)) continue;
+    extras.deleteWorkspace(id);
+    for (const p of uploads.list(id)) uploads.delete(id, p.photoId);
+    sessions.delete(id);
+    n++;
+  }
+  if (n) console.log(`swept ${n} visitor workspace(s) older than 24 h`);
+  return n;
+}
+sweepVisitorWorkspaces();
+setInterval(sweepVisitorWorkspaces, 3600_000).unref();
 
 server.listen(PORT, HOST, () => {
   console.log(`Closer (${mode} mode) on http://localhost:${PORT}  — screens: / · /app · /w/demo-rc1 · /admin · /version`);

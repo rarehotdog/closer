@@ -16,7 +16,7 @@ type Row = Record<string, unknown>;
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS workspaces (
   workspace_id TEXT PRIMARY KEY, kind TEXT NOT NULL, public_read_only INTEGER NOT NULL,
-  seed_ref TEXT, ledger_revision INTEGER NOT NULL, created_on TEXT NOT NULL);
+  seed_ref TEXT, ledger_revision INTEGER NOT NULL, created_on TEXT NOT NULL, created_at TEXT);
 CREATE TABLE IF NOT EXISTS events (
   event_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL,
   workspace_id TEXT NOT NULL, ledger_revision INTEGER NOT NULL, occurred_at TEXT NOT NULL,
@@ -59,6 +59,11 @@ export class SqliteLedger {
     this.db = new DatabaseSync(path);
     if (path !== ':memory:') this.db.exec('PRAGMA journal_mode=WAL;');
     this.db.exec(SCHEMA);
+    // Files from before the created_at column (the age the visitor sweep reads): add it and date the
+    // existing rows now, so an old visitor copy is swept 24 h after the upgrade, never at once.
+    const cols = (this.db.prepare('PRAGMA table_info(workspaces)').all() as Row[]).map((c) => String(c.name));
+    if (!cols.includes('created_at')) this.db.exec('ALTER TABLE workspaces ADD COLUMN created_at TEXT');
+    this.db.prepare('UPDATE workspaces SET created_at = ? WHERE created_at IS NULL').run(new Date().toISOString());
   }
 
   close(): void {
@@ -67,9 +72,12 @@ export class SqliteLedger {
   }
 
   // ---------- workspaces ----------
-  createWorkspace(ws: Omit<WorkspaceRow, 'ledgerRevision'>, seeds: { items: Item[]; since: IsoDate } | null): WorkspaceRow {
+  /** `createdAt` is the wall-clock creation instant the visitor sweep measures age from (createdOn may be backdated by a seed). */
+  createWorkspace(ws: Omit<WorkspaceRow, 'ledgerRevision'>, seeds: { items: Item[]; since: IsoDate } | null, createdAt: string = new Date().toISOString()): WorkspaceRow {
     this.tx(() => {
-      this.db.prepare('INSERT INTO workspaces VALUES (?,?,?,?,0,?)').run(ws.workspaceId, ws.kind, ws.publicReadOnly ? 1 : 0, ws.seedRef, ws.createdOn);
+      this.db
+        .prepare('INSERT INTO workspaces (workspace_id, kind, public_read_only, seed_ref, ledger_revision, created_on, created_at) VALUES (?,?,?,?,0,?,?)')
+        .run(ws.workspaceId, ws.kind, ws.publicReadOnly ? 1 : 0, ws.seedRef, ws.createdOn, createdAt);
       for (const it of seeds?.items ?? []) {
         this.putItem(ws.workspaceId, it);
         this.putAvailability(ws.workspaceId, { itemId: it.itemId, state: 'AVAILABLE', since: seeds!.since });
@@ -85,6 +93,35 @@ export class SqliteLedger {
 
   listWorkspaces(): WorkspaceRow[] {
     return (this.db.prepare('SELECT * FROM workspaces ORDER BY workspace_id').all() as Row[]).map(toWorkspace);
+  }
+
+  /**
+   * Visitor workspaces (Try forks) created before `cutoffIso` with no call row since then, oldest
+   * first. The call condition keeps the visitor day cap exact: a call made since the cutoff is
+   * still counted through its workspace row. Rows without a creation instant are never listed.
+   */
+  staleVisitorWorkspaces(cutoffIso: string): string[] {
+    const rows = this.db
+      .prepare(
+        "SELECT workspace_id FROM workspaces w WHERE w.kind = 'visitor' AND w.created_at IS NOT NULL AND w.created_at < ? AND NOT EXISTS (SELECT 1 FROM calls c WHERE c.workspace_id = w.workspace_id AND c.created_at >= ?) ORDER BY w.created_at, w.workspace_id",
+      )
+      .all(cutoffIso, cutoffIso) as Row[];
+    return rows.map((r) => String(r.workspace_id));
+  }
+
+  /**
+   * Deletes one visitor workspace with its events, items, availability, plans, wear rows and run
+   * records in one transaction; refuses every other kind (real, demo, rehearsal). Call rows stay:
+   * they are the money ledger, and spend() keeps counting them toward the app total.
+   */
+  deleteVisitorWorkspace(id: string): boolean {
+    const ws = this.getWorkspace(id);
+    if (!ws || ws.kind !== 'visitor') return false;
+    this.tx(() => {
+      for (const t of ['events', 'items', 'availability', 'plans', 'wear_rows', 'operations']) this.db.prepare(`DELETE FROM ${t} WHERE workspace_id = ?`).run(id);
+      this.db.prepare('DELETE FROM workspaces WHERE workspace_id = ?').run(id);
+    });
+    return this.getWorkspace(id) === null;
   }
 
   // ---------- reads ----------
