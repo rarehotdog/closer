@@ -11,6 +11,8 @@ const WALL_Z = -0.36;
 const SHOE_Z = 0.42;
 const HOOK_Y = RAIL.railY + 0.012; // the top of a hook rests on the top of the rail
 const UNAVAILABLE = { LAUNDRY: 'Laundry', REPAIR: 'Repair', STORED: 'Stored' };
+const RACK_TURN = -0.44; // pieces hang turned along the rail, like a shop rack; the one you tap turns to face you
+const PART = 0.15; // how far the neighbours of the tapped piece make room
 
 function webglOk() {
   try {
@@ -187,6 +189,7 @@ export function mountRail3d(host, pieces, opts) {
     const p = byId.get(slot.itemId);
     const holder = new THREE.Group();
     holder.position.set(slot.x, hanging ? HOOK_Y : 0, hanging ? 0 : SHOE_Z);
+    if (hanging) holder.rotation.y = RACK_TURN;
     const swing = new THREE.Group();
     holder.add(swing);
     let g = null;
@@ -201,7 +204,7 @@ export function mountRail3d(host, pieces, opts) {
     const words = tagWords(slot.tag, opts.money);
     const state = p.availability && p.availability !== 'AVAILABLE' ? UNAVAILABLE[p.availability] || 'Away' : '';
     const e = {
-      itemId: p.itemId, hanging, holder, swing, g, a: 0, v: 0, z: 0, zTo: 0,
+      itemId: p.itemId, hanging, holder, swing, g, a: 0, v: 0, z: 0, zTo: 0, x0: slot.x, dx: 0, dxTo: 0, turn: hanging ? RACK_TURN : 0, turnTo: hanging ? RACK_TURN : 0,
       tag: words || state ? tagEl(words, state) : null,
       // where the tag's string meets the piece: just right of the hanger's neck, or above a pair of shoes
       anchor: hanging ? new THREE.Vector3(0.05, -0.085, 0.03) : new THREE.Vector3(0, 0.2, 0),
@@ -295,9 +298,16 @@ export function mountRail3d(host, pieces, opts) {
         e.swing.rotation.z = e.a;
         e.swing.rotation.x = -e.a * 0.35;
       }
+      const ease = Math.min(1, dt * 9);
       const dz = e.zTo - e.z;
-      if (Math.abs(dz) > 1e-4) { e.z += dz * Math.min(1, dt * 9); moving = true; } else e.z = e.zTo;
+      if (Math.abs(dz) > 1e-4) { e.z += dz * ease; moving = true; } else e.z = e.zTo;
+      const ddx = e.dxTo - e.dx;
+      if (Math.abs(ddx) > 1e-4) { e.dx += ddx * ease; moving = true; } else e.dx = e.dxTo;
+      const dt2 = e.turnTo - e.turn;
+      if (Math.abs(dt2) > 1e-4) { e.turn += dt2 * ease; moving = true; } else e.turn = e.turnTo;
       e.holder.position.z = (e.hanging ? 0 : SHOE_Z) + e.z;
+      e.holder.position.x = e.x0 + e.dx;
+      if (e.hanging) e.holder.rotation.y = e.turn;
     }
     renderer.render(scene, camera);
     placeTags();
@@ -352,7 +362,16 @@ export function mountRail3d(host, pieces, opts) {
   el.addEventListener('pointercancel', onLeave);
 
   function select(itemId) {
-    for (const e of entries) e.zTo = e.itemId === itemId ? (e.hanging ? 0.16 : 0.08) : 0;
+    const hangingList = entries.filter((x) => x.hanging);
+    const k = hangingList.findIndex((x) => x.itemId === itemId);
+    for (const e of entries) {
+      const on = e.itemId === itemId;
+      e.zTo = on ? (e.hanging ? 0.16 : 0.08) : 0;
+      if (!e.hanging) continue;
+      e.turnTo = on ? 0 : RACK_TURN;
+      const i = hangingList.indexOf(e);
+      e.dxTo = k < 0 || on ? 0 : Math.sign(i - k) * PART * (Math.abs(i - k) === 1 ? 1 : 0.45);
+    }
     const e = entries.find((x) => x.itemId === itemId);
     if (e && view.max > 0 && Math.abs(e.holder.position.x - view.x) > view.half * 0.7) {
       view.x = Math.max(-view.max, Math.min(view.max, e.holder.position.x));
@@ -371,7 +390,7 @@ export function mountRail3d(host, pieces, opts) {
 
   return {
     select,
-    reset() { view.x = 0; for (const e of entries) e.zTo = 0; aim(); invalidate(); },
+    reset() { view.x = 0; for (const e of entries) { e.zTo = 0; e.dxTo = 0; e.turnTo = e.hanging ? RACK_TURN : 0; } aim(); invalidate(); },
     state() { return { x: view.x, max: view.max, pieces: entries.length, tags: entries.filter((e) => e.tag).map((e) => e.itemId), selected: entries.filter((e) => e.zTo > 0).map((e) => e.itemId) }; },
     dispose() {
       disposed = true;
