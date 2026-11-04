@@ -53,6 +53,17 @@ const uuid = () => crypto.randomUUID();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SLOTS = ['outer', 'top', 'bottom', 'shoes'];
 let META = null;
+// UI-only wording for engine codes. The codes themselves are unchanged and stay visible, small, next to the words.
+const STATE_LABEL = { DRAFT: 'Confirm the pieces', PROPOSED: 'Pick an option', LOCKED: 'Selected', WORN: 'Worn', HOLD: 'Needs your answer', NEEDS_REPLAN: 'Needs a re-plan', CANCELLED: 'Cancelled' };
+const FORMALITY_LABEL = { high: 'dressy', mid: 'in between', low: 'casual' };
+const CODE_LABEL = {
+  SCOPE_DENIED: 'Not allowed on this page', READBACK_MISMATCH: 'Saved, but the read-back did not match. Reload and check.', META_DISABLED: 'Model calls are switched off right now',
+  META_REQUEST_REJECTED: 'Pick one of the sentences', INVALID_TRANSITION: 'That step is not possible right now', NEEDS_CHECK: 'Fill every [check] / [확인] part first',
+  ALREADY_WORN: 'Already recorded', UNSUPPORTED_IMAGE: 'Could not read that photo',
+};
+/** Plain words for an error code, with the code itself small after them. */
+function errWords(code, detail) { return h('span', null, CODE_LABEL[code] || detail || code, ' ', h('span', { class: 'mono muted' }, code)); }
+function errChip(r, cls = 'bad', at = null) { return h('span', { class: `chip ${cls}`, 'data-at': at }, errWords(r.code, r.detail)); }
 
 // ---------- images, masks, cut-outs ----------
 const imgCache = new Map();
@@ -167,10 +178,10 @@ async function saveFlow(wsId, action, body, matches, okLabel) {
     resp = r.ok ? await r.json() : await postJson(`/api/ws/${wsId}/${action}`, body); // same eventId, never a new one
   }
   if (!resp.ok) {
-    return { ok: false, chip: resp.code === 'ALREADY_WORN' ? META.labels.alreadyRecorded : `${resp.code}${resp.detail ? ` · ${resp.detail}` : ''}`, cls: resp.code === 'ALREADY_WORN' ? 'warn' : 'bad', resp };
+    return { ok: false, chip: resp.code === 'ALREADY_WORN' ? META.labels.alreadyRecorded : errWords(resp.code, resp.detail), cls: resp.code === 'ALREADY_WORN' ? 'warn' : 'bad', resp };
   }
   const view = await getJson(`/api/ws/${wsId}/view`);
-  if (!matches(view)) return { ok: false, chip: 'READBACK_MISMATCH', cls: 'bad', view };
+  if (!matches(view)) return { ok: false, chip: errWords('READBACK_MISMATCH', ''), cls: 'bad', view };
   return { ok: true, chip: okLabel, cls: 'ok', view, resp, trail };
 }
 const sameOutfit = (a, b) => SLOTS.every((s) => (a[s] || null) === (b[s] || null));
@@ -213,7 +224,7 @@ function decisionUI(root, cfg) {
       S.answers = {};
       const own = !cfg.visitor && S.sentence.trim();
       const op = await postJson(`/api/ws/${S.wsId}/photo`, own ? { photoId: S.photoId, sentence: S.sentence.trim() } : { photoId: S.photoId, chipId: S.chipId });
-      if (op.ok === false) flash({ chip: `${op.code} · ${op.detail}`, cls: 'bad' });
+      if (op.ok === false) flash({ chip: errWords(op.code, op.detail), cls: 'bad' });
       S.ran = true;
     }, '#decision');
   }
@@ -231,11 +242,11 @@ function decisionUI(root, cfg) {
         try {
           const { jpeg, png } = await prepareUpload(f);
           const r = await postJson(`/api/ws/${S.wsId}/upload`, { jpegBase64: jpeg.url.split(',')[1], pngBase64: png.url.split(',')[1] });
-          if (r.ok === false) { flash({ chip: `${r.code} · ${r.detail}`, cls: 'bad' }); return; }
+          if (r.ok === false) { flash({ chip: errWords(r.code, r.detail), cls: 'bad' }); return; }
           META.photos.unshift({ photoId: r.photoId, title: 'Your photo', url: jpeg.url, w: r.w, h: r.h, count: 0, mine: true });
           S.photoId = r.photoId;
           flash({ chip: 'Photo saved on your server (EXIF removed). Delete it any time.', cls: 'ok' });
-        } catch (err) { flash({ chip: `UNSUPPORTED_IMAGE · ${err && err.message ? err.message : 'could not read the photo'}`, cls: 'bad' }); }
+        } catch (err) { flash({ chip: errWords('UNSUPPORTED_IMAGE', err && err.message ? err.message : 'could not read the photo'), cls: 'bad' }); }
       });
     } });
     const sentences = h('div', { class: 'sentences' }, META.chips.map((c) =>
@@ -251,7 +262,7 @@ function decisionUI(root, cfg) {
         sentences,
         cfg.visitor ? null : h('textarea', { id: 'own-sentence', rows: '2', class: 'draft', maxlength: '200', placeholder: 'Or write your own: Keep this jacket. The rest feels too dressed-up.', oninput: (e) => { S.sentence = e.target.value; } }, S.sentence),
         h('div', { class: 'spacer' }),
-        h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: run }, S.busy ? 'Working…' : 'Run'),
+        h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: run }, S.busy ? 'Working…' : 'Find the pieces'),
           cfg.visitor ? h('span', { class: 'muted' }, 'Each run uses a fresh copy of the sample wardrobe.') : null)));
   }
 
@@ -329,9 +340,9 @@ function decisionUI(root, cfg) {
         h('div', { class: 'hd' }, h('span', null, `Card ${c.cardId}${confirmed ? ` → ${op.cardItemIds[String(c.cardId)]}` : ''}`), h('span', { class: 'chip' }, c.slot)),
         h('div', { class: 'attrs' },
           h('span', null, c.type.replace('_', ' ')),
-          h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.sparkColor)}` }), `Spark: ${c.sparkColor}`),
-          c.maskColor ? h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.maskColor)}` }), `Mask pixels: ${c.maskColor}`) : h('span', { class: 'muted' }, 'no mask'),
-          h('span', null, `formality: ${c.formality}`),
+          h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.sparkColor)}` }), `Model says: ${c.sparkColor}`),
+          c.maskColor ? h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.maskColor)}` }), `Mask pixels say: ${c.maskColor}`) : h('span', { class: 'muted' }, 'no mask'),
+          h('span', null, FORMALITY_LABEL[c.formality] || c.formality),
           h('span', null, c.pinned ? h('span', { class: 'chip accent' }, 'keep') : null, c.offender ? h('span', { class: 'chip bad' }, 'feels off') : null)),
         q ? h('div', { class: 'question' }, `? ${q.text}`, h('div', { class: 'row', style: 'margin-top:6px' }, q.choices.map((ch) =>
           h('button', { class: 'btn small ghost', type: 'button', 'aria-pressed': String(chosen === ch), onclick: () => { S.answers[c.cardId] = ch; render(); } }, ch)))) : null);
@@ -345,14 +356,14 @@ function decisionUI(root, cfg) {
       for (const [k, v] of Object.entries(S.answers)) answers[k] = { color: v };
       const r = await saveFlow(S.wsId, 'confirm', { operationId: op.operationId, eventIds, expectedRevision: S.view.revision, answers },
         (v) => op.cards.every((c) => v.items.some((it) => it.cutoutRef === `${op.operationId}#${c.cardId}` && it.ownership === 'CONFIRMED')),
-        `+${op.cards.length} items · read back ✓`);
+        `${op.cards.length} pieces saved · checked against the server`);
       flash(r);
     });
   }
   async function propose(op) {
     await busy(async () => {
       const r = await postJson(`/api/ws/${S.wsId}/propose`, { operationId: op.operationId });
-      if (r.ok === false) flash({ chip: `${r.code} · ${r.detail}`, cls: 'bad' });
+      if (r.ok === false) flash({ chip: errWords(r.code, r.detail), cls: 'bad' });
       else S.flash = [];
     }, '#options');
   }
@@ -380,7 +391,7 @@ function decisionUI(root, cfg) {
   async function setAvail(item, state) {
     await busy(async () => {
       const r = await saveFlow(S.wsId, 'availability', { itemId: item.itemId, state, eventId: uuid(), expectedRevision: S.view.revision },
-        (v) => v.items.some((i) => i.itemId === item.itemId && i.availability === state), `${item.itemId} → ${state.toLowerCase()} · read back ✓`);
+        (v) => v.items.some((i) => i.itemId === item.itemId && i.availability === state), `${item.itemId} → ${state.toLowerCase()} · checked against the server`);
       flash(r);
     }, '#options');
   }
@@ -395,7 +406,7 @@ function decisionUI(root, cfg) {
   async function undo(wear) {
     await busy(async () => {
       const r = await saveFlow(S.wsId, 'undo', { wearEventId: wear.eventId, eventId: uuid(), expectedRevision: S.view.revision },
-        (v) => !v.wearRows.some((w) => w.eventId === wear.eventId), 'Wear undone · read back ✓');
+        (v) => !v.wearRows.some((w) => w.eventId === wear.eventId), 'Wear undone · checked against the server');
       flash(r);
     });
   }
@@ -403,7 +414,7 @@ function decisionUI(root, cfg) {
     await busy(async () => {
       await postJson('/api/demo-clock', { days: 1 });
       const r = await postJson(`/api/ws/${S.wsId}/next`, { fromPlanId: plan.planId });
-      S.flash = r.ok === false ? [{ chip: `${r.code} · ${r.detail}`, cls: 'bad' }] : [{ chip: META.labels.demoClockPlusOne, cls: 'warn' }];
+      S.flash = r.ok === false ? [{ chip: errWords(r.code, r.detail), cls: 'bad' }] : [{ chip: META.labels.demoClockPlusOne, cls: 'warn' }];
     }, '#decision');
   }
 
@@ -414,20 +425,22 @@ function decisionUI(root, cfg) {
     const parts = [];
     parts.push(h('div', { class: 'row', style: 'justify-content:space-between' },
       h('h2', { style: 'margin:0' }, op.kind === 'photo' ? 'Photo + sentence' : op.kind === 'replan' ? 'Button re-plan' : 'Next plan (no photo)'),
-      h('span', { class: `chip ${stateCls}`, id: 'op-state' }, op.state)));
+      h('span', { class: `chip ${stateCls}`, id: 'op-state', 'data-state': op.state }, STATE_LABEL[op.state] || op.state)));
     if (op.sentence) parts.push(h('p', { class: 'muted' }, `“${op.sentence}”`));
-    if (op.callLines.length) parts.push(h('ul', { class: 'calls', id: 'calls' }, op.callLines.map((l) => h('li', null, l))));
-    else if (op.kind !== 'photo') parts.push(h('ul', { class: 'calls' }, h('li', null, 'model calls: 0')));
     const chips = [...callChips(op), ...op.labels.map((l) => h('span', { class: 'chip' }, l)), ...op.reasonCodes.map((c) => h('span', { class: 'chip bad' }, c))];
     if (chips.length) parts.push(h('div', { class: 'chip-row' }, chips));
+    // The call lines prove the tooling; they sit below the photo, not above it.
+    const callsBlock = op.callLines.length ? h('div', { class: 'calls-block' }, h('h3', null, `Model calls · ${op.callLines.length}`), h('ul', { class: 'calls', id: 'calls' }, op.callLines.map((l) => h('li', null, l))))
+      : op.kind !== 'photo' ? h('ul', { class: 'calls' }, h('li', null, 'model calls: 0')) : null;
 
     if (op.kind === 'photo' && op.cards.length) {
       parts.push(h('div', { class: 'grid cols-2' }, stage(op), h('div', null, cardsView(op),
         !op.context ? h('div', { class: 'row', style: 'margin-top:12px' },
           h('button', { class: 'btn', id: 'confirm', type: 'button', disabled: S.busy || op.cards.some((c) => c.question && !S.answers[c.cardId]), onclick: () => confirm(op) }, `Confirm ${op.cards.length} cards`),
           h('span', { class: 'muted' }, 'Nothing is saved until you confirm.')) : null,
-        op.context && op.state === 'DRAFT' ? h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', id: 'propose', type: 'button', disabled: S.busy, onclick: () => propose(op) }, 'Propose edits')) : null)));
+        op.context && op.state === 'DRAFT' ? h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', id: 'propose', type: 'button', disabled: S.busy, onclick: () => propose(op) }, 'Suggest changes')) : null)));
     }
+    if (callsBlock) parts.push(callsBlock);
     if (op.questions.length && op.state !== 'DRAFT') {
       for (const q of op.questions) {
         parts.push(h('div', { class: 'question' }, `? ${q.text}`,
@@ -445,8 +458,8 @@ function decisionUI(root, cfg) {
           visualChip(o),
           flatlay(o.outfit, o.changedSlots, cuts, items),
           o.reasonLines.length ? h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))) : null,
-          op.state === 'PROPOSED' ? h('button', { class: 'btn small', type: 'button', 'data-pick': String(i), disabled: S.busy, onclick: () => pick(op, i) }, 'Pick this') : null))));
-      if (op.state === 'PROPOSED' && op.kind !== 'replan') parts.push(h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => keep(op) }, 'Keep as is (separate button)')));
+          op.state === 'PROPOSED' ? h('button', { class: 'btn small', type: 'button', 'data-pick': String(i), disabled: S.busy, onclick: () => pick(op, i) }, 'Wear this') : null))));
+      if (op.state === 'PROPOSED' && op.kind !== 'replan') parts.push(h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => keep(op) }, 'Keep it as it is')));
     }
     if (S.flash.length) parts.push(h('div', { class: 'chip-row flash', id: 'flash', role: 'status', 'aria-live': 'polite' }, S.flash.map((f) => h('span', { class: `chip ${f.cls}` }, f.chip))));
     return h('section', { class: 'panel', id: 'decision' }, parts);
@@ -460,11 +473,11 @@ function decisionUI(root, cfg) {
     const items = itemsById();
     const wear = S.view.wearRows.find((w) => w.planId === p.planId);
     return h('section', { class: 'panel', id: 'plan' },
-      h('div', { class: 'row', style: 'justify-content:space-between' }, h('h2', { style: 'margin:0' }, `Plan for ${p.occasionDate}`), h('span', { class: 'chip ok' }, p.state)),
+      h('div', { class: 'row', style: 'justify-content:space-between' }, h('h2', { style: 'margin:0' }, `Plan for ${p.occasionDate}`), h('span', { class: 'chip ok', 'data-state': p.state }, STATE_LABEL[p.state] || p.state)),
       h('div', { class: 'spacer' }),
       h('div', { style: 'max-width:340px' }, flatlay(p.slots, [], cuts, items)),
       h('div', { class: 'row', style: 'margin-top:12px' },
-        p.state === 'LOCKED' || p.state === 'WORN' ? h('button', { class: 'btn', id: 'wore', type: 'button', disabled: S.busy, onclick: () => wore(p) }, 'Wore it') : null,
+        p.state === 'LOCKED' || p.state === 'WORN' ? h('button', { class: 'btn', id: 'wore', type: 'button', disabled: S.busy, onclick: () => wore(p) }, 'I wore this') : null,
         p.state === 'WORN' && wear ? h('button', { class: 'btn ghost', type: 'button', onclick: () => undo(wear) }, 'Undo') : null,
         p.state === 'WORN' ? h('button', { class: 'btn ghost', id: 'next', type: 'button', onclick: () => next(p) }, `Next plan · ${META.labels.demoClockPlusOne}`) : null,
         h('span', { class: 'muted' }, p.state === 'WORN' ? `wear confirmed ${wear ? wear.occurredAt : ''}` : META.labels.wearNotConfirmed)));
@@ -478,7 +491,7 @@ function decisionUI(root, cfg) {
       h('div', { class: 'wardrobe' }, S.view.items.map((it) => h('div', { class: 'item' },
         h('div', { class: 'thumb' }, thumb(it, cuts)),
         h('div', { class: 'meta' },
-          h('div', null, h('b', null, it.itemId), ` · ${it.type.replace('_', ' ')} · ${it.color} · ${it.formality}`),
+          h('div', null, h('b', null, it.itemId), ` · ${it.type.replace('_', ' ')} · ${it.color} · ${FORMALITY_LABEL[it.formality] || it.formality}`),
           h('div', null, it.wearLabel),
           it.sample ? h('div', null, h('span', { class: 'chip sample' }, META.labels.sampleItem)) : null,
           h('div', { class: 'seg', role: 'group', 'aria-label': `${it.itemId} availability` }, ['AVAILABLE', 'LAUNDRY', 'REPAIR', 'STORED'].map((st) =>
@@ -558,7 +571,7 @@ async function demoScreen(view) {
       h('div', { class: 'spacer' }),
       h('div', { class: 'row' }, h('button', { class: 'btn ghost', type: 'button', id: 'try-write', onclick: async () => {
         const r = await postJson('/api/ws/demo-rc1/availability', { itemId: 'B2', state: 'LAUNDRY', eventId: uuid(), expectedRevision: v.revision });
-        out.replaceChildren(h('span', { class: `chip ${r.ok ? 'ok' : 'bad'}` }, r.ok ? 'write accepted' : `${r.code} · ${r.detail}`));
+        out.replaceChildren(r.ok ? h('span', { class: 'chip ok' }, 'write accepted') : errChip(r));
       } }, 'Try a write'), out)));
   const root = h('div');
   view.append(root);
@@ -625,6 +638,8 @@ const PLATFORM_OPTIONS = [['KARROT', 'Karrot (KRW)'], ['KREAM', 'KREAM (KRW)'], 
 const PLATFORM_CURRENCY = { KARROT: 'KRW', KREAM: 'KRW', BUNJANG: 'KRW', POSHMARK: 'USD', EBAY: 'USD', GRAILED: 'USD', DEPOP: 'USD', VINTED: 'EUR' };
 function money(n, c) { return c === 'KRW' ? `₩${Math.round(n).toLocaleString('en-US')}` : `${c === 'EUR' ? '€' : '$'}${Number(n).toFixed(2)}`; }
 const itemName = (it) => (it ? `${it.color !== 'unknown' ? `${it.color} ` : ''}${TYPE_NAME[it.type] || it.type}` : '');
+/** 2026-09-07 → 'Sep 7' (same date, friendlier; the ISO form stays in the data). */
+function fmtDate(iso) { const d = /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? new Date(`${iso}T00:00:00`) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : String(iso); }
 
 async function closetWs() {
   let id = null;
@@ -697,7 +712,7 @@ async function todayScreen(view) {
   async function pick(i) {
     const before = S.view.revision;
     const r = await saveFlow(id, 'lock', { eventId: uuid(), expectedRevision: before, operationId: S.op.operationId, optionIndex: i },
-      (vv) => vv.plans.some((p) => p.planId === S.op.planId && p.state === 'LOCKED' && sameOutfit(p.slots, S.op.options[i].outfit)), 'Saved and read back');
+      (vv) => vv.plans.some((p) => p.planId === S.op.planId && p.state === 'LOCKED' && sameOutfit(p.slots, S.op.options[i].outfit)), META.labels.selectionSaved);
     if (r.view) S.view = r.view;
     S.saved = r.ok ? S.op.options[i].outfit : null;
     S.picked = r.ok ? i : null;
@@ -709,7 +724,7 @@ async function todayScreen(view) {
   async function wore() {
     const planId = S.planId;
     const r = await saveFlow(id, 'wear', { eventId: uuid(), expectedRevision: S.view.revision, planId },
-      (vv) => vv.wearRows.some((w) => w.planId === planId), 'Wear recorded and read back');
+      (vv) => vv.wearRows.some((w) => w.planId === planId), META.labels.wearSaved);
     if (r.view) S.view = r.view;
     S.worn = r.ok;
     S.msg = h('span', { class: `chip ${r.cls}` }, r.chip);
@@ -727,7 +742,7 @@ async function todayScreen(view) {
   async function laundry(itemId) {
     const r = await postJson(`/api/ws/${id}/availability`, { eventId: uuid(), expectedRevision: S.view.revision, itemId, state: 'LAUNDRY' });
     S.view = await getJson(`/api/ws/${id}/view`);
-    if (!r.ok) { S.msg = h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`); render(); return; }
+    if (!r.ok) { S.msg = errChip(r); render(); return; }
     S.msg = h('span', { class: 'chip warn' }, `${itemId} is in the laundry now. Your kept pieces stay; the rest is re-planned.`);
     S.saved = null;
     await run(true);
@@ -740,27 +755,33 @@ async function todayScreen(view) {
       const avail = it.availability;
       return h('button', { type: 'button', class: `item pickable${on ? ' locked' : ''}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => { on ? S.locks.delete(it.itemId) : S.locks.add(it.itemId); S.op = null; S.saved = null; render(); } },
         h('div', { class: 'thumb' }, placeholder(it.color)),
-        h('div', { class: 'meta' }, h('b', null, `${it.itemId} · ${itemName(it)}`), h('span', null, `${it.formality} formality`),
+        h('div', { class: 'meta' }, h('b', null, `${it.itemId} · ${itemName(it)}`), h('span', null, FORMALITY_LABEL[it.formality] || it.formality),
           avail !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, avail.toLowerCase()) : null,
           on ? h('span', { class: 'chip accent' }, 'Keep this today') : null));
     }));
     const dir = h('div', { class: 'seg', role: 'group', 'aria-label': 'Direction' }, [['none', 'As it is'], ['less_formal', 'More relaxed'], ['more_formal', 'Dressier']].map(([k, l]) =>
       h('button', { type: 'button', 'aria-pressed': S.direction === k ? 'true' : 'false', onclick: () => { S.direction = k; render(); } }, l)));
     const rain = h('label', { class: 'row muted' }, h('input', { type: 'checkbox', id: 'rain', checked: S.rain ? true : null, onchange: (e) => { S.rain = e.target.checked; render(); } }), 'Rain likely today (you tell Closer; no weather service)');
-    const box = h('textarea', { id: 'say', rows: '2', class: 'draft', placeholder: '오늘 이 네이비 재킷 입을 건데 좀 편하게 / Keep the navy jacket, more relaxed' });
-    const sayPanel = h('section', { class: 'panel' }, h('h2', null, 'Say it'),
-      h('div', { class: 'chip-row' }, (META.intentChips || []).map((c) => h('button', { type: 'button', class: 'chip', onclick: () => say(c) }, c))),
-      box, h('button', { class: 'btn small', type: 'button', id: 'say-go', onclick: () => box.value.trim() && say(box.value) }, 'Read my sentence'),
-      S.op && S.op.intent ? h('div', { class: 'row' }, h('span', { class: 'chip accent' }, `Understood: keep ${S.op.intent.anchors.join(' + ')}${S.op.intent.direction !== 'none' ? ` · ${S.op.intent.direction.replace('_', ' ')}` : ''}${S.op.intent.rain ? ' · rain' : ''}`)) : null,
+    const box = h('textarea', { id: 'say', rows: '2', class: 'draft', 'aria-label': 'What you want to wear today', placeholder: 'Keep the navy jacket, make the rest more relaxed' });
+    // Example sentences: English first on screen (order only; the server list is unchanged).
+    const examples = [...(META.intentChips || [])].sort((a, b) => Number(/^[A-Za-z]/.test(b)) - Number(/^[A-Za-z]/.test(a)));
+    const DIR_WORD = { less_formal: 'more relaxed', more_formal: 'dressier' };
+    const SERVER_LABEL = { 'Sentence read by keyword rules (mock)': 'Mock mode: read with keyword rules, not the model', 'Reason by code': 'reasons written by code' };
+    const labelLine = (op) => (op.labels || []).map((l) => SERVER_LABEL[l] || l).join(' · ');
+    const sayPanel = h('section', { class: 'panel' }, h('h2', null, 'Tell Closer what you want today'),
+      h('p', { class: 'muted' }, 'Examples in English or Korean. Tap one to try it:'),
+      h('div', { class: 'chip-row' }, examples.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => say(c) }, c))),
+      box, h('button', { class: 'btn small', type: 'button', id: 'say-go', onclick: () => box.value.trim() && say(box.value) }, 'Go'),
+      S.op && S.op.intent ? h('div', { class: 'row' }, h('span', { class: 'chip accent' }, `Understood: keep ${S.op.intent.anchors.map((x) => `${x} · ${itemName(items[x])}`).join(' + ')}${DIR_WORD[S.op.intent.direction] ? ` · ${DIR_WORD[S.op.intent.direction]}` : ''}${S.op.intent.rain ? ' · rain' : ''}`)) : null,
       S.op && (S.op.callLines || []).length ? h('div', { class: 'chip-row', id: 'say-calls' }, callChips(S.op)) : null,
       S.op && (S.op.callLines || []).length ? h('ul', { class: 'calls' }, S.op.callLines.map((l) => h('li', null, l))) : null,
-      S.op && (S.op.labels || []).length ? h('p', { class: 'muted' }, S.op.labels.join(' · ')) : null);
+      S.op && (S.op.labels || []).length ? h('p', { class: 'muted' }, labelLine(S.op)) : null);
     // The answer comes right after the sentence panel; the 12-piece grid folds away once there is one (it reopens when you tap it or a piece).
     const flashAt = (where) => (S.msg && where === (S.picked !== null && S.saved ? 'option' : 'top') ? h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg) : null);
     const parts = [sayPanel];
     if (S.op) {
       const op = S.op;
-      if (op.ok === false) parts.push(h('section', { class: 'panel' }, h('div', { class: 'flash' }, h('span', { class: 'chip bad' }, `${op.code} · ${op.detail}`))));
+      if (op.ok === false) parts.push(h('section', { class: 'panel' }, h('div', { class: 'flash' }, errChip(op))));
       else if (op.state === 'HOLD') {
         const q = op.questions[0];
         parts.push(h('section', { class: 'panel' }, h('h2', null, 'Closer needs you'), h('p', { class: 'question' }, q ? q.text : op.detail),
@@ -775,7 +796,7 @@ async function todayScreen(view) {
             h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))),
             S.picked === i ? h('span', { class: 'chip ok' }, 'Your pick for today') : h('button', { class: 'btn', type: 'button', onclick: () => pick(i) }, 'Wear this'),
             S.picked === i ? flashAt('option') : null))),
-          h('p', { class: 'muted' }, `${(op.labels || []).join(' · ')}`)));
+          h('p', { class: 'muted' }, labelLine(op))));
       }
     } else if (S.msg) parts.push(flashAt('top'));
     if (S.saved && !S.worn) {
@@ -811,7 +832,7 @@ async function closetScreen(view) {
   async function load() { S.review = await getJson(`/api/ws/${id}/review?window=${S.window}`); render(); }
   async function act(itemId, action) {
     const r = await postJson(`/api/ws/${id}/reviewchoice`, { itemId, action });
-    S.msg = r.ok === false ? h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`) : null;
+    S.msg = r.ok === false ? errChip(r) : null;
     if (action === 'restyle') { location.href = `/today?lock=${itemId}`; return; }
     S.open = { itemId, action };
     S.draft = null;
@@ -822,7 +843,7 @@ async function closetScreen(view) {
   async function keep(itemId) {
     const after = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
     const r = await postJson(`/api/ws/${id}/exempt`, { itemId, reason: 'season', reviewAfter: after });
-    S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}` }, r.ok === false ? `${r.code} · ${r.detail}` : `Kept for the season · next look on ${r.reviewAfter}`);
+    S.msg = r.ok === false ? errChip(r) : h('span', { class: 'chip ok' }, `Kept for the season · next look on ${fmtDate(r.reviewAfter)}`);
     S.open = null;
     await load();
   }
@@ -923,7 +944,7 @@ async function closetScreen(view) {
     const D = S.decide;
     if (!D) return;
     const v = await getJson(`/api/ws/${id}/decide/${D.itemId}?horizon=${D.horizon}`);
-    if (!v || v.ok === false) { S.msg = h('span', { class: 'chip bad' }, v ? `${v.code} · ${v.detail}` : 'Could not load'); S.decide = null; render(); return; }
+    if (!v || v.ok === false) { S.msg = v ? errChip(v) : h('span', { class: 'chip bad' }, 'Could not load'); S.decide = null; render(); return; }
     D.view = v;
     const last = v.history[0] || null;
     if (D.fresh) {
@@ -955,7 +976,7 @@ async function closetScreen(view) {
     if (!D) return;
     const p = Number(D.price);
     const r = await postJson(`/api/ws/${id}/decide`, { itemId: D.itemId, choice, horizonDays: D.horizon, platform: D.platform, askPrice: p > 0 ? p : null, fees: feeLines(D.fees), namedUses: D.uses, note: null });
-    if (r.ok === false) { S.msg = h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`); render(); return; }
+    if (r.ok === false) { S.msg = errChip(r); render(); return; }
     if (choice === 'WEAR_ONCE') { location.href = `/today?lock=${D.itemId}`; return; }
     if (choice === 'SELL_PREPARE') {
       await act(D.itemId, 'sell_review');
@@ -1039,7 +1060,7 @@ async function closetScreen(view) {
     const add = async () => {
       const cur = PLATFORM_CURRENCY[plat.value];
       const r = await postJson(`/api/ws/${id}/evidence`, { itemId: S.open.itemId, platform: plat.value, priceType: type.value, amount: Number(amount.value), currency: cur, url: link.value || null, retrievedAt: new Date().toISOString().slice(0, 10), matchLevel: match.value });
-      S.msg = h('span', { class: `chip ${r.ok === false ? 'bad' : 'ok'}`, 'data-at': 'evidence' }, r.ok === false ? `${r.code} · ${r.detail}` : 'Price saved and read back');
+      S.msg = r.ok === false ? errChip(r, 'bad', 'evidence') : h('span', { class: 'chip ok', 'data-at': 'evidence' }, 'Price saved and read back');
       S.market = await getJson(`/api/ws/${id}/market/${S.open.itemId}`);
       render();
     };
@@ -1051,12 +1072,12 @@ async function closetScreen(view) {
   function draftPanel() {
     const d = S.draft;
     if (!d) return null;
-    if (d.ok === false) return h('span', { class: 'chip bad' }, `${d.code} · ${d.detail}`);
+    if (d.ok === false) return errChip(d);
     const ta = h('textarea', { id: 'draft-body', rows: '7', class: 'draft' });
     ta.value = d.body;
     const move = async (to) => {
       const r = await postJson(`/api/ws/${id}/draftmove`, { draftId: d.draftId, to, body: ta.value });
-      if (r.ok === false) S.msg = h('span', { class: 'chip warn', 'data-at': 'draft' }, r.code === 'NEEDS_CHECK' ? 'Fill every [check] / [확인] part first' : `${r.code} · ${r.detail}`);
+      if (r.ok === false) S.msg = errChip(r, 'warn', 'draft');
       else { S.draft = r; S.msg = h('span', { class: 'chip ok', 'data-at': 'draft' }, r.state === 'REVIEWED' ? 'Reviewed and read back' : 'Marked done by you'); }
       render();
     };
@@ -1080,13 +1101,13 @@ async function closetScreen(view) {
     const parts = [
       h('section', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, 'Review window'), win),
         h('p', { class: 'muted' }, r.note),
-        h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, `${k.toLowerCase().replace('_', ' ')} ${n}`)))),
+        h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, k === 'CANDIDATE' ? `No confirmed wear in ${S.window} days: ${n}` : k === 'RECENT_WEAR' ? `Worn recently: ${n}` : `${k.toLowerCase().replace(/_/g, ' ')}: ${n}`)))),
       h('section', { class: 'panel' }, h('h2', null, `To look at (${cands.length})`),
         cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this window.') : null,
         h('div', { class: 'grid' }, cands.map((x) => h('div', { class: `item wide${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
           h('div', { class: 'thumb' }, placeholder(S.items[x.itemId] ? S.items[x.itemId].color : 'unknown')),
           h('div', { class: 'meta' }, h('b', null, `${x.itemId} · ${itemName(S.items[x.itemId])}`), h('span', null, x.line),
-            h('span', { class: 'muted' }, `Tracked since ${x.trackedSince} · ${x.unrecordedDays} days without any record · source: ${x.source}`),
+            h('span', { class: 'muted' }, `Tracked since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays} days without any record`),
             x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
             x.lastChoice ? h('span', { class: 'chip' }, `Last choice: ${x.lastChoice.action.replace('_', ' ')}`) : null,
             h('div', { class: 'row' },
@@ -1128,7 +1149,7 @@ async function discoverScreen(view) {
   }
   async function toggleTarget(lookId, on) {
     const r = await postJson(`/api/ws/${id}/target`, { lookId, on });
-    S.msg = r.ok === false ? h('span', { class: 'chip bad' }, `${r.code} · ${r.detail}`) : null;
+    S.msg = r.ok === false ? errChip(r) : null;
     await loadCollection();
     render();
   }
@@ -1299,7 +1320,7 @@ async function closet3dScreen(view) {
     if (!cell || !it) return;
     const inOutfit = outfit[cell.slot] === itemId;
     const facts = h('ul', { class: 'reasons' },
-      h('li', null, `${LAYER_LABEL[cell.slot]} · ${it.formality} formality`),
+      h('li', null, `${LAYER_LABEL[cell.slot]} · ${FORMALITY_LABEL[it.formality] || it.formality}`),
       h('li', null, cuts[itemId] ? `Shown from ${cuts[itemId].mine ? 'your photo' : 'a sample photo'}, cut out by its mask` : 'Drawn by code: no photo registered for this piece'),
       h('li', null, AVAILABILITY_LABEL[cell.availability] || cell.availability),
       h('li', null, cell.wearLabel || 'no confirmed wear yet'),

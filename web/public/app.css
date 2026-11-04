@@ -322,6 +322,10 @@ textarea.draft {
   resize: vertical;
 }
 #say-go { margin-top: 2px; }
+textarea#say { font-family: inherit; font-size: 16px; }
+.calls-block { margin-top: 12px; }
+.calls-block h3 { margin: 0 0 6px; font-size: 13px; color: var(--ink-2); }
+.chip .mono.muted { font-size: 11px; }
 button.card.look, .card.look { font: inherit; color: inherit; text-align: left; display: grid; gap: 8px; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
 button.card.look:hover, .card.look:hover { border-color: var(--accent); }
 button.card.look > .row, .card.look .look-select > .row { padding: 6px 8px; background: var(--surface); border-radius: 8px; border: 1px solid var(--line); width: fit-content; }

@@ -40,7 +40,7 @@ test('AT-11 [mock] selection save then wear, each shown only after a matching fr
       LABELS.selectionSaved,
     );
     assert.equal(sel.result, 'COMMITTED');
-    assert.ok(sel.label!.startsWith('Selection saved'));
+    assert.equal(sel.label, LABELS.selectionSaved);
     assert.equal(h.state().plans.filter((p) => p.state === 'WORN').length, 0, 'WORN 0 at selection time');
 
     const wearId = newId('ev-wear');
@@ -55,7 +55,7 @@ test('AT-11 [mock] selection save then wear, each shown only after a matching fr
       LABELS.wearSaved,
     );
     assert.equal(worn.result, 'COMMITTED');
-    assert.equal(worn.label, '+1 wear · read back ✓');
+    assert.equal(worn.label, LABELS.wearSaved);
     assert.equal(h.state().events.filter((e) => e.kind === 'WEAR_CONFIRMED').length, 1);
 
     // "일치 때만": a mismatching read-back shows no label.
