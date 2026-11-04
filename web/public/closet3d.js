@@ -35,11 +35,9 @@ function webglOk() {
   }
 }
 
+// Light only since 11/5: the pages have no dark theme, so the stage is always the white closet.
 function isDark() {
-  const t = document.documentElement.dataset.theme;
-  if (t === 'dark') return true;
-  if (t === 'light') return false;
-  try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch { return false; }
+  return false;
 }
 
 function canvasOf(w, h) {
@@ -158,14 +156,14 @@ function drawTag(c, row, fmt) {
   g.beginPath();
   g.arc(128, 46, 17, 0, Math.PI * 2);
   g.lineWidth = 6;
-  g.strokeStyle = '#b99d68';
+  g.strokeStyle = '#f37021';
   g.stroke();
   g.textAlign = 'center';
   const amount = fmt(row.amount, row.currency);
   fitFont(g, amount, 196, 62, 24, 400, SERIF);
   g.fillStyle = '#151413';
   g.fillText(amount, 128, 182);
-  g.fillStyle = '#b99d68';
+  g.fillStyle = '#f37021';
   g.fillRect(100, 206, 56, 3);
   const platform = String(row.platformName || row.platform || '').split(' (')[0];
   fitFont(g, platform, 196, 32, 16, 600, SANS);
@@ -435,7 +433,7 @@ export function mountCloset3d(host, anatomy, opts) {
     wash: keepMat(new THREE.MeshBasicMaterial({ map: T.fade, color: 0xfff3e2, transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })),
     backShadow: keepMat(new THREE.MeshBasicMaterial({ map: T.radial, color: 0x1c1915, transparent: true, opacity: 0.16, depthWrite: false, toneMapped: false })),
     shoeGlow: keepMat(new THREE.MeshBasicMaterial({ map: T.radial, color: 0xffe9cf, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })),
-    halo: keepMat(new THREE.MeshBasicMaterial({ map: T.glow, color: 0xb08d4f, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false })),
+    halo: keepMat(new THREE.MeshBasicMaterial({ map: T.glow, color: 0xf37021, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false })),
     thread: keepMat(new THREE.LineBasicMaterial({ color: 0xbfa36b })),
     ghost: keepMat(new THREE.LineDashedMaterial({ color: 0xc9c1b4, dashSize: 0.14, gapSize: 0.1, transparent: true, opacity: 0 })),
   };

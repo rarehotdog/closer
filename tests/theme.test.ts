@@ -1,7 +1,7 @@
-// Theme tokens of web/public/app.css (the white walk-in closet look). Every text colour pair the pages
-// use stays at WCAG 4.5:1 or more and every control edge and focus ring at 3:1, in light and in dark;
-// champagne brass never colours text; the two dark blocks (system setting, forced data-theme) agree;
-// no font, image or stylesheet comes from outside the app (the CSP would refuse it).
+// Theme tokens of web/public/app.css (the white walk-in closet with one warm orange point colour, light only
+// since 11/5). Every text colour pair the pages use stays at WCAG 4.5:1 or more and every control edge and
+// focus ring at 3:1; the bright point orange and the ornament tokens never colour text; there is no dark
+// theme; no font, image or stylesheet comes from outside the app (the CSP would refuse it).
 import './helpers.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,9 +22,7 @@ function block(head: RegExp): Map<string, string> {
   return out;
 }
 const LIGHT = block(/^:root \{/m);
-const DARK_SYSTEM = block(/:root:not\(\[data-theme="light"\]\) \{/);
-const DARK_FORCED = block(/^:root\[data-theme="dark"\] \{/m);
-const THEMES: [string, Map<string, string>][] = [['light', LIGHT], ['dark', new Map([...LIGHT, ...DARK_SYSTEM])]];
+const THEMES: [string, Map<string, string>][] = [['light', LIGHT]];
 
 type Rgba = [number, number, number, number];
 function color(t: Map<string, string>, name: string): Rgba {
@@ -44,13 +42,15 @@ const lum = (c: Rgba): number => {
 };
 const ratio = (a: Rgba, b: Rgba): number => { const x = lum(a); const y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
-test('TH-01 text pairs reach 4.5:1 and control edges 3:1 in light and dark', () => {
+test('TH-01 text pairs reach 4.5:1 and control edges 3:1, the point orange included', () => {
   const text: [string, string][] = [
     ['ink', 'bg'], ['ink', 'surface'], ['ink', 'surface-2'], ['ink-2', 'bg'], ['ink-2', 'surface'], ['ink-2', 'surface-2'],
     ['ink-3', 'bg'], ['ink-3', 'surface'], ['ink-3', 'surface-2'], ['primary-ink', 'primary'], ['primary-ink', 'primary-hover'],
     ['accent', 'accent-soft'], ['bg', 'ink'], ['brass-ink', 'bg'], ['brass-ink', 'surface'],
     ['ok', 'ok-soft'], ['ok', 'surface'], ['warn', 'warn-soft'], ['warn', 'surface'], ['bad', 'bad-soft'], ['bad', 'surface'],
     ['ink-2', 'warn-soft'], ['ink-2', 'bad-soft'],
+    ['point-ink', 'point'], ['point-ink', 'point-hover'], ['point-text', 'bg'], ['point-text', 'surface'], ['point-text', 'surface-2'],
+    ['ink', 'point-soft'], ['ink-2', 'point-soft'], ['ink', 'select'],
   ];
   const edge: [string, string][] = [['focus', 'bg'], ['focus', 'surface'], ['focus', 'surface-2'], ['line-strong', 'bg'], ['line-strong', 'surface'], ['line-strong', 'surface-2']];
   for (const [theme, t] of THEMES) {
@@ -73,19 +73,21 @@ test('TH-01 text pairs reach 4.5:1 and control edges 3:1 in light and dark', () 
   }
 });
 
-test('TH-02 champagne brass is ornament: no text colour is set in --brass or --trim', () => {
+test('TH-02 the bright point orange and the ornament tokens never colour text', () => {
   assert.doesNotMatch(css, /(^|[^-])(color|fill):\s*var\(--(brass|trim)\)/m);
+  assert.doesNotMatch(css, /(^|[^-])color:\s*var\(--(point|point-hover|primary|primary-hover)\)/m, 'orange text uses --point-text');
 });
 
-test('TH-03 the two dark blocks define the same tokens with the same values', () => {
-  assert.ok(DARK_SYSTEM.size > 10, 'the dark block redefines the palette');
-  assert.deepEqual([...DARK_FORCED.entries()].sort(), [...DARK_SYSTEM.entries()].sort());
+test('TH-03 light only: no dark palette, and the page tells the browser so', () => {
+  assert.doesNotMatch(css, /prefers-color-scheme:\s*dark|data-theme="dark"/);
+  assert.match(css, /^:root \{[^}]*color-scheme: light;/m);
+  assert.match(html, /<meta name="color-scheme" content="light">/);
 });
 
-test('TH-04 nothing loads from outside the app, and the browser bar has a theme colour for both schemes', () => {
+test('TH-04 nothing loads from outside the app, and the browser bar has one light theme colour', () => {
   for (const [file, text] of [['app.css', css], ['index.html', html]]) {
     assert.doesNotMatch(text, /https?:\/\/|url\(\s*['"]?\/\//, `${file} names no outside address`);
   }
-  assert.match(html, /<meta name="theme-color" content="#[0-9a-f]{6}" media="\(prefers-color-scheme: light\)">/);
-  assert.match(html, /<meta name="theme-color" content="#[0-9a-f]{6}" media="\(prefers-color-scheme: dark\)">/);
+  assert.match(html, /<meta name="theme-color" content="#[0-9a-f]{6}">/);
+  assert.doesNotMatch(html, /theme-color[^>]*prefers-color-scheme: dark/);
 });

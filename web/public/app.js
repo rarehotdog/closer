@@ -1579,6 +1579,61 @@ function assetOverlay(L, overlayRows) {
   return { el, text: `${said.join('; ')}. ${note}.` };
 }
 
+/** Rail · Layers: a reload with or without ?view=layers, keeping ?ws= as it is. */
+function viewSwitch(mode) {
+  const go = (k) => {
+    if (k === mode) return;
+    const u = new URL(location.href);
+    if (k === 'layers') u.searchParams.set('view', 'layers');
+    else u.searchParams.delete('view');
+    location.assign(u.pathname + u.search);
+  };
+  return h('div', { class: 'seg view-seg', role: 'group', 'aria-label': 'View' },
+    [['rail', 'Rail'], ['layers', 'Layers']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
+}
+
+/* The rail (11/5): every piece hung on one rail, shoes under it, a tag only where the ledger holds a price.
+   Few words on screen: the count, one number per currency with its denominator, and the piece you tap. */
+async function railView(view, ctx) {
+  const { wsParam, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher } = ctx;
+  const cells = A.layers.flatMap((l) => l.items);
+  const pieces = cells.map((c) => ({ itemId: c.itemId, slot: c.slot, type: c.type, rgb: (META.palette && META.palette[c.color]) || null, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null }));
+  const rows = overlayRows(L);
+  const hud = h('div', { class: 'rail-hud' },
+    h('div', { class: 'rail-count' }, `${A.counts.total} pieces`),
+    rows.length ? h('div', { class: 'rail-sum' }, rows.map((r) => h('div', { class: 'rail-cur' },
+      h('span', { class: 'rail-num' }, money(r.total, r.currency)),
+      h('span', { class: 'rail-of', title: r.seen }, `${r.pieces}/${r.of}`),
+      r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null);
+  const host = h('div', { class: 'stage rail-stage' });
+  const sheet = h('section', { class: 'panel rail-sheet', id: 'piece', 'aria-live': 'polite', hidden: true });
+  const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List · ${A.counts.total}`),
+    h('div', { class: 'chip-row' }, cells.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } }, `${c.itemId} · ${itemName(byId[c.itemId])}`))));
+  view.append(h('div', { class: 'rail-head' }, h('h1', null, 'Closet in 3D'), switcher), hud, host, h('p', { class: 'muted hint' }, 'Drag to slide · tap a piece'), sheet, list);
+  const said = rows.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, latest price seen on ${r.pieces} of ${r.of} pieces`).join('; ');
+  const mod = await import('/static/rail3d.js').catch(() => null);
+  const rail = mod ? mod.mountRail3d(host, pieces, { tags: L ? L.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
+  if (!rail) { host.replaceWith(h('p', { class: 'chip warn' }, 'No WebGL here, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
+
+  function show(itemId) {
+    const it = byId[itemId];
+    const c = cells.find((x) => x.itemId === itemId);
+    if (!it || !c) return;
+    const t = L && L.tags ? L.tags[itemId] : null;
+    sheet.hidden = false;
+    sheet.replaceChildren(
+      h('div', { class: 'rail-sheet-hd' }, h('b', null, `${itemId} · ${itemName(it)}`), c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : null),
+      t ? h('p', { class: 'rail-sheet-price' }, h('span', { class: 'rail-sheet-num' }, money(t.amount, t.currency)), ` ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
+        : h('p', { class: 'muted' }, 'No price yet'),
+      h('p', { class: 'muted' }, c.wearLabel || 'No confirmed wear yet'),
+      h('div', { class: 'row' },
+        wsParam ? null : h('a', { class: 'btn small', href: `/closet?decide=${itemId}` }, 'Keep or let go?'),
+        wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear today'),
+        h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Layers')));
+    sheet.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
 async function closet3dScreen(view) {
   // ?ws=owner opens the owner's own wardrobe (owner token required); otherwise this browser's sample closet.
   const wsParam = new URLSearchParams(location.search).get('ws');
@@ -1620,6 +1675,10 @@ async function closet3dScreen(view) {
   const A = buildAnatomy(v.items, review.rows);
   const byId = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const C = A.counts;
+  // Two views of the same pieces: the rail (default) and the layers with the exploded view (?view=layers).
+  const mode = new URLSearchParams(location.search).get('view') === 'layers' ? 'layers' : 'rail';
+  const switcher = viewSwitch(mode);
+  if (mode === 'rail') return railView(view, { wsParam, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher });
   const overlay = assetOverlay(L, overlayRows);
   const host = h('div', { class: 'stage stage-luxe' }, overlay ? overlay.el : null);
   const panel = h('section', { class: 'panel', id: 'piece', 'aria-live': 'polite' }, h('p', { class: 'muted' }, 'Tap a piece, or pick one from the list, to see what Closer records about it.'));
@@ -1650,7 +1709,7 @@ async function closet3dScreen(view) {
         wsParam ? h('span', { class: 'muted' }, `Picked: ${ids.join(' + ')}. Use them as locks on My wardrobe.`) : h('a', { class: 'btn small', href: `/today?lock=${ids.join(',')}` }, `Wear these today (${ids.join(' + ')})`),
         h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const k of Object.keys(outfit)) delete outfit[k]; paintTray(); } }, 'Clear')) : null].filter(Boolean));
   }
-  view.append(h('h1', null, 'Closet in 3D'),
+  view.append(h('div', { class: 'rail-head' }, h('h1', null, 'Closet in 3D'), switcher),
     h('p', { class: 'lede' }, 'Your closet by layer: outerwear rail, tops, bottoms, shoes. Drag sideways to turn it, slide to pull the layers apart, tap a piece.'),
     host, h('p', { class: 'muted hint' }, 'Drag sideways to turn · tap a piece for its record'),
     h('div', { class: 'row explode-row' }, h('label', { for: 'explode' }, 'Pull the layers apart'), slider, resetBtn), panel, tray, legend, list);
@@ -1709,7 +1768,7 @@ async function closet3dScreen(view) {
   else if (p === '/closet/3d') await closet3dScreen(view);
   else if (p === '/discover') await discoverScreen(view);
   // Value line first: the chip row and the banner sit under the h1 and lede; the build line is a footer.
-  const anchor = view.querySelector('.lede') || view.querySelector('h1');
+  const anchor = view.querySelector('.lede') || view.querySelector('.rail-head') || view.querySelector('h1');
   if (anchor) anchor.after($('#chips'), $('#banner'));
   view.after(h('p', { class: 'muted build' }, META.buildChip));
   document.body.dataset.ready = '1';
