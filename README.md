@@ -50,7 +50,7 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 |---|---|
 | `npm test` | Runs the keyless acceptance tests, unit tests and static checks; writes `docs/at_results.json` and `docs/at_results.md`. |
 | `npm run ui` | Starts the local server on http://localhost:8787 (mock mode). Screens: `/` Try, `/today`, `/closet`, `/closet/3d`, `/discover`, `/w/demo-rc1`, `/admin`, `/version`. |
-| `npm run live:check` | Owner's machine only: one real call per model with the key read from the Keychain; writes `.data/live_check.json`. Never runs inside tests. |
+| `npm run live:check` | Owner's machine only, key read from the Keychain: the model list, one Spark intent call, one Spark 2 call and, with `--image`, one Spark photo call and one SAM call. Every answer goes through the code checks; writes `.data/live_check.json` (statuses, timings, code checks; no text). Never runs inside tests. |
 | `npm run screens` | Captures the screens into `docs/screens/` with Playwright Chromium (Playwright is not a project dependency). |
 | `npm run typecheck` | Optional `tsc` check (needs TypeScript and Node type definitions installed locally). |
 

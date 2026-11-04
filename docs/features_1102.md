@@ -95,8 +95,9 @@ Pieces that are likely out of season rank lower.
 ```
 node scripts/live_check.ts                    # dry run: shows the plan, sends nothing
 read -s MODEL_API_KEY && export MODEL_API_KEY # the key stays out of shell history
-node scripts/live_check.ts --live             # GET /models + one Spark intent call (≈ $0.004)
+node scripts/live_check.ts --live             # GET /models + one Spark intent call + one Spark 2 call (≈ $0.02)
 node scripts/live_check.ts --live --image ./outfit.jpg   # also Spark photo + SAM (≈ $0.04, long side ≤ 1600 px)
+node scripts/live_check.ts --live --dump-shape           # also saves each response's JSON key paths and types (no values)
 node scripts/intent_ablation.ts --live        # 12 Spark calls (≈ $0.05)
 ```
 
