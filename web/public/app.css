@@ -468,3 +468,43 @@ details.sub summary { cursor: pointer; font-weight: 600; padding: 6px 0; color: 
 }
 .side .linksbox { margin-top: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; }
 .side .linksbox a { overflow-wrap: anywhere; }
+
+/* Prices over time (11/4): a market-style line chart per currency. Highlighted platform in the accent, others faded, sample rows dashed in the warn tone. */
+.charts { display: grid; gap: 12px; margin: 10px 0 14px; }
+.pchart { min-width: 0; padding: 10px 10px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.pc-head { display: grid; gap: 2px; margin-bottom: 6px; }
+.pc-big { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; overflow-wrap: anywhere; }
+.pc-big.muted { font-size: 15px; font-weight: 500; }
+.pc-sub { font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pc-diff { font-size: 12.5px; }
+.pc-range { margin: 6px 0 2px; width: fit-content; }
+.pc-count { font-size: 12px; }
+.pc-svg { display: block; width: 100%; height: 180px; overflow: visible; }
+.pc-grid { stroke: var(--line); stroke-width: 1; }
+.pc-axis { fill: var(--ink-3); font-size: 11px; font-family: inherit; }
+.pc-axis.small { font-size: 10px; }
+.pc-seg { fill: none; stroke: var(--ink-3); stroke-width: 1.5; opacity: 0.45; stroke-linecap: round; }
+.pc-seg.is-focus { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
+.pc-seg.is-sample { stroke: var(--warn); stroke-dasharray: 5 4; }
+.pc-dot { stroke: var(--ink-3); fill: var(--ink-3); stroke-width: 1.5; opacity: 0.5; }
+.pc-dot.ask { fill: var(--surface); }
+.pc-dot.is-focus { stroke: var(--accent); opacity: 1; }
+.pc-dot.is-focus.trade { fill: var(--accent); }
+.pc-dot.is-sample { stroke: var(--warn); stroke-dasharray: 2 1.5; }
+.pc-dot.is-sample.trade { fill: var(--warn); }
+.pc-dot.is-picked { stroke-width: 3; }
+.pc-hit { fill: transparent; }
+.pc-pt { cursor: pointer; }
+.pc-pt:focus-visible { outline: none; }
+.pc-pt:focus-visible .pc-dot { stroke-width: 3.5; }
+.pc-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
+.pc-key { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.pc-key.is-focus { color: var(--ink); font-weight: 600; }
+.pc-legend .chip, .pc-sub .chip, .pc-readout .chip { white-space: nowrap; }
+.pc-key-svg { flex-shrink: 0; overflow: visible; }
+.pc-readout { margin: 6px 0 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.side .pchart { padding: 8px; }
+.side .pc-big { font-size: 21px; }
+.side .pc-sub { font-size: 12px; }
+.side .pc-legend { font-size: 12px; gap: 4px 10px; }
+@media (max-width: 430px) { .pc-range { width: 100%; } }

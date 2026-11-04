@@ -143,6 +143,62 @@ export function priceCards(itemId: string, evidence: readonly Evidence[]): Price
   });
 }
 
+// ---------------- prices over time ----------------
+
+/** One observed price as a point on the chart: the amount on the date it was seen, nothing derived. */
+export type SeriesPoint = { evidenceId: string; amount: number; priceType: PriceType; source: Evidence['source']; retrievedAt: IsoDate; matchLevel: MatchLevel; url: string | null };
+export type PriceSeries = {
+  platform: Platform;
+  name: string;
+  currency: Currency;
+  /** Sorted by retrievedAt, then evidenceId. Straight lines between these are the whole chart. */
+  points: SeriesPoint[];
+  count: number;
+  first: SeriesPoint | null;
+  latest: SeriesPoint | null;
+  min: number | null;
+  max: number | null;
+  line: string;
+};
+
+/** One series per platform in PLATFORMS order, in that platform's currency. No average, no trend, no conversion. */
+export function priceSeries(itemId: string, evidence: readonly Evidence[]): PriceSeries[] {
+  return PLATFORMS.map((p) => {
+    const info = PLATFORM_INFO[p];
+    const points: SeriesPoint[] = evidence
+      .filter((e) => e.itemId === itemId && e.platform === p)
+      .sort((a, b) => (a.retrievedAt < b.retrievedAt ? -1 : a.retrievedAt > b.retrievedAt ? 1 : a.evidenceId < b.evidenceId ? -1 : a.evidenceId > b.evidenceId ? 1 : 0))
+      .map((e) => ({ evidenceId: e.evidenceId, amount: e.amount, priceType: e.priceType, source: e.source, retrievedAt: e.retrievedAt, matchLevel: e.matchLevel, url: e.url }));
+    const amounts = points.map((x) => x.amount);
+    const count = points.length;
+    const first = points[0] ?? null;
+    const latest = points[count - 1] ?? null;
+    const line = count === 0
+      ? `No price seen on ${info.name} yet.`
+      : count === 1
+        ? `1 price seen on ${info.name} on ${first!.retrievedAt} (${info.currency}).`
+        : `${count} prices seen on ${info.name} from ${first!.retrievedAt} to ${latest!.retrievedAt} (${info.currency}), each as it was seen; nothing averaged.`;
+    return { platform: p, name: info.name, currency: info.currency, points, count, first, latest, min: count ? Math.min(...amounts) : null, max: count ? Math.max(...amounts) : null, line };
+  });
+}
+
+export type EvidenceCoverage = { withEvidence: number; total: number; pct: number | null; sampleOnly: number; line: string };
+
+/** How many of the given pieces have at least one price row. sampleOnly: pieces whose rows are all sample rows. */
+export function evidenceCoverage(itemIds: readonly string[], evidence: readonly Evidence[]): EvidenceCoverage {
+  const ids = [...new Set(itemIds)];
+  let withEvidence = 0;
+  let sampleOnly = 0;
+  for (const id of ids) {
+    const mine = evidence.filter((e) => e.itemId === id);
+    if (mine.length === 0) continue;
+    withEvidence++;
+    if (mine.every((e) => e.source === 'sample')) sampleOnly++;
+  }
+  const total = ids.length;
+  return { withEvidence, total, pct: total === 0 ? null : Math.round((100 * withEvidence) / total), sampleOnly, line: `Price evidence on ${withEvidence} of ${total} pieces` };
+}
+
 export type FeeLine = { label: string; kind: 'rate' | 'fixed'; value: number | null };
 /**
  * UNKNOWN: the owner has not checked this line (blank). CONFIRMED_ZERO: the owner typed 0 after

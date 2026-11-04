@@ -40,13 +40,16 @@ export function closetHistory(today: IsoDate): { occurredAt: IsoDate; itemIds: s
   return out;
 }
 
-/** Sample price rows for the demo. Shown with the Sample chip; not real market data. */
+/** Sample price rows for the demo, spread over the last four weeks so the price chart has a shape. Shown with the Sample chip; not real market data. */
 export function sampleEvidence(today: IsoDate): Evidence[] {
-  const base = { url: null, retrievedAt: today, size: 'M', condition: 'good', source: 'sample' as const };
+  const base = { url: null, size: 'M', condition: 'good', source: 'sample' as const };
   return [
-    { ...base, evidenceId: 'sample-1', itemId: 'J1', platform: 'KARROT', priceType: 'ASK', amount: 85000, currency: 'KRW', matchLevel: 'SIMILAR' },
-    { ...base, evidenceId: 'sample-2', itemId: 'J1', platform: 'KARROT', priceType: 'ASK', amount: 120000, currency: 'KRW', matchLevel: 'SIMILAR' },
-    { ...base, evidenceId: 'sample-3', itemId: 'J1', platform: 'POSHMARK', priceType: 'ASK', amount: 68, currency: 'USD', matchLevel: 'UNVERIFIED' },
-    { ...base, evidenceId: 'sample-4', itemId: 'J2', platform: 'KARROT', priceType: 'ASK', amount: 60000, currency: 'KRW', matchLevel: 'SIMILAR' },
+    { ...base, evidenceId: 'sample-1', itemId: 'J1', platform: 'KARROT', priceType: 'ASK', amount: 85000, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: addDays(today, -21) },
+    { ...base, evidenceId: 'sample-2', itemId: 'J1', platform: 'KARROT', priceType: 'ASK', amount: 120000, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: addDays(today, -3) },
+    { ...base, evidenceId: 'sample-3', itemId: 'J1', platform: 'POSHMARK', priceType: 'ASK', amount: 68, currency: 'USD', matchLevel: 'UNVERIFIED', retrievedAt: addDays(today, -9) },
+    { ...base, evidenceId: 'sample-4', itemId: 'J2', platform: 'KARROT', priceType: 'ASK', amount: 60000, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: addDays(today, -12) },
+    { ...base, evidenceId: 'sample-5', itemId: 'J1', platform: 'KARROT', priceType: 'TRADE', amount: 90000, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: addDays(today, -10) },
+    { ...base, evidenceId: 'sample-6', itemId: 'J2', platform: 'KARROT', priceType: 'ASK', amount: 55000, currency: 'KRW', matchLevel: 'SIMILAR', retrievedAt: addDays(today, -26) },
+    { ...base, evidenceId: 'sample-7', itemId: 'J2', platform: 'BUNJANG', priceType: 'ASK', amount: 58000, currency: 'KRW', matchLevel: 'UNVERIFIED', retrievedAt: addDays(today, -6) },
   ];
 }

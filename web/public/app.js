@@ -662,6 +662,133 @@ const itemName = (it) => (it ? `${it.color !== 'unknown' ? `${it.color} ` : ''}$
 /** 2026-09-07 → 'Sep 7' (same date, friendlier; the ISO form stays in the data). */
 function fmtDate(iso) { const d = /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? new Date(`${iso}T00:00:00`) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : String(iso); }
 
+// ---------- price chart over time: one currency per chart, one line per platform, straight segments between seen prices ----------
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : String(v));
+  }
+  for (const c of kids.flat(Infinity)) { if (c === null || c === undefined || c === false) continue; el.append(c instanceof Node ? c : document.createTextNode(String(c))); }
+  return el;
+}
+const dayOf = (iso) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10))) / 86400000;
+const isoOfDay = (day) => new Date(day * 86400000).toISOString().slice(0, 10);
+/** Axis step: 1, 2 or 5 × a power of ten, never below the currency's smallest sensible step. */
+function niceStep(x, cur) {
+  const floor = cur === 'KRW' ? 1000 : 1;
+  if (!(x > 0)) return cur === 'KRW' ? 10000 : 10;
+  const pow = Math.pow(10, Math.floor(Math.log10(x)));
+  const f = x / pow;
+  return Math.max(floor, (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow);
+}
+const PRICE_RANGES = [['30', '30d'], ['90', '90d'], ['all', 'All']];
+const MATCH_WORDS = { SAME_ITEM: 'same item', SIMILAR: 'similar item', UNVERIFIED: 'not sure' };
+const priceWord = (p) => (p.priceType === 'ASK' ? 'asking' : 'traded');
+/**
+ * Prices over time, drawn the way a market draws its price: x = the date a price was seen, y = the amount in this
+ * chart's currency. One line per platform through its seen points, straight segments only; sample rows dashed.
+ * Nothing here is averaged, converted, smoothed or forecast. `series` are the /market series of ONE currency.
+ * opts: { selectedPlatform, range ('30' | '90' | 'all'), selectedPoint (evidenceId), onPick(point, series), onRange(range), today }.
+ */
+function priceChart(series, cur, opts) {
+  const o = opts || {};
+  const range = o.range || 'all';
+  const today = o.today || new Date().toISOString().slice(0, 10);
+  const from = range === 'all' ? null : dayOf(today) - Number(range);
+  const shown = series.map((s) => ({ ...s, points: s.points.filter((p) => from === null || dayOf(p.retrievedAt) >= from) })).filter((s) => s.points.length);
+  const all = shown.flatMap((s) => s.points);
+  const last = (s) => s.points[s.points.length - 1];
+  const later = (a, b) => (a.retrievedAt > b.retrievedAt || (a.retrievedAt === b.retrievedAt && a.evidenceId > b.evidenceId));
+  // The highlighted platform: the selected one when it has a point in range, else the platform seen most recently.
+  const focus = shown.find((s) => s.platform === o.selectedPlatform) || shown.reduce((m, s) => (!m || later(last(s), last(m)) ? s : m), null);
+  const H = 180, top = 12, bottom = 24, right = 10;
+
+  const head = h('div', { class: 'pc-head' });
+  if (!focus) head.append(h('div', { class: 'pc-big muted' }, 'No prices seen in this range'));
+  else {
+    const L = last(focus), F = focus.points[0];
+    const d = L.amount - F.amount;
+    // Native append() would print a null child as the text "null": drop it first.
+    head.append(...[h('div', { class: 'pc-big' }, money(L.amount, cur)),
+      h('div', { class: 'pc-sub' }, `${focus.name} · ${priceWord(L)} · ${fmtDate(L.retrievedAt)}`, L.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null),
+      focus.points.length >= 2 ? h('div', { class: 'pc-diff muted' }, `${d > 0 ? `+${money(d, cur)}` : d < 0 ? `−${money(-d, cur)}` : 'No change'} since ${fmtDate(F.retrievedAt)} (${focus.points.length} seen on ${focus.name})`) : null].filter(Boolean));
+  }
+  head.append(h('div', { class: 'seg pc-range', role: 'group', 'aria-label': 'Range' }, PRICE_RANGES.map(([v, l]) => h('button', { type: 'button', 'aria-pressed': range === v ? 'true' : 'false', onclick: () => { if (o.onRange) o.onRange(v); } }, l))),
+    h('div', { class: 'muted pc-count' }, `${all.length} observation${all.length === 1 ? '' : 's'} in this range`));
+
+  const draw = (W) => {
+    const svg = svgEl('svg', { class: 'pc-svg', viewBox: `0 0 ${W} ${H}`, width: '100%', height: String(H), preserveAspectRatio: 'xMinYMin meet', role: 'img', 'aria-label': `${cur} prices seen over time, one line per platform` });
+    const amounts = all.map((p) => p.amount);
+    const lo0 = Math.min(...amounts), hi0 = Math.max(...amounts);
+    const step = niceStep((hi0 - lo0) / 2, cur);
+    let lo = Math.floor(lo0 / step) * step, hi = Math.ceil(hi0 / step) * step;
+    if (hi === lo) { hi = lo + step; lo = Math.max(0, lo - step); }
+    const ticks = [lo, (lo + hi) / 2, hi];
+    const labels = ticks.map((v) => money(v, cur));
+    // Wide: amounts in a left gutter. Narrow (a phone's half-width side): amounts sit inside the plot, just above their gridline.
+    const narrow = W < 220;
+    const gutter = narrow ? 0 : Math.min(84, 8 + Math.max(...labels.map((l) => l.length)) * 6.4);
+    const x0 = narrow ? 4 : gutter + 6, x1 = W - right, y0 = top, y1 = H - bottom;
+    const days = all.map((p) => dayOf(p.retrievedAt));
+    const tEnd = Math.max(dayOf(today), ...days);
+    let tStart = from === null ? Math.min(...days) : from;
+    if (tEnd - tStart < 7) tStart = tEnd - 7;
+    const X = (iso) => x0 + ((dayOf(iso) - tStart) / (tEnd - tStart)) * (x1 - x0);
+    const Y = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
+    ticks.forEach((v, i) => svg.append(
+      svgEl('line', { class: 'pc-grid', x1: gutter, x2: x1, y1: Y(v), y2: Y(v) }),
+      narrow ? svgEl('text', { class: 'pc-axis small', x: 2, y: Y(v) - 3 }, labels[i])
+        : svgEl('text', { class: 'pc-axis', x: gutter - 4, y: Y(v) + 4, 'text-anchor': 'end' }, labels[i])));
+    svg.append(svgEl('text', { class: 'pc-axis', x: x0, y: H - 6 }, fmtDate(isoOfDay(tStart))),
+      svgEl('text', { class: 'pc-axis', x: x1, y: H - 6, 'text-anchor': 'end' }, fmtDate(isoOfDay(tEnd))));
+    // Faded platforms first, the highlighted one on top.
+    for (const s of [...shown.filter((s) => s !== focus), focus]) {
+      const cls = s === focus ? 'is-focus' : 'is-other';
+      for (let i = 1; i < s.points.length; i++) {
+        const a = s.points[i - 1], b = s.points[i];
+        svg.append(svgEl('line', { class: `pc-seg ${cls}${a.source === 'sample' || b.source === 'sample' ? ' is-sample' : ''}`, x1: X(a.retrievedAt), y1: Y(a.amount), x2: X(b.retrievedAt), y2: Y(b.amount) }));
+      }
+      for (const p of s.points) {
+        const picked = o.selectedPoint === p.evidenceId;
+        const pick = () => { if (o.onPick) o.onPick(p, s); };
+        svg.append(svgEl('g', { class: 'pc-pt', role: 'button', tabindex: '0', 'data-evidence': p.evidenceId, 'aria-pressed': picked ? 'true' : 'false',
+          'aria-label': `${money(p.amount, cur)} ${priceWord(p)} on ${s.name}, ${p.retrievedAt}${p.source === 'sample' ? ', sample' : ''}`,
+          onclick: pick, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } } },
+          svgEl('circle', { class: 'pc-hit', cx: X(p.retrievedAt), cy: Y(p.amount), r: 13 }),
+          svgEl('circle', { class: `pc-dot ${cls} ${p.priceType === 'ASK' ? 'ask' : 'trade'}${p.source === 'sample' ? ' is-sample' : ''}${picked ? ' is-picked' : ''}`, cx: X(p.retrievedAt), cy: Y(p.amount), r: picked ? 6 : s === focus ? 4.5 : 3.5 })));
+      }
+    }
+    return svg;
+  };
+
+  const key = (s) => svgEl('svg', { class: 'pc-key-svg', viewBox: '0 0 26 12', width: '26', height: '12', 'aria-hidden': 'true' },
+    svgEl('line', { class: `pc-seg ${s === focus ? 'is-focus' : 'is-other'}${s.points.some((p) => p.source === 'sample') ? ' is-sample' : ''}`, x1: 1, y1: 6, x2: 25, y2: 6 }));
+  const legend = shown.length ? h('div', { class: 'pc-legend' },
+    shown.map((s) => h('span', { class: `pc-key${s === focus ? ' is-focus' : ''}` }, key(s), s.name, s.points.some((p) => p.source === 'sample') ? h('span', { class: 'chip sample' }, 'Sample') : null)),
+    h('span', { class: 'muted' }, 'filled = traded · hollow = asking · dashed = sample row')) : null;
+  const picked = o.selectedPoint ? all.find((p) => p.evidenceId === o.selectedPoint) : null;
+  const readout = picked ? h('p', { class: 'pc-readout', role: 'status' },
+    `${money(picked.amount, cur)} · ${priceWord(picked)} · ${MATCH_WORDS[picked.matchLevel] || picked.matchLevel} · ${picked.retrievedAt}`,
+    picked.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null,
+    picked.url ? h('a', { href: picked.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open the listing') : null) : null;
+
+  const wrap = h('div', { class: 'pchart', 'data-cur': cur }, head, all.length ? draw(360) : null, legend, readout);
+  // Redraw at the real width once laid out (and on a turn of the phone), so the text stays at its CSS size. Deferred a frame: a redraw inside the callback would re-trigger it.
+  if (all.length && typeof ResizeObserver === 'function') {
+    let width = 360;
+    new ResizeObserver((entries) => {
+      const w = Math.round(entries[0].contentRect.width);
+      if (!(w > 40) || Math.abs(w - width) < 4) return;
+      width = w;
+      requestAnimationFrame(() => { const old = wrap.querySelector('svg.pc-svg'); if (old && document.contains(wrap)) old.replaceWith(draw(w)); });
+    }).observe(wrap);
+  }
+  return wrap;
+}
+
 async function closetWs() {
   let id = null;
   try { id = localStorage.getItem('closer.closet'); } catch {}
@@ -845,13 +972,19 @@ async function todayScreen(view) {
 async function closetScreen(view) {
   chrome(sampleChips());
   const { id, view: v } = await closetWs();
-  const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
+  const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
   view.append(h('h1', null, 'My closet'),
     h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose; days without a record count as unknown.'),
     h('p', null, h('a', { class: 'btn small ghost', href: '/closet/3d' }, 'See the closet in 3D')), root);
 
-  async function load() { S.review = await getJson(`/api/ws/${id}/review?window=${S.window}`); render(); }
+  async function load() { [S.review, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/review?window=${S.window}`), getJson(`/api/ws/${id}/coverage`)]); render(); }
+  /** 'Price evidence on N of M pieces', counted on the server from the rows that exist; sample-only pieces are named apart. */
+  function coverageChips() {
+    const c = S.coverage;
+    if (!c || c.ok === false) return null;
+    return [h('span', { class: 'chip', id: 'coverage' }, c.line), c.sampleOnly ? h('span', { class: 'chip sample' }, `Sample · ${c.sampleOnly} of them only from sample rows`) : null];
+  }
   async function act(itemId, action) {
     const r = await postJson(`/api/ws/${id}/reviewchoice`, { itemId, action });
     S.msg = r.ok === false ? errChip(r) : null;
@@ -868,6 +1001,26 @@ async function closetScreen(view) {
     S.msg = r.ok === false ? errChip(r) : h('span', { class: 'chip ok' }, `Kept for the season · next look on ${fmtDate(r.reviewAfter)}`);
     S.open = null;
     await load();
+  }
+
+  /** One price chart per currency with a seen price (KRW, USD, EUR apart; never converted). Picking a point writes its amount into the price field. */
+  function sellCharts() {
+    if (!S.market) return null;
+    const M = S.market;
+    const curs = ['KRW', 'USD', 'EUR'].filter((c) => (M.series || []).some((s) => s.currency === c && s.count));
+    if (!curs.length) return h('p', { class: 'muted', id: 'no-prices' }, 'No prices seen yet. Add one you saw.');
+    return h('div', { class: 'charts' }, curs.map((c) => priceChart(M.series.filter((s) => s.currency === c), c, {
+      selectedPlatform: S.calc ? S.calc.platform : 'KARROT', range: S.chartRange[c] || 'all', selectedPoint: S.chartPick, today: M.today,
+      onRange: (r) => { S.chartRange[c] = r; render(); },
+      onPick: (p, s) => {
+        if (!S.calc) S.calc = { platform: s.platform, price: '', fees: newFees(s.platform), result: null };
+        // A price is written only into a field of its own currency: the platform switches when the currencies differ.
+        if (PLATFORM_CURRENCY[S.calc.platform] !== c) { S.calc.platform = s.platform; S.calc.fees = newFees(s.platform); S.calc.result = null; }
+        S.chartPick = p.evidenceId;
+        S.calc.price = String(p.amount);
+        render();
+      },
+    })));
   }
 
   /** Platforms with a saved price first; the empty ones fold into one line and a closed details, so the first input is not eight cards down. */
@@ -960,7 +1113,7 @@ async function closetScreen(view) {
   const CHOICE_LABEL = { KEEP: 'Keep', WEAR_ONCE: 'Try wearing it once', SELL_PREPARE: 'Prepare to sell', DEFER: 'Decide later' };
   async function openDecide(itemId) {
     // key: one idempotency key per panel open; the server stores a key once, so a tap that repeats a save cannot add a second row.
-    S.decide = { itemId, horizon: 90, view: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true, links: null, linksBusy: false, key: uuid(), last: null, saving: false };
+    S.decide = { itemId, horizon: 90, view: null, market: null, range: 'all', pick: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true, links: null, linksBusy: false, key: uuid(), last: null, saving: false };
     await loadDecide();
     const el = document.getElementById('decide');
     if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -968,9 +1121,10 @@ async function closetScreen(view) {
   async function loadDecide() {
     const D = S.decide;
     if (!D) return;
-    const v = await getJson(`/api/ws/${id}/decide/${D.itemId}?horizon=${D.horizon}`);
+    const [v, m] = await Promise.all([getJson(`/api/ws/${id}/decide/${D.itemId}?horizon=${D.horizon}`), getJson(`/api/ws/${id}/market/${D.itemId}`)]);
     if (!v || v.ok === false) { S.msg = v ? errChip(v) : h('span', { class: 'chip bad' }, 'Could not load'); S.decide = null; render(); return; }
     D.view = v;
+    D.market = m && m.ok !== false ? m : null;
     const last = v.history[0] || null;
     if (D.fresh) {
       // Start from the owner's last position on this piece: their own named uses, platform, asking price and cost lines as typed.
@@ -1088,13 +1242,20 @@ async function closetScreen(view) {
     const num = h('input', { id: 'dc-price', type: 'number', min: '1', step: 'any', inputmode: 'decimal', placeholder: `Asking price to test (${cur})`, 'aria-label': 'Asking price', value: D.price, oninput: (e) => { D.price = e.target.value; if (range) range.value = e.target.value; }, onchange: recalc });
     const range = hasRange ? h('input', { id: 'dc-range', type: 'range', min: String(rmin), max: String(rmax), step: String(step), 'aria-label': 'Asking price slider', value: D.price || String(Math.round(lo / step) * step), oninput: (e) => { D.price = e.target.value; num.value = e.target.value; }, onchange: recalc }) : null;
     const seen = h('p', { class: 'muted' }, ev.line, hasRange ? ` Seen: ${lo === hi ? money(lo, cur) : `${money(lo, cur)}–${money(hi, cur)}`}. ` : ' ', ev.sample.count ? h('span', { class: 'chip sample' }, 'Sample') : null);
+    // Prices over time in this platform's currency: its line highlighted, other platforms of the same currency faded. A tapped point fills the asking price.
+    const curSeries = D.market ? (D.market.series || []).filter((s) => s.currency === cur && s.count) : [];
+    const chart = curSeries.length ? priceChart(curSeries, cur, {
+      selectedPlatform: D.platform, range: D.range, selectedPoint: D.pick, today: V.today,
+      onRange: (r) => { D.range = r; render(); },
+      onPick: (p) => { D.pick = p.evidenceId; D.price = String(p.amount); recalc(); },
+    }) : null;
     const N = D.net && D.net.ok !== false ? D.net : null;
     const netbox = h('div', { class: 'netbox', role: 'status' },
       N ? netRows(N, cur, 'Asking price (assumed)', 'I would receive') : h('dl', { class: 'kv' }, h('dt', null, 'Asking price'), h('dd', null, h('span', { class: 'chip warn' }, 'not set')), h('dt', null, 'I would receive'), h('dd', null, h('span', { class: 'chip warn' }, 'unknown'))),
       h('p', { class: 'muted' }, N ? N.line : D.net && D.net.ok === false ? D.net.detail : 'Pick a price to test. The net stays unknown until every cost line is checked.'));
     const sell = h('div', { class: 'card side' },
       h('div', { class: 'hd' }, 'If I prepare to sell'),
-      plat, seen,
+      plat, seen, chart,
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small ghost', disabled: D.linksBusy ? true : null, onclick: findLinks }, D.linksBusy ? 'Asking the model…' : 'Find listings with Wonder')),
       linksBox(D),
       range, num,
@@ -1135,7 +1296,8 @@ async function closetScreen(view) {
       const cur = PLATFORM_CURRENCY[plat.value];
       const r = await postJson(`/api/ws/${id}/evidence`, { itemId: S.open.itemId, platform: plat.value, priceType: type.value, amount: Number(amount.value), currency: cur, url: link.value || null, retrievedAt: new Date().toISOString().slice(0, 10), matchLevel: match.value });
       S.msg = r.ok === false ? errChip(r, 'bad', 'evidence') : h('span', { class: 'chip ok', 'data-at': 'evidence' }, 'Price saved and read back');
-      S.market = await getJson(`/api/ws/${id}/market/${S.open.itemId}`);
+      [S.market, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/market/${S.open.itemId}`), getJson(`/api/ws/${id}/coverage`)]);
+      if (S.decide && S.decide.itemId === S.open.itemId) S.decide.market = S.market;
       render();
     };
     // The result of "Save price" shows next to the button, not at the end of the page.
@@ -1175,7 +1337,7 @@ async function closetScreen(view) {
     const parts = [
       h('section', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, 'Review window'), win),
         h('p', { class: 'muted' }, r.note),
-        h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, k === 'CANDIDATE' ? `No confirmed wear in ${S.window} days: ${n}` : k === 'RECENT_WEAR' ? `Worn recently: ${n}` : `${k.toLowerCase().replace(/_/g, ' ')}: ${n}`)))),
+        h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, k === 'CANDIDATE' ? `No confirmed wear in ${S.window} days: ${n}` : k === 'RECENT_WEAR' ? `Worn recently: ${n}` : `${k.toLowerCase().replace(/_/g, ' ')}: ${n}`)), coverageChips())),
       h('section', { class: 'panel' }, h('h2', null, `To look at (${cands.length})`),
         cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this window.') : null,
         h('div', { class: 'grid' }, cands.map((x) => h('div', { class: `item wide${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
@@ -1189,7 +1351,7 @@ async function closetScreen(view) {
               actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
     ];
     parts.push(decidePanel());
-    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel', id: 'selling' }, h('h2', null, `Prices you saw for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), evidenceForm(), calcPanel(), priceCards()));
+    if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel', id: 'selling' }, h('h2', null, `Prices you saw for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), sellCharts(), evidenceForm(), calcPanel(), priceCards()));
     if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
     parts.push(draftPanel());
     parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),
