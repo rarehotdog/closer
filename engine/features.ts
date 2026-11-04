@@ -7,7 +7,7 @@ import { ExtrasStore, HANDOFF_NEXT, type ReviewChoice } from '../store/extras.ts
 import { ALL_RULES, factsFromState, type RuleSet } from './rules.ts';
 import { EXEMPT_REASONS, REVIEW_ACTIONS, clampWindow, reviewWardrobe, type Exemption, type ReviewAction, type ReviewRow } from './review.ts';
 import {
-  HANDOFF_KINDS, PLATFORMS, PLATFORM_INFO, donateDraft, netScenario, priceCards, sellDraft, validateEvidence,
+  HANDOFF_KINDS, PLATFORMS, PLATFORM_INFO, donateDraft, evidenceCoverage, netScenario, priceCards, priceSeries, sellDraft, validateEvidence,
   type Evidence, type FeeLine, type Handoff, type HandoffKind, type HandoffState, type OwnerFacts, type Platform,
 } from './market.ts';
 import { SAMPLE_LOOKS, collectionOf, lookById, matchLook, type Collection, type Look, type LookCategory } from './looks.ts';
@@ -130,7 +130,13 @@ export class FeatureService {
   // ---------------- price evidence ----------------
   market(ws: string, itemId: string, sample: readonly Evidence[] = []) {
     const evidence = [...this.extras.evidence(ws), ...sample.filter((e) => e.itemId === itemId)];
-    return { itemId, cards: priceCards(itemId, evidence), note: 'Each platform stands alone. Asking prices are not sales. Nothing is averaged or converted.' };
+    return { itemId, today: this.today(), cards: priceCards(itemId, evidence), series: priceSeries(itemId, evidence), note: 'Each platform stands alone. Asking prices are not sales. Nothing is averaged or converted.' };
+  }
+
+  /** How many confirmed pieces have at least one price row (owner-entered or the sample rows passed in). */
+  coverage(ws: string, sample: readonly Evidence[] = []) {
+    const ids = this.ledger.readState(ws, { fresh: true }).items.filter((i) => i.ownership === 'CONFIRMED').map((i) => i.itemId);
+    return evidenceCoverage(ids, [...this.extras.evidence(ws), ...sample]);
   }
 
   addEvidence(ws: string, e: Partial<Evidence>): Evidence | Fail {

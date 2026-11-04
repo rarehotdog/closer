@@ -239,6 +239,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   const sample = ws.seedRef === 'sample-closet' ? sampleEvidence(clock.today()) : [];
   if (method === 'GET' && action === 'review') return send(res, 200, feat.review(wsId, Number(url.searchParams.get('window') ?? 60)));
   if (method === 'GET' && action === 'market' && arg) return send(res, 200, feat.market(wsId, arg, sample));
+  if (method === 'GET' && action === 'coverage') return send(res, 200, feat.coverage(wsId, sample));
   if (method === 'GET' && action === 'drafts') return send(res, 200, { drafts: feat.drafts(wsId) });
   if (method === 'GET' && action === 'look' && arg) return send(res, 200, feat.matchLook(wsId, arg));
   if (method === 'GET' && action === 'collection') return send(res, 200, feat.collection(wsId));

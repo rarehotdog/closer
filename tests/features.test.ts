@@ -15,7 +15,7 @@ import { CHIPS, createPhotoLibrary } from '../fixtures/photos.ts';
 import { closetHistory, closetItems, sampleEvidence } from '../fixtures/closet.ts';
 import { KILL_TTL_MS, PROVISIONAL_CAPS } from '../engine/caps.ts';
 import { addDays } from '../shared/dates.ts';
-import { netScenario, priceCards, sellDraft, validateEvidence, HANDOFF_STATES, PLATFORMS, PLATFORM_INFO } from '../engine/market.ts';
+import { evidenceCoverage, netScenario, priceCards, priceSeries, sellDraft, validateEvidence, HANDOFF_STATES, PLATFORMS, PLATFORM_INFO } from '../engine/market.ts';
 import { countOutfits } from '../engine/looks.ts';
 // @ts-expect-error plain browser module without type declarations; the same file the 3D screen imports
 import { buildAnatomy } from '../web/public/anatomy.js';
@@ -202,8 +202,9 @@ describe('F2 price cards and hand-off drafts', () => {
     const cards = priceCards('J1', sampleEvidence(TODAY));
     assert.deepEqual(cards.map((c) => c.platform), ['KREAM', 'KARROT', 'BUNJANG', 'POSHMARK', 'EBAY', 'GRAILED', 'DEPOP', 'VINTED']);
     const karrot = cards.find((c) => c.platform === 'KARROT')!;
-    assert.deepEqual(karrot.entries.map((e) => e.amount).sort(), [120000, 85000].sort());
-    assert.ok(karrot.entries.every((e) => e.priceType === 'ASK' && e.source === 'sample'));
+    // newest first: the 120,000 asking price (3 days ago), the 90,000 trade (10 days ago), the 85,000 asking price (21 days ago)
+    assert.deepEqual(karrot.entries.map((e) => [e.amount, e.priceType]), [[120000, 'ASK'], [90000, 'TRADE'], [85000, 'ASK']]);
+    assert.ok(karrot.entries.every((e) => e.source === 'sample'));
     assert.equal(cards.find((c) => c.platform === 'KREAM')!.status, 'NO_EVIDENCE');
     assert.equal(cards.find((c) => c.platform === 'POSHMARK')!.entries[0].currency, 'USD');
     for (const c of cards) assert.equal('average' in c || 'median' in c || 'range' in c, false);
@@ -629,10 +630,10 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.ok(!('ok' in v));
     const k = v.evidence.find((x) => x.platform === 'KARROT')!;
     assert.deepEqual({ c: k.owner.count, min: k.owner.min, max: k.owner.max }, { c: 1, min: 90000, max: 90000 });
-    assert.deepEqual({ c: k.sample.count, min: k.sample.min, max: k.sample.max }, { c: 2, min: 85000, max: 120000 });
+    assert.deepEqual({ c: k.sample.count, min: k.sample.min, max: k.sample.max }, { c: 3, min: 85000, max: 120000 });
     assert.equal(k.owner.ids.some((id) => k.sample.ids.includes(id)), false);
     assert.doesNotMatch(JSON.stringify(v.evidence), /average|median|pooled/i);
-    assert.match(k.line, /1 price you entered and 2 sample prices/);
+    assert.match(k.line, /1 price you entered and 3 sample prices/);
     const kream = v.evidence.find((x) => x.platform === 'KREAM')!;
     assert.match(kream.line, /No price seen on KREAM yet/);
   });
@@ -652,7 +653,7 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.equal(d.sell.askStatus, 'ASSUMED');
     assert.equal(d.sell.scenario!.net, null);
     assert.deepEqual(d.sell.scenario!.unknown, ['Platform fee']);
-    assert.deepEqual(d.sell.evidence.sample.ids, ['sample-4']);
+    assert.deepEqual(d.sell.evidence.sample.ids, ['sample-4', 'sample-6']);
     const again = t.feat.decisions(t.ws, 'J2');
     assert.equal(again.length, 1);
     const { outcome: _o, ...stored } = again[0];
@@ -732,6 +733,37 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.match(c.line, /Days without a record stay unknown/);
     // The snapshots themselves did not change when the wears were recorded.
     assert.equal(t.extras.decision(t.ws, open.decision.decisionId)!.keep.wearsCounted, open.decision.keep.wearsCounted);
+  });
+});
+
+describe('F6 price chart series and coverage', () => {
+  it('F6-01 priceSeries: one series per platform in its own currency, points in date order, first and latest, nothing averaged', () => {
+    const S = priceSeries('J1', sampleEvidence(TODAY));
+    assert.deepEqual(S.map((s) => s.platform), [...PLATFORMS]);
+    const k = S.find((s) => s.platform === 'KARROT')!;
+    assert.deepEqual(k.points.map((p) => [p.amount, p.priceType, p.retrievedAt]), [[85000, 'ASK', addDays(TODAY, -21)], [90000, 'TRADE', addDays(TODAY, -10)], [120000, 'ASK', addDays(TODAY, -3)]]);
+    assert.equal(k.count, 3);
+    assert.equal(k.first!.evidenceId, 'sample-1');
+    assert.equal(k.latest!.evidenceId, 'sample-2');
+    assert.deepEqual([k.currency, k.min, k.max], ['KRW', 85000, 120000]);
+    assert.ok(k.points.every((p) => p.source === 'sample'));
+    assert.match(k.line, /3 prices seen on Karrot/);
+    const posh = S.find((s) => s.platform === 'POSHMARK')!;
+    assert.deepEqual([posh.count, posh.currency, posh.first!.amount, posh.first === posh.latest], [1, 'USD', 68, true]);
+    const kream = S.find((s) => s.platform === 'KREAM')!;
+    assert.deepEqual([kream.count, kream.first, kream.latest, kream.min, kream.max], [0, null, null, null, null]);
+    assert.doesNotMatch(JSON.stringify(S), /"(average|median|trend)[A-Za-z]*":/i);
+  });
+
+  it('F6-02 evidenceCoverage counts pieces with any price row and keeps sample-only pieces apart; an empty list has no percentage', () => {
+    const t = setup({ history: closetHistory(TODAY) });
+    assert.deepEqual(t.feat.coverage(t.ws, sampleEvidence(TODAY)), { withEvidence: 2, total: 12, pct: 17, sampleOnly: 2, line: 'Price evidence on 2 of 12 pieces' });
+    const e = t.feat.addEvidence(t.ws, { itemId: 'B3', platform: 'KREAM', priceType: 'TRADE', amount: 30000, currency: 'KRW', retrievedAt: TODAY, matchLevel: 'SAME_ITEM' });
+    assert.ok(!('ok' in e));
+    const c = t.feat.coverage(t.ws, sampleEvidence(TODAY));
+    assert.deepEqual([c.withEvidence, c.total, c.sampleOnly, c.line], [3, 12, 2, 'Price evidence on 3 of 12 pieces']);
+    assert.deepEqual([t.feat.coverage(t.ws).withEvidence, t.feat.coverage(t.ws).sampleOnly], [1, 0]);
+    assert.deepEqual(evidenceCoverage([], sampleEvidence(TODAY)), { withEvidence: 0, total: 0, pct: null, sampleOnly: 0, line: 'Price evidence on 0 of 0 pieces' });
   });
 });
 
