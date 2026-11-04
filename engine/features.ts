@@ -12,8 +12,8 @@ import {
 } from './market.ts';
 import { SAMPLE_LOOKS, collectionOf, lookById, matchLook, type Collection, type Look, type LookCategory } from './looks.ts';
 import {
-  DECISION_CHOICES, DEFAULT_HORIZON, HORIZON_DAYS, evidenceSummaries, isHorizon, keepSideOf, outcomeOf, sellSideOf, validateNamedUses,
-  type DecisionChoice, type DecisionSnapshot, type EvidenceSummary, type KeepSide, type Outcome,
+  DECISION_CHOICES, DEFAULT_HORIZON, HORIZON_DAYS, basisOf, evidenceSummaries, evidenceSummaryOf, isHorizon, keepSideOf, outcomeOf, recheckOf, sellSideOf, validateNamedUses,
+  type DecisionChoice, type DecisionSnapshot, type EvidenceSummary, type HorizonDays, type KeepSide, type Outcome, type Recheck,
 } from './decision.ts';
 import type { DecisionContext } from '../shared/wardrobe.ts';
 
@@ -29,9 +29,12 @@ export type DecisionView = {
   horizons: number[];
   keep: KeepSide;
   evidence: EvidenceSummary[];
-  history: (DecisionSnapshot & { outcome: Outcome })[];
+  /** Newest first. recheck lists the counted facts that moved since each snapshot (for its own horizon and platform). */
+  history: (DecisionSnapshot & { outcome: Outcome; recheck: Recheck })[];
   note: string;
 };
+
+const CLIENT_KEY_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 /** Fee lines as the owner typed them: a blank value is unknown, 0 counts only when typed. Returns a message when a line is malformed. */
 export function parseFees(fees: unknown): FeeLine[] | string {
@@ -170,12 +173,23 @@ export class FeatureService {
     if (!item) return fail('INVALID_TRANSITION', 'unknown item');
     const horizonDays = a.horizonDays === undefined ? DEFAULT_HORIZON : a.horizonDays;
     if (!isHorizon(horizonDays)) return fail('INVALID_TRANSITION', `horizonDays must be one of ${HORIZON_DAYS.join(', ')}`);
-    const row = this.reviewRows(ws, horizonDays).find((r) => r.itemId === item.itemId);
+    const rowsFor = new Map<HorizonDays, ReviewRow[]>([[horizonDays, this.reviewRows(ws, horizonDays)]]);
+    const row = rowsFor.get(horizonDays)!.find((r) => r.itemId === item.itemId);
     if (!row) return fail('INVALID_TRANSITION', 'unknown item');
     const today = this.today();
     const history = this.extras.decisions(ws, item.itemId);
     const last = history[history.length - 1] ?? null;
     const evidence = [...this.extras.evidence(ws), ...sample.filter((e) => e.itemId === item.itemId)];
+    // The keep side as it stands today for a snapshot's own horizon, so a different horizon on screen is not reported as moved facts.
+    const keepNow = (d: DecisionSnapshot): KeepSide | null => {
+      if (!rowsFor.has(d.keep.horizonDays)) rowsFor.set(d.keep.horizonDays, this.reviewRows(ws, d.keep.horizonDays));
+      const r = rowsFor.get(d.keep.horizonDays)!.find((x) => x.itemId === item.itemId);
+      return r ? keepSideOf(item, r, d.keep.horizonDays, d.keep.namedUses, today) : null;
+    };
+    const recheck = (d: DecisionSnapshot): Recheck => {
+      const now = keepNow(d);
+      return now ? recheckOf(d, now, evidenceSummaryOf(item.itemId, d.sell.platform, evidence)) : { needed: false, changed: [] };
+    };
     return {
       itemId: item.itemId,
       item: { itemId: item.itemId, slot: item.slot, type: item.type, color: item.color },
@@ -183,15 +197,22 @@ export class FeatureService {
       horizons: [...HORIZON_DAYS],
       keep: keepSideOf(item, row, horizonDays, last?.keep.namedUses ?? [], today),
       evidence: evidenceSummaries(item.itemId, evidence),
-      history: history.map((d) => ({ ...d, outcome: outcomeOf(d, st.wearRows, today) })).reverse(),
+      history: history.map((d) => ({ ...d, outcome: outcomeOf(d, st.wearRows, today), recheck: recheck(d) })).reverse(),
       note: 'Both sides show counts and the prices you entered. No probability is shown because there is no counted basis for one. Taking a position saves a snapshot of this screen and changes nothing outside Closer.',
     };
   }
 
-  /** Save a position as a snapshot. The net is recomputed here from the cost lines; a net sent by a client is ignored. */
-  decide(ws: string, a: { itemId: string; choice: string; horizonDays?: number; platform: string; askPrice?: number | null; fees?: unknown[]; namedUses?: unknown; note?: string | null }, sample: readonly Evidence[] = []): { decision: DecisionSnapshot; outcome: Outcome } | Fail {
+  /**
+   * Save a position as a snapshot. The net is recomputed here from the cost lines; a net sent by a
+   * client is ignored. With a clientKey the save is idempotent: the same key on the same facts
+   * returns the row already saved (duplicate: true) instead of a second row; the same key on
+   * different facts is refused, because that position would rest on a screen the owner has not seen.
+   */
+  decide(ws: string, a: { itemId: string; choice: string; horizonDays?: number; platform: string; askPrice?: number | null; fees?: unknown[]; namedUses?: unknown; note?: string | null; clientKey?: string | null }, sample: readonly Evidence[] = []): { decision: DecisionSnapshot; outcome: Outcome; duplicate?: true } | Fail {
     const deny = this.writable(ws);
     if (deny) return deny;
+    const clientKey = a.clientKey === undefined || a.clientKey === null ? null : String(a.clientKey);
+    if (clientKey !== null && !CLIENT_KEY_RE.test(clientKey)) return fail('INVALID_TRANSITION', 'clientKey must be 8 to 64 letters, digits, _ or -');
     if (!(DECISION_CHOICES as readonly string[]).includes(a.choice)) return fail('INVALID_TRANSITION', `choice must be one of ${DECISION_CHOICES.join(', ')}`);
     if (!(PLATFORMS as readonly string[]).includes(a.platform)) return fail('INVALID_TRANSITION', 'unknown platform');
     const horizonDays = a.horizonDays === undefined ? DEFAULT_HORIZON : a.horizonDays;
@@ -210,6 +231,14 @@ export class FeatureService {
     const row = this.reviewRows(ws, horizonDays).find((r) => r.itemId === item.itemId);
     if (!row) return fail('INVALID_TRANSITION', 'unknown item');
     const evidence = [...this.extras.evidence(ws), ...sample.filter((e) => e.itemId === item.itemId)];
+    const keep = keepSideOf(item, row, horizonDays, namedUses, today);
+    const sell = sellSideOf(item.itemId, a.platform as Platform, askPrice, fees, evidence);
+    const basis = basisOf(keep, sell);
+    const prior = clientKey === null ? null : this.extras.decisionByKey(ws, clientKey);
+    if (prior) {
+      if (prior.basis !== basis) return fail('INVALID_TRANSITION', 'this position was already saved on different facts; open it again to take a new position');
+      return { decision: prior, outcome: outcomeOf(prior, st.wearRows, today), duplicate: true };
+    }
     const snapshot: DecisionSnapshot = {
       schema: 'closer.decision.1',
       decisionId: `d_${randomUUID().slice(0, 12)}`,
@@ -217,12 +246,13 @@ export class FeatureService {
       choice: a.choice as DecisionChoice,
       at: this.now().toISOString(),
       today,
-      keep: keepSideOf(item, row, horizonDays, namedUses, today),
-      sell: sellSideOf(item.itemId, a.platform as Platform, askPrice, fees, evidence),
+      keep,
+      sell,
+      basis,
       note,
       sourceRevision: this.revision,
     };
-    const saved = this.extras.addDecision(ws, snapshot);
+    const saved = this.extras.addDecision(ws, snapshot, clientKey);
     return { decision: saved, outcome: outcomeOf(saved, st.wearRows, today) };
   }
 

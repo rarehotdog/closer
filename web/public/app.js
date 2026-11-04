@@ -957,7 +957,8 @@ async function closetScreen(view) {
   // ---- Keep or let go: one question per piece, two sides of counted facts, a position saved as a snapshot ----
   const CHOICE_LABEL = { KEEP: 'Keep', WEAR_ONCE: 'Try wearing it once', SELL_PREPARE: 'Prepare to sell', DEFER: 'Decide later' };
   async function openDecide(itemId) {
-    S.decide = { itemId, horizon: 90, view: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true, links: null, linksBusy: false };
+    // key: one idempotency key per panel open; the server stores a key once, so a tap that repeats a save cannot add a second row.
+    S.decide = { itemId, horizon: 90, view: null, platform: 'KARROT', price: '', fees: newFees('KARROT'), net: null, uses: [], useLabel: '', useOn: '', fresh: true, links: null, linksBusy: false, key: uuid(), last: null, saving: false };
     await loadDecide();
     const el = document.getElementById('decide');
     if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -1022,16 +1023,31 @@ async function closetScreen(view) {
   }
   async function takePosition(choice) {
     const D = S.decide;
-    if (!D) return;
+    if (!D || D.saving) return;
     const p = Number(D.price);
-    const r = await postJson(`/api/ws/${id}/decide`, { itemId: D.itemId, choice, horizonDays: D.horizon, platform: D.platform, askPrice: p > 0 ? p : null, fees: feeLines(D.fees), namedUses: D.uses, note: null });
+    const body = { itemId: D.itemId, choice, horizonDays: D.horizon, platform: D.platform, askPrice: p > 0 ? p : null, fees: feeLines(D.fees), namedUses: D.uses, note: null };
+    // The same position tapped again (same choice and inputs) goes out under the key it was saved with, so the server answers
+    // "already saved" instead of adding a row; anything different goes out under the fresh key drawn after the last save.
+    const same = JSON.stringify(body);
+    const key = D.last && D.last.same === same ? D.last.key : D.key;
+    D.saving = true;
+    render();
+    let r;
+    try {
+      r = await postJson(`/api/ws/${id}/decide`, { ...body, clientKey: key });
+    } catch {
+      r = { ok: false, code: 'SAVE_UNCONFIRMED', detail: 'No reply from the server. Tap once more: the same key cannot save twice.' };
+    }
+    D.saving = false;
     if (r.ok === false) { S.msg = errChip(r); render(); return; }
+    D.last = { same, key };
+    D.key = uuid();
     if (choice === 'WEAR_ONCE') { location.href = `/today?lock=${D.itemId}`; return; }
     if (choice === 'SELL_PREPARE') {
       await act(D.itemId, 'sell_review');
       S.calc = { platform: D.platform, price: D.price, fees: D.fees.map((f) => ({ ...f })), result: D.net && D.net.ok !== false ? D.net : null };
     }
-    S.msg = h('span', { class: 'chip ok' }, `Saved and read back · ${CHOICE_LABEL[choice]} · ${r.decision.decisionId}`);
+    S.msg = r.duplicate ? h('span', { class: 'chip' }, `Already saved · ${r.decision.decisionId}`) : h('span', { class: 'chip ok' }, `Saved and read back · ${CHOICE_LABEL[choice]} · ${r.decision.decisionId}`);
     await loadDecide();
   }
   function decidePanel() {
@@ -1084,16 +1100,20 @@ async function closetScreen(view) {
       feeRows(D.fees, cur, recalc, true),
       h('button', { type: 'button', class: 'btn small ghost', onclick: () => { D.fees.push({ label: 'Other cost', kind: 'fixed', value: '' }); render(); } }, 'Add a cost line'),
       netbox);
-    const pos = h('div', { class: 'row actions' },
-      h('button', { type: 'button', class: 'btn small', onclick: () => takePosition('KEEP') }, 'Keep'),
-      h('button', { type: 'button', class: 'btn small', onclick: () => takePosition('WEAR_ONCE') }, 'Try wearing it once'),
-      h('button', { type: 'button', class: 'btn small', onclick: () => takePosition('SELL_PREPARE') }, 'Prepare to sell'),
-      h('button', { type: 'button', class: 'btn small ghost', onclick: () => takePosition('DEFER') }, 'Decide later'));
+    // The four positions are off while a save is in flight, so a second tap cannot start a second save.
+    const busy = D.saving ? true : null;
+    const pos = h('div', { class: 'row actions', 'aria-busy': D.saving ? 'true' : null },
+      h('button', { type: 'button', class: 'btn small', disabled: busy, onclick: () => takePosition('KEEP') }, 'Keep'),
+      h('button', { type: 'button', class: 'btn small', disabled: busy, onclick: () => takePosition('WEAR_ONCE') }, 'Try wearing it once'),
+      h('button', { type: 'button', class: 'btn small', disabled: busy, onclick: () => takePosition('SELL_PREPARE') }, 'Prepare to sell'),
+      h('button', { type: 'button', class: 'btn small ghost', disabled: busy, onclick: () => takePosition('DEFER') }, 'Decide later'));
     const hist = V.history.length ? h('div', null, h('h3', null, `Positions taken (${V.history.length})`),
       h('ul', { class: 'reasons' }, V.history.map((d) => h('li', null,
         h('b', null, `${d.at.slice(0, 10)} · ${CHOICE_LABEL[d.choice] || d.choice}`),
         ` · ${d.keep.horizonDays} days · ${d.sell.askPrice !== null ? `${money(d.sell.askPrice, d.sell.currency)} on ${d.sell.evidence.name}` : 'no price tested'} · ${d.sell.scenario && d.sell.scenario.net !== null ? `net ${money(d.sell.scenario.net, d.sell.currency)}` : 'net unknown'}`,
-        h('br'), h('span', { class: 'muted' }, d.outcome.line))))) : null;
+        h('br'), h('span', { class: 'muted' }, d.outcome.line),
+        // Counted facts that moved since this snapshot (its own horizon and platform); nothing is shown when none did.
+        d.recheck && d.recheck.needed ? [h('br'), h('span', { class: 'chip warn', 'data-recheck': d.decisionId }, `Facts moved: ${d.recheck.changed.join(' · ')}`)] : null)))) : null;
     return h('section', { class: 'panel decide', id: 'decide' },
       h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Keep or let go? · ${D.itemId} · ${itemName(S.items[D.itemId])}`), h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.decide = null; render(); } }, 'Close')),
       h('p', { class: 'ask' }, K.question), hz,

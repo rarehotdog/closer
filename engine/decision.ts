@@ -4,6 +4,7 @@
 // counted basis for one, and a number without a basis would be read as advice. The owner takes a
 // position (keep, wear it once, prepare to sell, decide later); the position is saved as a snapshot
 // of what was on the screen and is resolved later by counted wear records, never by the app.
+import { createHash } from 'node:crypto';
 import { addDays, diffDays, type IsoDate } from '../shared/dates.ts';
 import type { WearRow } from '../shared/ledger.ts';
 import type { Item } from '../shared/wardrobe.ts';
@@ -69,9 +70,13 @@ export type DecisionSnapshot = {
   today: IsoDate;
   keep: KeepSide;
   sell: SellSide;
+  /** Fingerprint of the counted facts on the screen when the position was taken (basisOf). */
+  basis: string;
   note: string | null;
   sourceRevision: string;
 };
+
+export type Recheck = { needed: boolean; changed: string[] };
 
 export type Outcome = {
   status: 'OPEN' | 'CLOSED';
@@ -163,6 +168,50 @@ export function outcomeOf(d: Pick<DecisionSnapshot, 'itemId' | 'today' | 'keep'>
     ? `Open: ${wearsSince} confirmed wear${wearsSince === 1 ? '' : 's'} since the decision, ${daysElapsed} of ${daysTotal} days passed, any record on ${recordedDaysSince} of them.`
     : `Closed on ${until}: ${wearsSince} confirmed wear${wearsSince === 1 ? '' : 's'} in the ${daysTotal} days after the decision, any record on ${recordedDaysSince} of them. Days without a record stay unknown.`;
   return { status, daysElapsed, daysTotal, wearsSince, recordedDaysSince, line };
+}
+
+/**
+ * A stable fingerprint (sha256) of the counted facts a position rests on: the wear counts of the
+ * keep side, the evidence ids on the chosen platform, the asking price and the cost lines as typed.
+ * Two requests with the same basis were taken on the same facts; a different basis means the facts
+ * on the screen had moved in between.
+ */
+export function basisOf(keep: KeepSide, sell: SellSide): string {
+  const facts = {
+    wearsCounted: keep.wearsCounted,
+    recordedDays: keep.recordedDays,
+    trackedDays: keep.trackedDays,
+    lastConfirmedWear: keep.lastConfirmedWear,
+    evidenceIds: [...sell.evidence.owner.ids, ...sell.evidence.sample.ids].sort(),
+    platform: sell.platform,
+    askPrice: sell.askPrice,
+    costs: (sell.scenario?.costs ?? []).map((c) => ({ label: c.label, kind: c.kind, value: c.value })),
+  };
+  return createHash('sha256').update(JSON.stringify(facts), 'utf8').digest('hex');
+}
+
+/**
+ * Which counted facts under a saved position have moved since, in plain words ("2 more confirmed
+ * wears", "1 new price on KREAM", "tracked days 76 → 90"). The keep side passed in must be computed
+ * for the snapshot's own horizon, and the evidence for its own platform. Nothing here judges the
+ * position: it only lists what is different now.
+ */
+export function recheckOf(snapshot: Pick<DecisionSnapshot, 'keep' | 'sell'>, currentKeep: KeepSide, currentEvidence: EvidenceSummary): Recheck {
+  const then = snapshot.keep;
+  const changed: string[] = [];
+  const dWears = currentKeep.wearsCounted - then.wearsCounted;
+  if (dWears !== 0) changed.push(`${Math.abs(dWears)} ${dWears > 0 ? 'more' : 'fewer'} confirmed wear${Math.abs(dWears) === 1 ? '' : 's'}`);
+  if (currentKeep.lastConfirmedWear !== then.lastConfirmedWear) changed.push(`last confirmed wear ${then.lastConfirmedWear ?? 'none'} → ${currentKeep.lastConfirmedWear ?? 'none'}`);
+  if (currentKeep.recordedDays !== then.recordedDays) changed.push(`recorded days ${then.recordedDays} → ${currentKeep.recordedDays}`);
+  if (currentKeep.trackedDays !== then.trackedDays) changed.push(`tracked days ${then.trackedDays} → ${currentKeep.trackedDays}`);
+  const platform = snapshot.sell.platform;
+  const before = new Set([...snapshot.sell.evidence.owner.ids, ...snapshot.sell.evidence.sample.ids]);
+  const now = new Set([...currentEvidence.owner.ids, ...currentEvidence.sample.ids]);
+  const added = [...now].filter((id) => !before.has(id)).length;
+  const removed = [...before].filter((id) => !now.has(id)).length;
+  if (added) changed.push(`${added} new price${added === 1 ? '' : 's'} on ${platform}`);
+  if (removed) changed.push(`${removed} price${removed === 1 ? '' : 's'} removed on ${platform}`);
+  return { needed: changed.length > 0, changed };
 }
 
 export function validateNamedUses(x: unknown, today: IsoDate): NamedUse[] | string {
