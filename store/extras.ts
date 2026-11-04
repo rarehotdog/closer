@@ -64,6 +64,18 @@ export class ExtrasStore {
     this.db.close();
   }
 
+  /** Removes every side-table row of one workspace in one transaction (the sweep of visitor copies). */
+  deleteWorkspace(ws: string): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const t of ['review_exemptions', 'review_choices', 'evidence', 'handoffs', 'look_targets', 'decisions']) this.db.prepare(`DELETE FROM ${t} WHERE workspace_id = ?`).run(ws);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
   // ---- exemptions ----
   putExemption(ws: string, itemId: string, e: Exemption): Exemption {
     this.db.prepare('INSERT OR REPLACE INTO review_exemptions VALUES (?,?,?,?,?)').run(ws, itemId, e.reason, e.reviewAfter, e.note);

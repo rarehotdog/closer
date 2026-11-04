@@ -55,6 +55,7 @@ let mode: 'mock' | 'real';
 let svc: CloserService;
 let ledger: SqliteLedger;
 let feat: FeatureService;
+let extras: ExtrasStore;
 let uploads: PhotoStore;
 try {
   const p = createPortsFromEnv(env, lib, {
@@ -73,7 +74,8 @@ try {
   // Sample photos for everyone; uploaded photos only through routes that check their workspace.
   const photoSource = { get: (id: string) => uploads.get(id) ?? lib.get(id) };
   svc = new CloserService({ ledger, ports: p.ports, clock, photos: photoSource, mode });
-  feat = new FeatureService({ ledger, extras: new ExtrasStore(DB_PATH), today: clock.today, now: clock.now, revision: SHA });
+  extras = new ExtrasStore(DB_PATH);
+  feat = new FeatureService({ ledger, extras, today: clock.today, now: clock.now, revision: SHA });
 } catch (e) {
   if (e instanceof RealModeRefused) {
     console.error(`Refusing to start: ${e.message}`);
@@ -167,7 +169,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
     const wsId = `try-${randomUUID().slice(0, 8)}`;
     const sessionId = `sess-${randomUUID().slice(0, 8)}`;
     const roles = rolesOutside(photo.photoId);
-    ledger.createWorkspace({ workspaceId: wsId, kind: 'visitor', publicReadOnly: false, seedRef: `fx-h/${photo.photoId}`, createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() });
+    ledger.createWorkspace({ workspaceId: wsId, kind: 'visitor', publicReadOnly: false, seedRef: `fx-h/${photo.photoId}`, createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() }, clock.now().toISOString());
     sessions.set(wsId, sessionId);
     return send(res, 200, { workspaceId: wsId, sessionId, seededLabel: sampleWardrobe(roles.length) });
   }
@@ -349,6 +351,26 @@ const server = createServer(async (req, res) => {
     send(res, 500, { ok: false, detail: 'internal error' });
   }
 });
+
+// Try forks (kind 'visitor') are disposable: 24 hours after creation their ledger rows, side-table
+// rows and photos go; call rows stay (money ledger). Runs at startup and hourly; the timer never
+// keeps the process alive. Owner, demo and sample-closet copies are not touched.
+const VISITOR_TTL_MS = 24 * 3600_000;
+function sweepVisitorWorkspaces(): number {
+  const cutoff = new Date(clock.now().getTime() - VISITOR_TTL_MS).toISOString();
+  let n = 0;
+  for (const id of ledger.staleVisitorWorkspaces(cutoff)) {
+    if (!ledger.deleteVisitorWorkspace(id)) continue;
+    extras.deleteWorkspace(id);
+    for (const p of uploads.list(id)) uploads.delete(id, p.photoId);
+    sessions.delete(id);
+    n++;
+  }
+  if (n) console.log(`swept ${n} visitor workspace(s) older than 24 h`);
+  return n;
+}
+sweepVisitorWorkspaces();
+setInterval(sweepVisitorWorkspaces, 3600_000).unref();
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Closer (${mode} mode) on http://localhost:${PORT}  — screens: / · /app · /w/demo-rc1 · /admin · /version`);
