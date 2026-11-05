@@ -123,6 +123,7 @@ Muse Wonder is in preview and, per dev.meta.ai/docs/models (read 2026-11-04), no
 
 ## What comes next (not built)
 
+- One photo of a whole closet registers every visible piece: a closet-scan mode that reads up to 16 garments per photo without the one-piece-per-slot rule an outfit photo keeps, confirmed card by card and hung on the rail. Today the photo path reads one outfit.
 - Import your order history as a file you export yourself, so each piece carries what you paid and when.
 - What each piece would leave in your hand on each platform, in the closet ledger itself (today the ledger shows a net only for positions you saved with every cost line checked).
 - Resale evidence from official platform APIs where they exist; otherwise a screenshot you paste. Never averaged across platforms.
