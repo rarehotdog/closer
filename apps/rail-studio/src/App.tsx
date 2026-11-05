@@ -57,6 +57,7 @@ export default function App() {
   };
   const [accountOpen, setAccountOpen] = useState(false);
   const privateView = Boolean(wardrobe.account && !wardrobe.sampleView);
+  const mixedGuestView = !wardrobe.account && wardrobe.localCount > 0;
   const activeLooks = privateView ? [] : TARGET_LOOKS;
   const [initialPieceRequest] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -542,7 +543,7 @@ export default function App() {
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] font-medium text-[#8C857B] tracking-wide shrink-0">
-              {privateView ? 'YOUR CLOSET AT A GLANCE' : 'SAMPLE CLOSET AT A GLANCE'}
+              {privateView ? 'YOUR CLOSET AT A GLANCE' : mixedGuestView ? 'BROWSER CLOSET AT A GLANCE' : 'SAMPLE CLOSET AT A GLANCE'}
             </span>
             <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
               <button
@@ -577,7 +578,7 @@ export default function App() {
             className="text-[10px] text-[#57534E] mt-0.5"
             data-testid="sample-data-notice"
           >
-            {privateView ? wardrobe.persistenceNotice : 'Sample data · latest price seen · nothing is listed, posted or paid'}
+            {privateView ? wardrobe.persistenceNotice : mixedGuestView ? 'Sample closet + your local pieces · latest price seen · nothing is posted' : 'Sample data · latest price seen · nothing is listed, posted or paid'}
           </div>
 
           <div className="flex items-baseline gap-3 mt-1">
