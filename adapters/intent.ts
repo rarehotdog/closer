@@ -38,7 +38,7 @@ export function buildIntentBody(sentence: string, items: readonly IntentItem[]):
     model: SPARK_MODEL,
     store: false,
     reasoning: { effort: 'low' },
-    max_output_tokens: 600,
+    max_output_tokens: 4000, // live 11/5: at 600 the model spent the whole budget reasoning (status incomplete, reason max_output_tokens) and wrote no answer
     text: { format: { type: 'json_schema', name: INTENT_SCHEMA_NAME, schema: intentSchema(items.map((i) => i.itemId)), strict: true } },
     input: [
       { type: 'message', role: 'system', content: [{ type: 'input_text', text: INTENT_INSTRUCTIONS }] },

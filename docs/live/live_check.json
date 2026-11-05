@@ -1,0 +1,154 @@
+{
+  "at": "2026-11-05T01:22:37.082Z",
+  "base": "https://api.meta.ai/v1",
+  "models": {
+    "spark": "muse-spark-1.3",
+    "sam": "sam-3.1"
+  },
+  "sentence": "\uc624\ub298\uc740 \uc774 \ub124\uc774\ube44 \uc7ac\ud0b7 \uc785\uace0 \uc2f6\uc5b4. \ub098\uba38\uc9c0\ub294 \uc880 \ud3b8\ud558\uac8c.",
+  "image": "sample photo p1 from fixtures/photos.ts (drawn by code, 1200x1600, saved as JPEG)",
+  "steps": [
+    {
+      "step": "GET /models",
+      "ok": true,
+      "http": 200,
+      "latencyMs": 652,
+      "usageReported": null,
+      "costMicroUsd": 0,
+      "result": {
+        "count": 9,
+        "hasSpark": true,
+        "hasSam": true,
+        "relevant": [
+          "muse-wonder-1.0",
+          "sam-3.1",
+          "muse-spark-1.3-contributor",
+          "muse-voice-transcribe-1.0",
+          "muse-spark-1.3",
+          "muse-image-1.0",
+          "muse-spark-1.2-contributor",
+          "muse-spark-1.2",
+          "muse-spark-1.1"
+        ]
+      }
+    },
+    {
+      "step": "Spark intent",
+      "ok": true,
+      "http": 200,
+      "latencyMs": 9112,
+      "usageReported": true,
+      "costMicroUsd": 4466,
+      "attempts": 1,
+      "result": {
+        "codeCheck": {
+          "ok": true,
+          "anchors": [
+            "J1"
+          ],
+          "direction": "less_formal",
+          "rain": false
+        }
+      }
+    },
+    {
+      "step": "Spark 2 propose",
+      "ok": true,
+      "http": 200,
+      "latencyMs": 9714,
+      "usageReported": true,
+      "costMicroUsd": 8469,
+      "attempts": 1,
+      "result": {
+        "tool": "propose_edit",
+        "codeCheck": {
+          "ok": true,
+          "kind": "options",
+          "options": [
+            [
+              "bottom:B1\u2192B2"
+            ],
+            [
+              "bottom:B1\u2192B2",
+              "shoes:S1\u2192S2"
+            ]
+          ]
+        },
+        "codeSolver": [
+          [
+            "bottom:B1\u2192B2"
+          ],
+          [
+            "bottom:B1\u2192B2",
+            "shoes:S1\u2192S2"
+          ]
+        ]
+      }
+    },
+    {
+      "step": "Spark photo",
+      "ok": true,
+      "http": 200,
+      "latencyMs": 7148,
+      "usageReported": true,
+      "costMicroUsd": 7379,
+      "attempts": 1,
+      "result": {
+        "garments": 4,
+        "pin": 1,
+        "direction": "less_formal",
+        "offenders": 3
+      }
+    },
+    {
+      "step": "SAM masks",
+      "ok": false,
+      "http": 200,
+      "latencyMs": 2350,
+      "usageReported": true,
+      "costMicroUsd": 2500,
+      "attempts": 1,
+      "result": {
+        "requested": 4,
+        "records": 4,
+        "withMask": 4,
+        "parser": [],
+        "edgePx": [
+          {
+            "id": 1,
+            "maxEdgePx": 57,
+            "frame": "1200x1600",
+            "raster": "482x739"
+          },
+          {
+            "id": 2,
+            "maxEdgePx": 56,
+            "frame": "1200x1600",
+            "raster": "461x664"
+          },
+          {
+            "id": 3,
+            "maxEdgePx": 15,
+            "frame": "1200x1600",
+            "raster": "432x597"
+          },
+          {
+            "id": 4,
+            "maxEdgePx": 45,
+            "frame": "1200x1600",
+            "raster": "411x417"
+          }
+        ],
+        "tolerancePx": "auto: max(8, 5% of the box side)",
+        "codeCheck": {
+          "ok": false,
+          "codes": [
+            "INVALID_MODEL_OUTPUT"
+          ],
+          "detail": "mask 4 leaves its box by 45 px (tolerance 22)"
+        }
+      }
+    }
+  ],
+  "allOk": false
+}

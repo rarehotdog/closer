@@ -73,11 +73,11 @@ You decide at four places: the cards (step 4), the option and the wear (step 7),
 
 ## Current state
 
-This repository runs in **mock mode** by default: no Meta model is called and no key exists anywhere in the repository. The Meta adapters are written from the documentation examples and stay marked unverified until a live run is recorded in `.data/` on the owner's machine. Status, test results and next steps: [docs/status.md](docs/status.md) · [docs/at_results.md](docs/at_results.md) · [docs/features_1102.md](docs/features_1102.md).
+This repository runs in **mock mode** by default: no Meta model is called and no key exists anywhere in the repository. A live run against the Meta Model API was recorded on 2026-11-05 with `scripts/live_check.ts` ([docs/live/live_check.json](docs/live/live_check.json): statuses, timings and code checks only, no key, prompt or answer): the model list, `muse-spark-1.3` reading a sentence, reading a photo (4 garments) and picking edits through one function-tool turn all answered 200 and passed the code checks; `sam-3.1` answered 200 with 4 masks decoded by `@meta-sam/parser`, and the code check refused one mask that left its box by 45 px (tolerance 22 px), so that step is recorded as failed. Status, test results and next steps: [docs/status.md](docs/status.md) · [docs/at_results.md](docs/at_results.md) · [docs/features_1102.md](docs/features_1102.md).
 
 - Live URL: not deployed yet (the kit is in [deploy/](deploy/README.md)).
 - Demo video: not recorded yet; the script is [docs/demo_script.md](docs/demo_script.md). `/w/demo-rc1` shows the read-only sample run with its state hash.
-- Live model calls recorded in this repository: 0.
+- Live model calls recorded in this repository: 5 on 2026-11-05 (4 passed the code checks, 1 refused by the mask-in-box check), in [docs/live/live_check.json](docs/live/live_check.json).
 
 | Command | What it does |
 |---|---|
@@ -104,7 +104,7 @@ Measurement table: `Photos: {n} ({real or AI-generated}), ground truth written b
 | Candidates → at most two edits | `muse-spark-1.3` | function tools `propose_edit` / `ask_owner`, strict, `parallel_tool_calls: false`, `tool_choice` omitted, up to 8 PNG cut-outs | `adapters/spark2.ts` | `validateSpark2` (IDs, slots, rules; the locked piece never moves) |
 | The owner's own prompt, optional | `muse-wonder-1.0` (or `muse-spark-1.3` by flag) | text, images, json_schema, function tools, `web_search` grounding with `url_citation` annotations, `previous_response_id` | `adapters/wonder.ts` · `scripts/wonder.ts` · `POST /api/ws/:id/wonder` | caps and the kill switch in `CloserService.askWonder`; `engine/links.ts` sorts cited links by platform and reads no price from any page |
 
-Muse Wonder is in preview and, per dev.meta.ai/docs/models (read 2026-11-04), not available in South Korea on the Model API; every Wonder request runs unchanged on Spark with the model flag. Live calls recorded in this repository: 0 (the line above is updated from `.data/live_check.json` when the owner runs `npm run live:check`).
+Muse Wonder is in preview and, per dev.meta.ai/docs/models (read 2026-11-04), not available in South Korea on the Model API; every Wonder request runs unchanged on Spark with the model flag. Live calls recorded in this repository: 5 on 2026-11-05 ([docs/live/live_check.json](docs/live/live_check.json)); the live model list includes `muse-wonder-1.0`, which was not called.
 
 ## Known limits
 
