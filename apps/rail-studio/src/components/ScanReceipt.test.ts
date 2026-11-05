@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { cardsToPieces, receiptCards, modeLine, scanAttempted, samplePreviewOnly, cutoutSummary, type ScanOk } from './ScanPhotoModal.tsx';
 import { validateWardrobe } from '../../server/wardrobeSchema.ts';
 import { encodePng } from '../../server/closer/engine/png.ts';
+import { GARMENT_TYPES } from '../../../../shared/wardrobe.ts';
 
 const cutout = `data:image/png;base64,${encodePng({w:2,h:2,data:new Uint8Array(16).fill(255)}).toString('base64')}`;
 function result(receiptId: string | undefined): ScanOk {
@@ -26,6 +27,24 @@ test('a live answer without a bounded receipt is not available to hang', () => {
   assert.throws(() => receiptCards(result('receipt/invalid')), /scan receipt/);
   assert.equal(receiptCards({...result(undefined),mode:'fake'}).length,1);
   assert.doesNotMatch(modeLine('live'), /\bLIVE\b/);
+});
+
+test('scanned trousers and footwear keep their actual cutout and receipt in the new fixtures', () => {
+  for (const [type, slot, silhouette, category] of [
+    ['jeans', 'bottom', 'trousers', 'trousers'],
+    ['sneakers', 'shoes', 'sneaker-box', 'footwear'],
+    ['boots', 'shoes', 'sneaker-box', 'footwear'],
+    ...Object.entries(GARMENT_TYPES).filter(([, slot]) => slot === 'shoes').map(([type]) => [type, 'shoes', 'sneaker-box', 'footwear']),
+  ]) {
+    const scan = result('receipt-fixtures');
+    scan.cards[0] = { ...scan.cards[0], type, slot };
+    const [piece] = cardsToPieces(receiptCards(scan), {}, 'live', [], 1234);
+    assert.equal(piece.category, category);
+    assert.equal(piece.silhouette, silhouette);
+    assert.equal(piece.imageUrl, cutout);
+    assert.equal(piece.scanReceiptId, 'receipt-fixtures');
+    assert.deepEqual(validateWardrobe([piece]), [piece]);
+  }
 });
 
 test('wardrobe schema preserves receipt pairs and rejects partial or non-live claims', () => {

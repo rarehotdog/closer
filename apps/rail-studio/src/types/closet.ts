@@ -18,7 +18,8 @@ export type GarmentCategory =
   | 'hoodie'
   | 'knitwear'
   | 'shirt'
-  | 'trousers';
+  | 'trousers'
+  | 'footwear';
 
 export type GarmentSilhouette =
   | 'overcoat'
@@ -26,7 +27,9 @@ export type GarmentSilhouette =
   | 'hoodie'
   | 'blouson'
   | 'knit'
-  | 'tee';
+  | 'tee'
+  | 'trousers'
+  | 'sneaker-box';
 
 export type DecisionChoice = 'keep' | 'sell' | 'undecided';
 

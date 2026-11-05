@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GarmentPiece } from '../types/closet';
 import {
+  Boutique3DDisplayVariant,
+  resolve3DDisplayVariant,
+  railPieceSpacing,
   computeGarmentRotationHeat,
   countRotationTiers,
   formatCurrency,
@@ -41,6 +44,9 @@ let reducedMotionFallbackConsumed = false;
 type RailStage = 'loading' | 'ready' | 'fallback';
 
 interface ProjectedTag {
+  displayVariant: Boutique3DDisplayVariant;
+  displayFixtureBadge: string;
+  displayFixtureTitle: string;
   id: string;
   code: string;
   brand: string;
@@ -337,10 +343,428 @@ function createKnockoutGarmentTexture(
 }
 
 /**
+ * Generates a high-resolution sartorial wool twill or Japanese selvedge denim weave texture
+ * for 3D sculpted trousers with subtle vertical crease sheen and topstitched seam lines.
+ */
+function getTailoredTrouserTexture(
+  primaryHex: string,
+  secondaryHex: string,
+  isDenim: boolean,
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  const baseColor = new THREE.Color(primaryHex);
+  const secColor = new THREE.Color(secondaryHex || primaryHex);
+  const br = Math.round(baseColor.r * 255);
+  const bg = Math.round(baseColor.g * 255);
+  const bb = Math.round(baseColor.b * 255);
+
+  ctx.fillStyle = `rgb(${br},${bg},${bb})`;
+  ctx.fillRect(0, 0, 256, 512);
+
+  // Diagonal twill weave micro-lines + vertical warp yarns
+  for (let y = 0; y < 512; y += 3) {
+    for (let x = 0; x < 256; x += 3) {
+      const diag = (x + y) % 6 === 0;
+      const delta = isDenim ? (diag ? 16 : -10) : diag ? 9 : -7;
+      const r = Math.max(0, Math.min(255, br + delta));
+      const g = Math.max(0, Math.min(255, bg + delta));
+      const b = Math.max(0, Math.min(255, bb + delta));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(x, y, 2, 2);
+    }
+  }
+
+  // Soft vertical cylindrical shading + razor-sharp central Savile Row knife-crease highlight
+  const creaseGrad = ctx.createLinearGradient(0, 0, 256, 0);
+  creaseGrad.addColorStop(0.0, 'rgba(0, 0, 0, 0.28)');
+  creaseGrad.addColorStop(0.45, 'rgba(255, 255, 255, 0.03)');
+  creaseGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.24)');
+  creaseGrad.addColorStop(0.52, 'rgba(0, 0, 0, 0.16)');
+  creaseGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0.28)');
+  ctx.fillStyle = creaseGrad;
+  ctx.fillRect(0, 0, 256, 512);
+
+  // Sartorial side outseam topstitching (gold contrast thread on raw denim, tonal silk pick-stitch on wool)
+  ctx.strokeStyle = isDenim
+    ? 'rgba(212, 155, 68, 0.65)'
+    : `rgba(${Math.round(secColor.r * 255)},${Math.round(secColor.g * 255)},${Math.round(secColor.b * 255)}, 0.45)`;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(22, 0);
+  ctx.lineTo(22, 512);
+  ctx.moveTo(234, 0);
+  ctx.lineTo(234, 512);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Generates an optical glossy collector glass door texture with studio softbox specular streaks,
+ * beveled drop-front door border, and laser-etched UV-99 museum vitrine markings.
+ */
+function getGlossyGlassDoorTexture(): THREE.CanvasTexture {
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 384;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.clearRect(0, 0, 512, 384);
+
+  // Subtle icy-clear optical acrylic tint around beveled perimeter
+  const edgeGrad = ctx.createLinearGradient(0, 0, 512, 384);
+  edgeGrad.addColorStop(0, 'rgba(235, 246, 255, 0.34)');
+  edgeGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.10)');
+  edgeGrad.addColorStop(1, 'rgba(220, 238, 255, 0.32)');
+  ctx.fillStyle = edgeGrad;
+  ctx.fillRect(0, 0, 512, 384);
+
+  // Beveled drop-front acrylic door inner gasket frame
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(14, 14, 484, 356);
+
+  ctx.strokeStyle = 'rgba(197, 165, 114, 0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(22, 22, 468, 340);
+
+  // Multi-band diagonal studio softbox specular reflection streaks
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(56, 366);
+  ctx.lineTo(190, 18);
+  ctx.lineTo(246, 18);
+  ctx.lineTo(112, 366);
+  ctx.closePath();
+  const streakGrad1 = ctx.createLinearGradient(56, 18, 246, 366);
+  streakGrad1.addColorStop(0, 'rgba(255, 255, 255, 0.62)');
+  streakGrad1.addColorStop(0.5, 'rgba(255, 255, 255, 0.35)');
+  streakGrad1.addColorStop(1, 'rgba(255, 255, 255, 0.08)');
+  ctx.fillStyle = streakGrad1;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(266, 366);
+  ctx.lineTo(395, 18);
+  ctx.lineTo(422, 18);
+  ctx.lineTo(293, 366);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
+  ctx.fill();
+  ctx.restore();
+
+  // Laser-etched corner calibration reticles on the collector glass door
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = 2;
+  const cornerLen = 18;
+  [
+    [30, 30, 1, 1],
+    [482, 30, -1, 1],
+    [30, 354, 1, -1],
+    [482, 354, -1, -1],
+  ].forEach(([cx, cy, dx, dy]) => {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + dy * cornerLen);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + dx * cornerLen, cy);
+    ctx.stroke();
+  });
+
+  // Micro-etched collector authenticity stamp at bottom-right of glass door
+  ctx.font = '700 11px monospace';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.textAlign = 'right';
+  ctx.fillText('ILLUSTRATIVE GLASS · DISPLAY FIXTURE', 468, 344);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Generates an engraved champagne-brass plaque texture for the Trouser Clamp & Glass Vitrine Plinth.
+ */
+function getEngravedBrassPlaqueTexture(
+  titleText: string,
+  subText: string,
+): THREE.CanvasTexture {
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  const grad = ctx.createLinearGradient(0, 0, 256, 64);
+  grad.addColorStop(0, '#DFC496');
+  grad.addColorStop(0.5, '#C5A572');
+  grad.addColorStop(1, '#A68550');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 64);
+
+  ctx.strokeStyle = '#3D2E18';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(4, 4, 248, 56);
+
+  ctx.fillStyle = '#1E160C';
+  ctx.font = '700 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(titleText.slice(0, 24), 128, 29);
+
+  ctx.font = '600 11px sans-serif';
+  ctx.fillStyle = '#3D2E18';
+  ctx.fillText(subText.slice(0, 30), 128, 48);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Builds a 12-Part Composite Sculpted 3D Limited-Edition Sneaker Mesh
+ * for the Glossy Glass Box Display Variant.
+ */
+function buildSculptedLuxurySneakerMesh(
+  garmentId: string,
+  sneakerUpperMat: THREE.MeshStandardMaterial,
+  sneakerAccentMat: THREE.MeshStandardMaterial,
+  sailMidsoleMat: THREE.MeshStandardMaterial,
+  gumOutsoleMat: THREE.MeshStandardMaterial,
+  brassMat: THREE.MeshStandardMaterial,
+  hermesTagMat: THREE.MeshStandardMaterial,
+  isLeftShoe: boolean,
+): THREE.Group {
+  const shoe = new THREE.Group();
+
+  // 1. Treaded Gum/Rubber Outsole with forefoot & heel pivot pods
+  const outsole = new THREE.Mesh(
+    new THREE.BoxGeometry(0.195, 0.028, 0.415),
+    gumOutsoleMat,
+  );
+  outsole.position.set(0, 0.014, 0);
+  outsole.userData = { garmentId };
+  shoe.add(outsole);
+
+  // 2. Sculpted Sail Cream Midsole with visible heel Air/cushion window
+  const midsole = new THREE.Mesh(
+    new THREE.BoxGeometry(0.202, 0.042, 0.422),
+    sailMidsoleMat,
+  );
+  midsole.position.set(0, 0.048, 0);
+  midsole.userData = { garmentId };
+  shoe.add(midsole);
+
+  const airWindow = new THREE.Mesh(
+    new THREE.BoxGeometry(0.208, 0.018, 0.095),
+    new THREE.MeshPhysicalMaterial({
+      color: 0xdbeafe,
+      transparent: true,
+      opacity: 0.75,
+      roughness: 0.05,
+      clearcoat: 1.0,
+    }),
+  );
+  airWindow.position.set(0, 0.046, -0.12);
+  airWindow.userData = { garmentId };
+  shoe.add(airWindow);
+
+  // 3. Main Leather / Nubuck Quarter & Vamp Body
+  const quarterBody = new THREE.Mesh(
+    new THREE.BoxGeometry(0.184, 0.112, 0.285),
+    sneakerUpperMat,
+  );
+  quarterBody.position.set(0, 0.122, -0.025);
+  quarterBody.castShadow = true;
+  quarterBody.userData = { garmentId };
+  shoe.add(quarterBody);
+
+  // 4. Sculpted Rounded Perforated Toe-Box & Forefoot Mudguard
+  const toeBox = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.088, 0.096, 0.078, 18),
+    sailMidsoleMat,
+  );
+  toeBox.position.set(0, 0.102, 0.135);
+  toeBox.scale.set(1.0, 1.0, 1.15);
+  toeBox.userData = { garmentId };
+  shoe.add(toeBox);
+
+  const mudguardWrap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.095, 0.099, 0.048, 18, 1, false, -Math.PI * 0.65, Math.PI * 1.3),
+    sneakerAccentMat,
+  );
+  mudguardWrap.position.set(0, 0.09, 0.142);
+  mudguardWrap.scale.set(1.0, 1.0, 1.14);
+  mudguardWrap.userData = { garmentId };
+  shoe.add(mudguardWrap);
+
+  // 5. Elevated Padded Ankle Collar & Sculpted Heel Counter
+  const heelCounter = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.086, 0.093, 0.165, 18),
+    sneakerAccentMat,
+  );
+  heelCounter.position.set(0, 0.152, -0.125);
+  heelCounter.userData = { garmentId };
+  shoe.add(heelCounter);
+
+  const ankleCollarRim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.076, 0.018, 10, 18),
+    sailMidsoleMat,
+  );
+  ankleCollarRim.rotation.x = Math.PI / 2 + 0.14;
+  ankleCollarRim.position.set(0, 0.228, -0.118);
+  ankleCollarRim.userData = { garmentId };
+  shoe.add(ankleCollarRim);
+
+  // 6. Embossed Collector Heel Pull-Tab
+  const heelTab = new THREE.Mesh(
+    new THREE.BoxGeometry(0.068, 0.065, 0.022),
+    brassMat,
+  );
+  heelTab.position.set(0, 0.195, -0.21);
+  heelTab.userData = { garmentId };
+  shoe.add(heelTab);
+
+  // 7. Gusseted Padded Tongue + 8. Woven Brand Tongue Patch
+  const tongue = new THREE.Mesh(
+    new THREE.BoxGeometry(0.114, 0.145, 0.034),
+    sailMidsoleMat,
+  );
+  tongue.position.set(0, 0.192, 0.01);
+  tongue.rotation.x = -0.32;
+  tongue.userData = { garmentId };
+  shoe.add(tongue);
+
+  const tonguePatch = new THREE.Mesh(
+    new THREE.BoxGeometry(0.064, 0.038, 0.038),
+    hermesTagMat,
+  );
+  tonguePatch.position.set(0, 0.238, -0.008);
+  tonguePatch.rotation.x = -0.32;
+  tonguePatch.userData = { garmentId };
+  shoe.add(tonguePatch);
+
+  // 9. Angled Eyestay Panels + 10. Five Criss-Cross 3D Flat Shoelace Strands & Brass Aglets
+  [-0.015, 0.015, 0.045, 0.075, 0.105].forEach((laceZ, lIdx) => {
+    const laceBar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.132, 0.014, 0.018),
+      sailMidsoleMat,
+    );
+    laceBar.position.set(0, 0.188 - lIdx * 0.014, laceZ);
+    laceBar.rotation.z = lIdx % 2 === 0 ? 0.08 : -0.08;
+    laceBar.userData = { garmentId };
+    shoe.add(laceBar);
+
+    [-0.068, 0.068].forEach((eyeX) => {
+      const eyelet = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.009, 0.009, 0.016, 8),
+        brassMat,
+      );
+      eyelet.rotation.z = Math.PI / 2;
+      eyelet.position.set(eyeX, 0.184 - lIdx * 0.014, laceZ);
+      eyelet.userData = { garmentId };
+      shoe.add(eyelet);
+    });
+  });
+
+  // 11. Signature Lateral & Medial Reverse Swoosh / Collector Overlay Panels
+  const swooshCheck = new THREE.Mesh(
+    new THREE.BoxGeometry(0.198, 0.036, 0.205),
+    sneakerAccentMat,
+  );
+  swooshCheck.position.set(0, 0.126, 0.005);
+  swooshCheck.rotation.x = -0.15;
+  swooshCheck.userData = { garmentId };
+  shoe.add(swooshCheck);
+
+  const swooshTail = new THREE.Mesh(
+    new THREE.BoxGeometry(0.202, 0.052, 0.048),
+    sneakerAccentMat,
+  );
+  swooshTail.position.set(0, 0.144, 0.085);
+  swooshTail.rotation.x = 0.42;
+  swooshTail.userData = { garmentId };
+  shoe.add(swooshTail);
+
+  // 12. Internal Cedar/Brass Shoe Tree Knob & Hanging Deadstock Collector Authenticity Tag
+  const shoeTreeKnob = new THREE.Mesh(
+    new THREE.SphereGeometry(0.024, 12, 12),
+    brassMat,
+  );
+  shoeTreeKnob.position.set(0, 0.255, -0.125);
+  shoeTreeKnob.userData = { garmentId };
+  shoe.add(shoeTreeKnob);
+
+  if (!isLeftShoe) {
+    const authenticityTag = new THREE.Mesh(
+      new THREE.BoxGeometry(0.012, 0.075, 0.048),
+      hermesTagMat,
+    );
+    authenticityTag.position.set(0.108, 0.135, 0.02);
+    authenticityTag.rotation.z = -0.28;
+    authenticityTag.userData = { garmentId };
+    shoe.add(authenticityTag);
+  }
+
+  return shoe;
+}
+
+/**
  * Builds a photorealistic 3D Boutique Rail Garment Group:
  * - Real 3D curved champagne-brass / chrome hanger hook engaging the 3D rail
+ * - Specialized 3D Luxury Boutique Trouser Clamp for 'trousers'
+ * - Specialized 3D 2-Tier Glossy Glass Box Display Variant for 'footwear' / 'sneaker-box'
  * - Volumetric 3D relief shell with sculpted vertical depth folds paired with studio cutout photography
  */
+/** Show the supplied photo on its fixture; a generic sculpt is only an illustrative fallback. */
+function attachFixturePhoto(
+  root: THREE.Group, garment: GarmentPiece, modeled: THREE.Object3D[],
+  width: number, height: number, y: number, z: number,
+) {
+  const hasPhoto = Boolean(garment.frontImageUrl || garment.imageUrl);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff, transparent: true, alphaTest: 0.08, side: THREE.DoubleSide,
+    roughness: 0.72, depthWrite: true,
+  });
+  const photo = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  photo.position.set(0, y, z);
+  photo.userData = { garmentId: garment.id, source: 'owner-photo' };
+  photo.visible = false;
+  root.add(photo);
+  if (hasPhoto && !garment.isSample) modeled.forEach(object => { object.visible = false; });
+  return {
+    root,
+    applyCutoutTexture: (texture: THREE.CanvasTexture) => {
+      // Sample inventory intentionally demonstrates the modeled fixtures.
+      if (garment.isSample) return;
+      modeled.forEach(object => { object.visible = false; });
+      const image = texture.image as { width?: number; height?: number };
+      const aspect = (image.width || 1) / (image.height || 1);
+      // Cutouts retain the source aspect ratio; the square scan canvas includes transparent padding.
+      const fittedHeight = Math.min(height, width / aspect);
+      photo.scale.set(fittedHeight * aspect / width, fittedHeight / height, 1);
+      material.map = texture;
+      material.needsUpdate = true;
+      photo.visible = true;
+    },
+    showPlainShell: () => {
+      // Do not invent a replacement product when an owner's photo fails to load.
+      if (hasPhoto && !garment.isSample) return;
+      modeled.forEach(object => { object.visible = true; });
+    },
+  };
+}
+
 function buildBoutiqueGarmentGroup(
   garment: GarmentPiece,
   fabricBump: THREE.Texture,
@@ -352,7 +776,8 @@ function buildBoutiqueGarmentGroup(
   showPlainShell: () => void;
 } {
   const root = new THREE.Group();
-  root.userData = { garmentId: garment.id };
+  const displayVariantInfo = resolve3DDisplayVariant(garment);
+  root.userData = { garmentId: garment.id, displayVariant: displayVariantInfo.variant };
 
   // 1. 3D Metal Hanger Hook looping over the horizontal boutique rail at y = 1.65
   const hookCurve = new THREE.CatmullRomCurve3([
@@ -379,12 +804,662 @@ function buildBoutiqueGarmentGroup(
   neckCollar.userData = { garmentId: garment.id };
   root.add(neckCollar);
 
-  // 1b. Sculpted 3D Sartorial Walnut & Brass Shoulder Hanger Wings (visible in 3D orbit & front views)
   const hangerWoodMat = new THREE.MeshStandardMaterial({
     color: garment.hangerType === 'matte-black' ? 0x222326 : 0x5a3821,
-    roughness: 0.36,
+    roughness: 0.34,
     metalness: 0.08,
   });
+
+  // ============================================================================
+  // VARIANT A: SPECIALIZED 3D LUXURY BOUTIQUE TROUSER CLAMP & TAILORED TROUSERS
+  // ============================================================================
+  if (displayVariantInfo.variant === 'trouser-clamp') {
+    const clampRigGroup = new THREE.Group();
+    clampRigGroup.name = 'LuxuryBoutiqueTrouserClamp';
+
+    const merinoFeltMat = new THREE.MeshStandardMaterial({
+      color: 0xe6dfd3,
+      roughness: 0.92,
+      metalness: 0.01,
+    });
+    const suedeGripPadMat = new THREE.MeshStandardMaterial({
+      color: 0x2c2520,
+      roughness: 0.88,
+      metalness: 0.02,
+    });
+
+    // 1. Dual-Beam Contoured Walnut Clamp Press Jaws (Front & Rear Jaws sandwiching Merino Felt Liner)
+    [-0.026, 0.026].forEach((jawZ) => {
+      const walnutJaw = new THREE.Mesh(
+        new THREE.BoxGeometry(0.74, 0.064, 0.032),
+        hangerWoodMat,
+      );
+      walnutJaw.position.set(0, 1.24, jawZ);
+      walnutJaw.castShadow = true;
+      walnutJaw.userData = { garmentId: garment.id };
+      clampRigGroup.add(walnutJaw);
+
+      // Beveled Champagne-Brass Top Rail Crown on each jaw
+      const brassJawCrown = new THREE.Mesh(
+        new THREE.BoxGeometry(0.75, 0.015, 0.036),
+        brassMat,
+      );
+      brassJawCrown.position.set(0, 1.278, jawZ);
+      brassJawCrown.userData = { garmentId: garment.id };
+      clampRigGroup.add(brassJawCrown);
+    });
+
+    // Plush Merino Felt Cushion Strip compressed between the dual walnut jaws
+    const feltCushionLiner = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.056, 0.022),
+      merinoFeltMat,
+    );
+    feltCushionLiner.position.set(0, 1.234, 0);
+    feltCushionLiner.userData = { garmentId: garment.id };
+    clampRigGroup.add(feltCushionLiner);
+
+    // Left & Right Machined Brass Clamp End-Caps & Guide Pins
+    [-0.372, 0.372].forEach((endX) => {
+      const endCap = new THREE.Mesh(
+        new THREE.BoxGeometry(0.024, 0.072, 0.092),
+        brassMat,
+      );
+      endCap.position.set(endX, 1.242, 0);
+      endCap.userData = { garmentId: garment.id };
+      clampRigGroup.add(endCap);
+    });
+
+    // 2. Center Eccentric Brass Cam-Lock Lever & Savile Row Engraved Nameplate
+    const camHousing = new THREE.Mesh(
+      new THREE.BoxGeometry(0.115, 0.082, 0.098),
+      brassMat,
+    );
+    camHousing.position.set(0, 1.252, 0);
+    camHousing.userData = { garmentId: garment.id };
+    clampRigGroup.add(camHousing);
+
+    const clampNameplate = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.22, 0.044),
+      new THREE.MeshBasicMaterial({
+        map: getEngravedBrassPlaqueTexture(
+          `${garment.code} · ${garment.brand}`,
+          'SAVILE ROW CLAMP',
+        ),
+      }),
+    );
+    clampNameplate.position.set(0, 1.24, 0.051);
+    clampNameplate.userData = { garmentId: garment.id };
+    clampRigGroup.add(clampNameplate);
+
+    // Pivoting Cam-Lock Tension Lever Arm & Knurled Brass Barrel
+    const camLeverArm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.011, 0.014, 0.13, 12),
+      chromeMat,
+    );
+    camLeverArm.position.set(0.045, 1.31, 0.042);
+    camLeverArm.rotation.z = -0.58;
+    camLeverArm.userData = { garmentId: garment.id };
+    clampRigGroup.add(camLeverArm);
+
+    const camLeverKnob = new THREE.Mesh(
+      new THREE.SphereGeometry(0.02, 12, 12),
+      brassMat,
+    );
+    camLeverKnob.position.set(0.092, 1.35, 0.042);
+    camLeverKnob.userData = { garmentId: garment.id };
+    clampRigGroup.add(camLeverKnob);
+
+    // 3. Dual Sliding Spring-Loaded Boutique Pinch Clamps (Left & Right Mechanical Clips)
+    [-0.225, 0.225].forEach((clipX) => {
+      const clipAssembly = new THREE.Group();
+      clipAssembly.position.set(clipX, 1.21, 0);
+
+      // Sliding Upper Carriage Bracket wrapping the clamp bar
+      const slideCarriage = new THREE.Mesh(
+        new THREE.BoxGeometry(0.082, 0.088, 0.098),
+        chromeMat,
+      );
+      slideCarriage.position.set(0, 0.032, 0);
+      slideCarriage.userData = { garmentId: garment.id };
+      clipAssembly.add(slideCarriage);
+
+      // Coiled Spring Barrel Axis
+      const springBarrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.018, 0.018, 0.086, 14),
+        brassMat,
+      );
+      springBarrel.rotation.z = Math.PI / 2;
+      springBarrel.position.set(0, -0.012, 0.046);
+      springBarrel.userData = { garmentId: garment.id };
+      clipAssembly.add(springBarrel);
+
+      // Articulated Front & Rear Pinch Jaws gripping the trouser waistband
+      [-0.036, 0.036].forEach((jZ) => {
+        const pinchJaw = new THREE.Mesh(
+          new THREE.BoxGeometry(0.076, 0.105, 0.018),
+          chromeMat,
+        );
+        pinchJaw.position.set(0, -0.055, jZ);
+        pinchJaw.userData = { garmentId: garment.id };
+        clipAssembly.add(pinchJaw);
+      });
+
+      // Suede Cushion Grip Pad at bottom of pinch jaw
+      const suedePad = new THREE.Mesh(
+        new THREE.BoxGeometry(0.078, 0.036, 0.092),
+        suedeGripPadMat,
+      );
+      suedePad.position.set(0, -0.095, 0);
+      suedePad.userData = { garmentId: garment.id };
+      clipAssembly.add(suedePad);
+
+      // Angled Thumb-Release Lever Tab on top of pinch clamp
+      const thumbTab = new THREE.Mesh(
+        new THREE.BoxGeometry(0.058, 0.048, 0.014),
+        brassMat,
+      );
+      thumbTab.position.set(0, 0.068, 0.048);
+      thumbTab.rotation.x = 0.38;
+      thumbTab.userData = { garmentId: garment.id };
+      clipAssembly.add(thumbTab);
+
+      clampRigGroup.add(clipAssembly);
+    });
+
+    root.add(clampRigGroup);
+
+    const fixtureChildren = new Set(root.children);
+    // 4. Hyper-Sculpted 3D Tailored Pleated Trousers (Waistband, Belt, Double Pleats, Creased Wide Legs & Cuffs)
+    const isDenim =
+      garment.code === 'P2' ||
+      garment.name.toLowerCase().includes('denim') ||
+      garment.fabricLabel.toLowerCase().includes('selvedge');
+    const trouserTex = getTailoredTrouserTexture(
+      garment.colorHex,
+      garment.secondaryColorHex || garment.colorHex,
+      isDenim,
+    );
+    const trouserColor = new THREE.Color(garment.colorHex);
+    const trouserMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: trouserTex,
+      roughness: isDenim ? 0.74 : 0.62,
+      metalness: 0.05,
+      bumpMap: fabricBump,
+      bumpScale: 0.009,
+    });
+    const creaseRidgeMat = new THREE.MeshStandardMaterial({
+      color: trouserColor.clone().multiplyScalar(1.22),
+      roughness: 0.46,
+      metalness: 0.08,
+    });
+    const beltLeatherMat = new THREE.MeshStandardMaterial({
+      color: isDenim ? 0x3b2314 : 0x1e1c1a,
+      roughness: 0.38,
+      metalness: 0.12,
+    });
+
+    // Tailored High-Waisted Waistband
+    const waistband = new THREE.Mesh(
+      new THREE.BoxGeometry(0.65, 0.135, 0.175),
+      trouserMat,
+    );
+    waistband.position.set(0, 1.09, 0);
+    waistband.castShadow = true;
+    waistband.userData = { garmentId: garment.id };
+    root.add(waistband);
+
+    // Self-Fabric / Saddle Leather Belt + Sculpted Brass Frame Buckle & 6 Belt Loops
+    const beltStrap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.662, 0.052, 0.184),
+      beltLeatherMat,
+    );
+    beltStrap.position.set(0, 1.09, 0);
+    beltStrap.userData = { garmentId: garment.id };
+    root.add(beltStrap);
+
+    const brassBeltBuckle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.078, 0.076, 0.194),
+      brassMat,
+    );
+    brassBeltBuckle.position.set(0, 1.09, 0);
+    brassBeltBuckle.userData = { garmentId: garment.id };
+    root.add(brassBeltBuckle);
+
+    [-0.27, -0.14, 0.14, 0.27].forEach((loopX) => {
+      const beltLoop = new THREE.Mesh(
+        new THREE.BoxGeometry(0.022, 0.142, 0.19),
+        trouserMat,
+      );
+      beltLoop.position.set(loopX, 1.09, 0);
+      beltLoop.userData = { garmentId: garment.id };
+      root.add(beltLoop);
+    });
+
+    // Sculpted Left & Right Wide-Leg Pleated Trouser Columns with Natural Drape & Knife Crease
+    [-0.162, 0.162].forEach((legX, legIdx) => {
+      const legGroup = new THREE.Group();
+      legGroup.position.set(legX, 0.04, legIdx === 0 ? 0.012 : -0.012);
+
+      // Custom Vertex-Deformed Sartorial Trouser Leg Column
+      const legGeo = new THREE.CylinderGeometry(0.136, 0.156, 2.04, 28, 24);
+      const lPos = legGeo.attributes.position;
+      for (let i = 0; i < lPos.count; i++) {
+        const vx = lPos.getX(i);
+        const vy = lPos.getY(i);
+        const vz = lPos.getZ(i);
+        // Flatten depth slightly while pinching front/rear into a crisp Savile Row pressed crease
+        const frontBackFactor = Math.pow(Math.abs(vz) / 0.156, 1.35);
+        const pleatFlare = vy > 0.35 ? Math.sin(vx * 24) * 0.008 : 0;
+        const kneeDrapeZ = Math.sin((vy + 1.0) * 2.2) * 0.012;
+        lPos.setX(i, vx * 1.08 + pleatFlare);
+        lPos.setZ(
+          i,
+          vz * 0.72 + Math.sign(vz) * frontBackFactor * 0.028 + kneeDrapeZ,
+        );
+      }
+      legGeo.computeVertexNormals();
+
+      const legColumn = new THREE.Mesh(legGeo, trouserMat);
+      legColumn.castShadow = true;
+      legColumn.receiveShadow = true;
+      legColumn.userData = { garmentId: garment.id };
+      legGroup.add(legColumn);
+
+      // Double Forward Savile Row Waist Pleat Folds at Top of Leg
+      [-0.038, 0.032].forEach((pleatX, pIdx) => {
+        const pleatFold = new THREE.Mesh(
+          new THREE.BoxGeometry(0.026, 0.62 - pIdx * 0.12, 0.195),
+          creaseRidgeMat,
+        );
+        pleatFold.position.set(pleatX, 0.66, 0.012);
+        pleatFold.rotation.z = legIdx === 0 ? 0.03 : -0.03;
+        pleatFold.userData = { garmentId: garment.id };
+        legGroup.add(pleatFold);
+      });
+
+      // Full-Length Front & Back Pressed Knife-Edge Crease Ridges
+      const frontCrease = new THREE.Mesh(
+        new THREE.BoxGeometry(0.022, 2.02, 0.232),
+        creaseRidgeMat,
+      );
+      frontCrease.position.set(0, 0, 0.008);
+      frontCrease.userData = { garmentId: garment.id };
+      legGroup.add(frontCrease);
+
+      // Weighted 4.5cm Tailored Turn-Up Ankle Cuff
+      const ankleCuff = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.162, 0.162, 0.11, 24),
+        trouserMat,
+      );
+      ankleCuff.scale.set(1.09, 1, 0.76);
+      ankleCuff.position.set(0, -0.96, 0.01);
+      ankleCuff.userData = { garmentId: garment.id };
+      legGroup.add(ankleCuff);
+
+      // Raw Japanese Selvedge Denim Outseam Red/White ID Tick on Turn-Up Cuff (for Denim Trousers)
+      if (isDenim) {
+        const selvedgeTick = new THREE.Mesh(
+          new THREE.BoxGeometry(0.024, 0.114, 0.042),
+          new THREE.MeshBasicMaterial({ color: 0xfaf8f5 }),
+        );
+        selvedgeTick.position.set(
+          legIdx === 0 ? -0.172 : 0.172,
+          -0.96,
+          0.01,
+        );
+        selvedgeTick.userData = { garmentId: garment.id };
+        legGroup.add(selvedgeTick);
+
+        const redLine = new THREE.Mesh(
+          new THREE.BoxGeometry(0.028, 0.116, 0.012),
+          new THREE.MeshBasicMaterial({ color: 0xd93829 }),
+        );
+        redLine.position.set(legIdx === 0 ? -0.173 : 0.173, -0.96, 0.01);
+        redLine.userData = { garmentId: garment.id };
+        legGroup.add(redLine);
+      }
+
+      root.add(legGroup);
+    });
+
+    const hitProxy = new THREE.Mesh(
+      new THREE.BoxGeometry(0.84, 2.45, 0.52),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    hitProxy.position.set(0, 0.25, 0);
+    hitProxy.layers.set(1);
+    hitProxy.userData = { garmentId: garment.id };
+    root.add(hitProxy);
+
+    const modeledGarment = root.children.filter(child => !fixtureChildren.has(child) && child !== hitProxy);
+    return attachFixturePhoto(root, garment, modeledGarment, 0.72, 2.18, 0.04, 0.16);
+
+  }
+
+  // ============================================================================
+  // VARIANT B: SPECIALIZED 3D 'GLOSSY GLASS BOX' DISPLAY VARIANT FOR FOOTWEAR
+  // ============================================================================
+  if (displayVariantInfo.variant === 'glossy-glass-box') {
+    const modeledShoes: THREE.Object3D[] = [];
+    const glassVaultRig = new THREE.Group();
+    glassVaultRig.name = 'GlossyGlassSneakerBoxVariant';
+
+    // 1. Machined Champagne-Brass Suspension Yoke & Dual Turnbuckle Cable Rods
+    const topSuspensionYoke = new THREE.Mesh(
+      new THREE.BoxGeometry(0.82, 0.048, 0.062),
+      brassMat,
+    );
+    topSuspensionYoke.position.set(0, 1.26, 0);
+    topSuspensionYoke.userData = { garmentId: garment.id };
+    glassVaultRig.add(topSuspensionYoke);
+
+    [-0.365, 0.365].forEach((rodX) => {
+      const cableRod = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.013, 0.013, 2.16, 14),
+        brassMat,
+      );
+      cableRod.position.set(rodX, 0.19, 0);
+      cableRod.userData = { garmentId: garment.id };
+      glassVaultRig.add(cableRod);
+
+      // Knurled Brass Turnbuckle Tensioners at Upper & Lower Case Mounts
+      [1.21, 0.82, -0.08].forEach((tbY) => {
+        const turnbuckle = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.022, 0.022, 0.055, 12),
+          chromeMat,
+        );
+        turnbuckle.position.set(rodX, tbY, 0);
+        turnbuckle.userData = { garmentId: garment.id };
+        glassVaultRig.add(turnbuckle);
+      });
+    });
+
+    // Optical High-Gloss Acrylic/Glass Materials
+    const glossyGlassEnclosureMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf2f8ff,
+      transparent: true,
+      opacity: 0.32,
+      roughness: 0.02,
+      metalness: 0.08,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.01,
+      reflectivity: 1.0,
+      depthWrite: false,
+    });
+
+    const frontDropDoorMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      map: getGlossyGlassDoorTexture(),
+      transparent: true,
+      opacity: 0.78,
+      roughness: 0.02,
+      metalness: 0.1,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.01,
+      reflectivity: 1.0,
+      depthWrite: false,
+    });
+
+    const primaryUpperColor = new THREE.Color(garment.colorHex);
+    const accentColor = new THREE.Color(
+      garment.secondaryColorHex || '#F37021',
+    );
+    const sneakerUpperMat = new THREE.MeshStandardMaterial({
+      color: primaryUpperColor,
+      roughness: 0.34,
+      metalness: 0.06,
+    });
+    const sneakerAccentMat = new THREE.MeshStandardMaterial({
+      color: accentColor,
+      roughness: 0.28,
+      metalness: 0.14,
+    });
+    const sailMidsoleMat = new THREE.MeshStandardMaterial({
+      color: 0xf7f2e7,
+      roughness: 0.42,
+      metalness: 0.02,
+    });
+    const gumOutsoleMat = new THREE.MeshStandardMaterial({
+      color: 0xb97e4a,
+      roughness: 0.56,
+      metalness: 0.03,
+    });
+    const obsidianPlinthMat = new THREE.MeshStandardMaterial({
+      color: 0x161618,
+      roughness: 0.18,
+      metalness: 0.22,
+    });
+    const hermesTagMat = new THREE.MeshStandardMaterial({
+      color: 0xf37021,
+      roughness: 0.32,
+      metalness: 0.08,
+    });
+    const ledGlowMat = new THREE.MeshBasicMaterial({ color: 0xfff3d1 });
+
+    // 2. Build Two Stacked High-End Glossy Glass Collector Sneaker Boxes
+    // Tier 0 (y = 0.54): Upper Hero Presentation Vitrine with Canted Levitation Riser
+    // Tier 1 (y = -0.36): Lower Deadstock Archive Vitrine with Collector Box & Hygrometer
+    [0.54, -0.36].forEach((caseY, tierIdx) => {
+      const vitrine = new THREE.Group();
+      vitrine.position.set(0, caseY, 0);
+
+      // A. Obsidian Lacquer Collector Base Plinth + Recessed Gold LED Underglow
+      const plinth = new THREE.Mesh(
+        new THREE.BoxGeometry(0.82, 0.072, 0.54),
+        obsidianPlinthMat,
+      );
+      plinth.position.set(0, -0.265, 0);
+      plinth.userData = { garmentId: garment.id };
+      vitrine.add(plinth);
+
+      // Acrylic Mirror Reflector Deck on Top of Plinth
+      const mirrorDeck = new THREE.Mesh(
+        new THREE.BoxGeometry(0.76, 0.012, 0.48),
+        chromeMat,
+      );
+      mirrorDeck.position.set(0, -0.224, 0);
+      mirrorDeck.userData = { garmentId: garment.id };
+      vitrine.add(mirrorDeck);
+
+      // Engraved Champagne-Brass Collector Provenance Plaque on Front of Plinth
+      const plaqueMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.34, 0.054),
+        new THREE.MeshBasicMaterial({
+          map: getEngravedBrassPlaqueTexture(
+            `${garment.code} · ${garment.brand}`,
+            tierIdx === 0
+              ? `${garment.code} · DISPLAY #01`
+              : 'ILLUSTRATIVE DISPLAY',
+          ),
+        }),
+      );
+      plaqueMesh.position.set(0, -0.265, 0.273);
+      plaqueMesh.userData = { garmentId: garment.id };
+      vitrine.add(plaqueMesh);
+
+      // B. Top Anodized Canopy Crown + Recessed 3000K Museum LED Light Strip
+      const topCanopyRim = new THREE.Mesh(
+        new THREE.BoxGeometry(0.81, 0.032, 0.53),
+        obsidianPlinthMat,
+      );
+      topCanopyRim.position.set(0, 0.265, 0);
+      topCanopyRim.userData = { garmentId: garment.id };
+      vitrine.add(topCanopyRim);
+
+      const ledCeilingStrip = new THREE.Mesh(
+        new THREE.BoxGeometry(0.72, 0.018, 0.42),
+        ledGlowMat,
+      );
+      ledCeilingStrip.position.set(0, 0.244, 0);
+      ledCeilingStrip.userData = { garmentId: garment.id };
+      vitrine.add(ledCeilingStrip);
+
+      // C. Interior Collector Presentation Hardware + 12-Part Sculpted 3D Sneakers
+      if (tierIdx === 0) {
+        // Upper Hero Vitrine: Canted Clear-Acrylic & Brass Levitation Riser under Right Sneaker
+        const riserPillar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.022, 0.028, 0.065, 14),
+          brassMat,
+        );
+        riserPillar.position.set(0.16, -0.19, 0.0);
+        riserPillar.userData = { garmentId: garment.id };
+        vitrine.add(riserPillar);
+
+        const riserPlatform = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 0.014, 0.38),
+          glossyGlassEnclosureMat,
+        );
+        riserPlatform.position.set(0.16, -0.155, 0.0);
+        riserPlatform.rotation.x = 0.14;
+        riserPlatform.rotation.y = -0.28;
+        riserPlatform.userData = { garmentId: garment.id };
+        vitrine.add(riserPlatform);
+
+        // Left Sneaker sitting flush on mirror deck
+        const leftShoe = buildSculptedLuxurySneakerMesh(
+          garment.id,
+          sneakerUpperMat,
+          sneakerAccentMat,
+          sailMidsoleMat,
+          gumOutsoleMat,
+          brassMat,
+          hermesTagMat,
+          true,
+        );
+        leftShoe.position.set(-0.165, -0.218, 0.02);
+        leftShoe.rotation.y = 0.32;
+        vitrine.add(leftShoe);
+        modeledShoes.push(leftShoe);
+
+        // Right Hero Sneaker elevated on canted collector riser
+        const rightShoe = buildSculptedLuxurySneakerMesh(
+          garment.id,
+          sneakerUpperMat,
+          sneakerAccentMat,
+          sailMidsoleMat,
+          gumOutsoleMat,
+          brassMat,
+          hermesTagMat,
+          false,
+        );
+        rightShoe.position.set(0.16, -0.145, 0.0);
+        rightShoe.rotation.x = 0.14;
+        rightShoe.rotation.y = -0.32;
+        vitrine.add(rightShoe);
+        modeledShoes.push(rightShoe);
+      } else {
+        // Lower Archive Vitrine: Miniature Collector Shoebox on Left + Deadstock Sneaker on Right + Brass Hygrometer
+        const collectorShoeBox = new THREE.Mesh(
+          new THREE.BoxGeometry(0.28, 0.14, 0.36),
+          hermesTagMat,
+        );
+        collectorShoeBox.position.set(-0.18, -0.148, -0.02);
+        collectorShoeBox.rotation.y = 0.18;
+        collectorShoeBox.userData = { garmentId: garment.id };
+        vitrine.add(collectorShoeBox);
+        modeledShoes.push(collectorShoeBox);
+
+        const boxLid = new THREE.Mesh(
+          new THREE.BoxGeometry(0.292, 0.032, 0.372),
+          obsidianPlinthMat,
+        );
+        boxLid.position.set(-0.18, -0.068, -0.02);
+        boxLid.rotation.y = 0.18;
+        boxLid.userData = { garmentId: garment.id };
+        vitrine.add(boxLid);
+        modeledShoes.push(boxLid);
+
+        const archiveShoe = buildSculptedLuxurySneakerMesh(
+          garment.id,
+          sneakerUpperMat,
+          sneakerAccentMat,
+          sailMidsoleMat,
+          gumOutsoleMat,
+          brassMat,
+          hermesTagMat,
+          false,
+        );
+        archiveShoe.position.set(0.155, -0.218, 0.02);
+        archiveShoe.rotation.y = -0.45;
+        vitrine.add(archiveShoe);
+        modeledShoes.push(archiveShoe);
+
+        // Brass Humidity / Desiccator Gauge Disc inside lower corner
+        const hygrometer = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.032, 0.032, 0.016, 16),
+          brassMat,
+        );
+        hygrometer.rotation.x = Math.PI / 2;
+        hygrometer.position.set(-0.31, 0.16, 0.22);
+        hygrometer.userData = { garmentId: garment.id };
+        vitrine.add(hygrometer);
+      }
+
+      // D. Crystal-Clear Glossy Glass Enclosure Box + Optical Drop-Front Door
+      const glassBox = new THREE.Mesh(
+        new THREE.BoxGeometry(0.78, 0.49, 0.5),
+        glossyGlassEnclosureMat,
+      );
+      glassBox.position.set(0, 0.01, 0);
+      glassBox.renderOrder = 2;
+      glassBox.userData = { garmentId: garment.id };
+      vitrine.add(glassBox);
+
+      // Dedicated Front Drop-Front Optical Glass Door with Specular Softbox Streaks & Etching
+      const frontDoorPane = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.76, 0.47),
+        frontDropDoorMat,
+      );
+      frontDoorPane.position.set(0, 0.01, 0.254);
+      frontDoorPane.renderOrder = 3;
+      frontDoorPane.userData = { garmentId: garment.id };
+      vitrine.add(frontDoorPane);
+
+      // Top-Center Magnetic Chrome & Brass Drop-Front Door Clasp Handle
+      const magneticClaspLatch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.026, 0.024),
+        brassMat,
+      );
+      magneticClaspLatch.position.set(0, 0.225, 0.262);
+      magneticClaspLatch.userData = { garmentId: garment.id };
+      vitrine.add(magneticClaspLatch);
+
+      // 4 Vertical Champagne-Brass Corner Frame Pillars on the Glossy Glass Box
+      [
+        [-0.39, -0.25],
+        [0.39, -0.25],
+        [-0.39, 0.25],
+        [0.39, 0.25],
+      ].forEach(([cx, cz]) => {
+        const cornerPost = new THREE.Mesh(
+          new THREE.BoxGeometry(0.02, 0.52, 0.02),
+          brassMat,
+        );
+        cornerPost.position.set(cx, 0.01, cz);
+        cornerPost.userData = { garmentId: garment.id };
+        vitrine.add(cornerPost);
+      });
+
+      glassVaultRig.add(vitrine);
+    });
+
+    root.add(glassVaultRig);
+
+    const hitProxy = new THREE.Mesh(
+      new THREE.BoxGeometry(0.88, 2.42, 0.6),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    hitProxy.position.set(0, 0.25, 0);
+    hitProxy.layers.set(1);
+    hitProxy.userData = { garmentId: garment.id };
+    root.add(hitProxy);
+
+    return attachFixturePhoto(root, garment, modeledShoes, 0.68, 0.43, 0.55, 0.29);
+
+  }
+
+  // 1c. Standard Upper Garments: Sculpted 3D Sartorial Walnut & Brass Shoulder Hanger Wings
   const shoulderWingGeo = new THREE.CylinderGeometry(0.018, 0.028, 0.46, 12);
   const leftWingArm = new THREE.Mesh(shoulderWingGeo, hangerWoodMat);
   leftWingArm.position.set(-0.2, 1.23, 0);
@@ -948,7 +2023,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
     lowerCredenzaTop.position.set(0, -1.25, -1.09);
     vaultGroup.add(lowerCredenzaTop);
 
-    // Sculpted 3D Leather Chelsea Boots & Loafers on the Lower Credenza
+    // 6-Bay Illuminated Glossy Glass Limited-Edition Sneaker & Boot Collector Vitrines on the Lower Credenza
     const leatherDarkMat = new THREE.MeshStandardMaterial({
       color: 0x2b1d16,
       roughness: 0.28,
@@ -959,32 +2034,87 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
       roughness: 0.32,
       metalness: 0.08,
     });
-    [-3.6, -2.7, 2.7, 3.6].forEach((shoeX, sIdx) => {
+    const collectorCreamMat = new THREE.MeshStandardMaterial({
+      color: 0xf4efe6,
+      roughness: 0.34,
+      metalness: 0.05,
+    });
+    const vaultGlassCaseMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf2f8ff,
+      transparent: true,
+      opacity: 0.35,
+      roughness: 0.03,
+      metalness: 0.08,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+      reflectivity: 0.98,
+      depthWrite: false,
+    });
+
+    [-3.8, -2.3, -0.8, 0.8, 2.3, 3.8].forEach((shoeX, sIdx) => {
       const pairGroup = new THREE.Group();
-      pairGroup.position.set(shoeX, -1.22, -0.98);
-      const shoeMat = sIdx % 2 === 0 ? leatherDarkMat : leatherCognacMat;
-      [-0.11, 0.11].forEach((offsetX) => {
-        const bootShaft = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.055, 0.065, 0.22, 12),
-          shoeMat,
+      pairGroup.position.set(shoeX, -1.22, -0.94);
+
+      const shoeMat =
+        sIdx % 3 === 0
+          ? collectorCreamMat
+          : sIdx % 3 === 1
+            ? leatherCognacMat
+            : leatherDarkMat;
+
+      // Collector Plinth & Internal LED Light Bar
+      const vitrineBase = new THREE.Mesh(
+        new THREE.BoxGeometry(0.66, 0.04, 0.44),
+        walnutMat,
+      );
+      vitrineBase.position.set(0, 0.02, 0);
+      pairGroup.add(vitrineBase);
+
+      const vitrineLed = new THREE.Mesh(
+        new THREE.BoxGeometry(0.58, 0.016, 0.34),
+        new THREE.MeshBasicMaterial({ color: 0xfff0c4 }),
+      );
+      vitrineLed.position.set(0, 0.36, 0);
+      pairGroup.add(vitrineLed);
+
+      [-0.13, 0.13].forEach((offsetX, sideIdx) => {
+        const midsole = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, 0.03, 0.31),
+          collectorCreamMat,
         );
-        bootShaft.position.set(offsetX, 0.11, -0.04);
-        pairGroup.add(bootShaft);
+        midsole.position.set(offsetX, 0.055, 0.02);
+        pairGroup.add(midsole);
 
         const bootVamp = new THREE.Mesh(
-          new THREE.BoxGeometry(0.12, 0.08, 0.28),
+          new THREE.BoxGeometry(0.13, 0.085, 0.27),
           shoeMat,
         );
-        bootVamp.position.set(offsetX, 0.04, 0.04);
+        bootVamp.position.set(offsetX, 0.1, 0.02);
         pairGroup.add(bootVamp);
 
-        const brassHeelAccent = new THREE.Mesh(
-          new THREE.BoxGeometry(0.122, 0.02, 0.09),
-          brassMat,
+        const bootShaft = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.055, 0.064, 0.16, 12),
+          sideIdx === 0 ? shoeMat : hermesMat,
         );
-        brassHeelAccent.position.set(offsetX, 0.01, -0.05);
-        pairGroup.add(brassHeelAccent);
+        bootShaft.position.set(offsetX, 0.15, -0.05);
+        pairGroup.add(bootShaft);
       });
+
+      // Glossy Glass Collector Box Enclosure around each Shoe Pair
+      const glassCube = new THREE.Mesh(
+        new THREE.BoxGeometry(0.64, 0.36, 0.42),
+        vaultGlassCaseMat,
+      );
+      glassCube.position.set(0, 0.2, 0);
+      pairGroup.add(glassCube);
+
+      const topBrassFrame = new THREE.Mesh(
+        new THREE.BoxGeometry(0.65, 0.018, 0.43),
+        brassMat,
+      );
+      topBrassFrame.position.set(0, 0.38, 0);
+      pairGroup.add(topBrassFrame);
+
       vaultGroup.add(pairGroup);
     });
 
@@ -1349,8 +2479,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
         total: simItems.length,
       });
     };
-    // Dense, tactile boutique rail spacing (0.56m between hangers)
-    const spacing = 0.56;
+    // Wider gallery spacing for a focused collection of glass cases and trousers.
 
     const rebuildGarmentMeshes = () => {
       while (garmentsContainer.children.length > 0) {
@@ -1363,13 +2492,22 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
             if (material !== brassMat && material !== chromeMat) materials.add(material);
           }
         });
-        materials.forEach((material) => material.dispose());
+        const cachedCutouts = new Set(cutoutTextureCache.values());
+        const ownedTextures = new Set<THREE.Texture>();
+        materials.forEach(material => {
+          for (const value of Object.values(material)) {
+            if (value instanceof THREE.Texture && value !== fabricBump && !cachedCutouts.has(value as THREE.CanvasTexture)) ownedTextures.add(value);
+          }
+          material.dispose();
+        });
+        ownedTextures.forEach(texture => texture.dispose());
         garmentsContainer.remove(prior);
       }
       simItems = [];
 
       const list = garmentsRef.current;
       setCutoutsReady({ ready: 0, total: list.length });
+      const spacing = railPieceSpacing(list.length);
       const totalWidth = (list.length - 1) * spacing;
 
       list.forEach((g, idx) => {
@@ -1419,12 +2557,18 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
         // Listed before its textures are requested, so a cached cut-out counts at once.
         simItems.push(simItem);
 
+        if (resolve3DDisplayVariant(g).variant !== 'sartorial-hanger' && (g.isSample || !(g.imageUrl || g.frontImageUrl))) {
+          onPhotoFailed();
+          return;
+        }
         const sideUrl =
           g.imageUrl ||
+          g.frontImageUrl ||
           STUDIO_CUTOUT_SOURCES[g.silhouette] ||
           STUDIO_CUTOUT_SOURCES.hoodie;
         const frontUrl =
           g.frontImageUrl ||
+          g.imageUrl ||
           FRONT_CUTOUT_SOURCES[g.silhouette] ||
           FRONT_CUTOUT_SOURCES.hoodie;
 
@@ -1529,6 +2673,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
       glideFromOffset = railOffsetRef.current;
       if (idx !== -1) {
+        const spacing = railPieceSpacing(list.length);
         const totalWidth = (list.length - 1) * spacing;
         glideToOffset = -totalWidth / 2 + idx * spacing;
       } else {
@@ -1595,6 +2740,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
           1.22,
           item.group.position.z + 0.2,
         );
+        camera.updateMatrixWorld();
         _projVec.project(camera);
 
         const screenX = ((_projVec.x + 1) / 2) * w;
@@ -1607,8 +2753,12 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
           screenY > 40;
 
         const heat = computeGarmentRotationHeat(g);
+        const fixture = resolve3DDisplayVariant(g);
 
         return {
+          displayVariant: fixture.variant,
+          displayFixtureBadge: fixture.shortBadge,
+          displayFixtureTitle: fixture.fixtureTitle,
           id: g.id,
           code: g.code,
           brand: g.brand,
@@ -1885,6 +3035,9 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
     requestRenderRef.current = requestRender;
     rebuildGarmentsRef.current = () => {
       rebuildGarmentMeshes();
+      stepSimulation();
+      renderer.render(scene, camera);
+      updateProjectedHangTags();
       requestRender();
     };
 
@@ -2307,6 +3460,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
                 type="button"
                 data-testid={`hang-tag-${tag.code}`}
                 data-hang-tag-id={tag.id}
+                data-display-variant={tag.displayVariant}
                 data-rotation-heat={tag.heatTier}
                 data-heatmap-active={showRotationHeatmap ? 'true' : 'false'}
                 data-tag-kind={tag.tagKind}
@@ -2396,6 +3550,9 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
                   }
                 >
                   <span>{tag.code}</span>
+                  {tag.displayVariant !== 'sartorial-hanger' && (
+                    <span title={tag.displayFixtureTitle} className="px-1 rounded bg-[#EEE5D7] text-[#685033] text-[8px]">{tag.displayFixtureBadge}</span>
+                  )}
                   {secondaryText && (
                     <>
                       <span aria-hidden="true">·</span>
@@ -2484,6 +3641,11 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
                       : 'Undecided'}
               </span>
             </div>
+            {resolve3DDisplayVariant(hoveredGarment).variant !== 'sartorial-hanger' && (
+              <div className="text-[9px] text-[#8C857B]">
+                {resolve3DDisplayVariant(hoveredGarment).shortBadge} · {hoveredGarment.isSample || !(hoveredGarment.imageUrl || hoveredGarment.frontImageUrl) ? 'Illustrative 3D model' : 'Your photo on a 3D fixture'}
+              </div>
+            )}
             <div className="text-xs font-semibold text-[#141413] truncate mt-0.5">
               {hoveredGarment.name}
             </div>

@@ -18,6 +18,8 @@ import {
   formatCurrency,
   getLatestObservation,
   isKeptAfterReload,
+  resolve3DDisplayVariant,
+  railPieceSpacing,
 } from './utils/ledgerLogic';
 import type { SceneViewMode } from './components/BoutiqueRail3D';
 import { ClosetGrid } from './components/ClosetGrid';
@@ -41,7 +43,7 @@ import { MarketPulse } from './components/MarketPulse';
 import { isPersonalPiece } from './utils/accountWardrobe';
 import { preparePiecePhotos, preparePhotoUrl } from './utils/photoUpload';
 
-type FilterTab = 'all' | 'KRW' | 'USD' | 'sell' | 'today';
+type FilterTab = 'all' | 'pants-shoes' | 'KRW' | 'USD' | 'sell' | 'today';
 
 function todayDate() {
   const now = new Date();
@@ -145,6 +147,7 @@ export default function App() {
   // Filtered garments displayed on the 3D rail
   const visibleGarments = useMemo(() => {
     return garments.filter((g) => {
+      if (filterTab === 'pants-shoes') return resolve3DDisplayVariant(g).variant !== 'sartorial-hanger';
       if (filterTab === 'KRW') return g.currency === 'KRW';
       if (filterTab === 'USD') return g.currency === 'USD';
       if (filterTab === 'sell') return g.lastDecision?.choice === 'sell';
@@ -271,7 +274,7 @@ export default function App() {
     setSelectedId(id);
     const idx = visibleGarments.findIndex((g) => g.id === id);
     if (idx !== -1) {
-      const spacing = 0.56;
+      const spacing = railPieceSpacing(visibleGarments.length);
       const totalWidth = (visibleGarments.length - 1) * spacing;
       const targetBaseX = -totalWidth / 2 + idx * spacing;
       animateRailOffsetTo(targetBaseX);
@@ -793,13 +796,14 @@ export default function App() {
               <div className="flex flex-wrap items-center justify-between gap-3 pt-1.5 border-t border-[#E7E2DA]">
                 {/* Filter Segmented Bar */}
                 <div
-                  className="flex items-center gap-1 bg-[#FAF8F5] p-1 rounded-lg border border-[#E7E2DA]"
+                  className="flex flex-wrap items-center gap-1 bg-[#FAF8F5] p-1 rounded-lg border border-[#E7E2DA] max-w-full"
                   role="group"
                   aria-label="Filter boutique rail"
                 >
                   {(
                     [
                       { id: 'all', label: `All (${garments.length})` },
+                      { id: 'pants-shoes', label: `Pants & Shoes (${garments.filter(g => resolve3DDisplayVariant(g).variant !== 'sartorial-hanger').length})` },
                       { id: 'KRW', label: 'KRW ₩' },
                       { id: 'USD', label: 'USD $' },
                       { id: 'sell', label: `Sell (${ledgerSummary.sellCount})` },
@@ -809,6 +813,8 @@ export default function App() {
                     <button
                       key={tab.id}
                       type="button"
+                      data-testid={`filter-tab-${tab.id}`}
+                      aria-pressed={filterTab === tab.id}
                       onClick={() => {
                         setFilterTab(tab.id);
                         setRailOffset(0);

@@ -5,7 +5,7 @@ import { stripJpegMetadata } from './closer/store/photos.ts';
 
 export const MAX_WARDROBE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-const SEED_IDS = new Set(['J1', 'J2', 'T1', 'J3', 'T2', 'B1', 'J4', 'K1', 'T3', 'S1']);
+const SEED_IDS = new Set(['J1', 'J2', 'T1', 'J3', 'T2', 'B1', 'J4', 'K1', 'T3', 'S1', 'P1', 'P2', 'F1', 'F2']);
 const PLATFORMS = ['KREAM', 'Karrot', 'Bunjang', 'Musinsa Used', 'Poshmark', 'eBay', 'Grailed', 'Depop', 'StockX', 'Vinted'];
 const CURRENCIES = ['KRW', 'USD'];
 export class InvalidWardrobe extends Error {}
@@ -98,8 +98,8 @@ function piece(raw: unknown): GarmentPiece {
   if (!/^(scan-|piece-custom-)[A-Za-z0-9_-]+$/.test(id) || SEED_IDS.has(id.toUpperCase()) || g.isSample !== false || g.scanMode === 'fake') return fail();
   const out: Record<string, unknown> = {
     id, code:string(g.code,40), name:string(g.name,300), brand:string(g.brand,200,true),
-    category:enumeration(g.category,['outerwear','blazer','hoodie','knitwear','shirt','trousers']),
-    silhouette:enumeration(g.silhouette,['overcoat','blazer','hoodie','blouson','knit','tee']),
+    category:enumeration(g.category,['outerwear','blazer','hoodie','knitwear','shirt','trousers','footwear']),
+    silhouette:enumeration(g.silhouette,['overcoat','blazer','hoodie','blouson','knit','tee','trousers','sneaker-box']),
     currency:enumeration(g.currency,CURRENCIES), purchasePrice:g.purchasePrice === null ? null : number(g.purchasePrice),
     isSample:false, fabricLabel:string(g.fabricLabel,300,true), hangerType:enumeration(g.hangerType,['walnut-brass','brushed-brass','matte-black']),
     wearsLast60Days:number(g.wearsLast60Days,100000,true),

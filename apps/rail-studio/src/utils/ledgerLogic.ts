@@ -1005,6 +1005,8 @@ export const SILHOUETTE_TO_CATEGORY: Record<GarmentSilhouette, GarmentCategory> 
   blouson: 'outerwear',
   knit: 'knitwear',
   tee: 'shirt',
+  trousers: 'trousers',
+  'sneaker-box': 'footwear',
 };
 
 export interface HangPieceInput {
@@ -1383,6 +1385,7 @@ export function describePhotoSource(garment: GarmentPiece): string {
   }
   const url = garment.frontImageUrl || garment.imageUrl || '';
   if (!url) return 'No photo · no model call';
+  if (garment.isSample) return 'Sample photo · no model call';
   if (url.startsWith('data:') || url.startsWith('blob:')) {
     return 'Your photo · no model call';
   }
@@ -1395,4 +1398,61 @@ export function describePhotoSource(garment: GarmentPiece): string {
  */
 export function isKeptAfterReload(garment: GarmentPiece): boolean {
   return garment.id.startsWith('scan-');
+}
+
+export type Boutique3DDisplayVariant =
+  | 'trouser-clamp'
+  | 'glossy-glass-box'
+  | 'sartorial-hanger';
+
+/** Shared by fixture placement and selection centering. */
+export function railPieceSpacing(count: number): number {
+  return count <= 5 ? 0.86 : 0.58;
+}
+
+export interface Boutique3DDisplayVariantInfo {
+  variant: Boutique3DDisplayVariant;
+  shortBadge: string;
+  fixtureTitle: string;
+  specLabel: string;
+}
+
+/**
+ * Resolves the specialized 3D Boutique Rail display fixture variant for a garment:
+ * - 'glossy-glass-box' for items with category 'footwear' or silhouette 'sneaker-box'
+ * - 'trouser-clamp' for items with category 'trousers' or silhouette 'trousers'
+ * - 'sartorial-hanger' for standard upper garments (overcoats, blazers, hoodies, knits, tees)
+ */
+export function resolve3DDisplayVariant(
+  garment: Pick<GarmentPiece, 'category' | 'silhouette'>,
+): Boutique3DDisplayVariantInfo {
+  if (
+    garment.category === 'footwear' ||
+    garment.silhouette === 'sneaker-box'
+  ) {
+    return {
+      variant: 'glossy-glass-box',
+      shortBadge: 'Glass Box',
+      fixtureTitle: '2-Tier Glossy Glass Collector Box',
+      specLabel:
+        'Drop-Front Clearcoat Acrylic · 3000K Museum LED · Canted Riser',
+    };
+  }
+
+  if (garment.category === 'trousers' || garment.silhouette === 'trousers') {
+    return {
+      variant: 'trouser-clamp',
+      shortBadge: 'Clamp Bar',
+      fixtureTitle: 'Savile Row Mechanical Trouser Clamp',
+      specLabel:
+        'Dual-Jaw Walnut Press · Merino Felt Liner · Brass Cam-Lock & Pinch Clips',
+    };
+  }
+
+  return {
+    variant: 'sartorial-hanger',
+    shortBadge: 'Hanger',
+    fixtureTitle: 'Contoured Walnut & Brass Shoulder Hanger',
+    specLabel: 'Sculpted Shoulder Gusset · Champagne Brass Hook',
+  };
 }

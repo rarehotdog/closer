@@ -5,8 +5,10 @@ Rail Studio is the English boutique interface inside the submitted
 point is the port-3200 `closerdesign` `meta-live-v2` interface
 (`7dec1d08409befd162651800b8815222a9ac4b01`). The current scene ports the port-3201
 spatial design from `closerdesign` main
-(`96989fe1f6fbc73c049a2553d32d048d2d8627a8`): walnut and brass hangers, an oak-floor
-Walk-In Vault, side bays and camera navigation. This directory is a
+(`b0644dcf226bd9441802436cae3e617e1788d4fe`, including `64283c2` fixtures): walnut and brass hangers, an oak-floor
+Walk-In Vault, side bays, trouser clamps, glass shoe displays and camera navigation.
+The price hero, fixture badge and Market / Wear / Decide inspector layout
+follow that design while retaining account and evidence behavior. This directory is a
 post-submission addition and runs as a separate app from the root interface.
 
 One outfit or closet photo becomes pieces you can inspect and act on. The face
@@ -29,6 +31,10 @@ canonical event ledger and price/decision engine in this app's account database.
   back and forth within the room, rather than claiming a full 360-degree spin.
   Selecting a piece pauses orbit and opens its inspector. Camera controls sit
   above the measured bottom dock and follow its collapsed state.
+- **Latest design catalog.** Pants & Shoes filters the four sample trousers and
+  footwear pieces. Sculpted fixtures illustrate the catalog; personal photo
+  cutouts stay visible and retain their scan receipt. Samples never enter an
+  account automatically.
 - **Visible prices.** Hang tags show recorded prices or an explicit unknown
   state. The desktop Market Pulse card shows the latest entered or sample
   observation, its platform, asking/traded status and date. Its change amount
@@ -103,8 +109,8 @@ npm ci
 PORT=3203 CLOSER_KILL=1 npm run dev
 ```
 
-Choose an unused port; existing 3200/3201 development servers need not be
-restarted. Run these commands from `apps/rail-studio`:
+The integrated preview uses port 3203 while the separate design reference uses
+port 3201. Choose an unused port when running another checkout. Run these commands from `apps/rail-studio`:
 
 ```sh
 npm run lint           # TypeScript checks

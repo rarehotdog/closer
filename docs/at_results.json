@@ -115,8 +115,26 @@
       "reason": ""
     },
     {
+      "name": "AT-17 permits the two exact technical tokens in text and history",
+      "file": "tests/static_scope.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-17 still detects plain forbidden text and non-token substrings",
+      "file": "tests/static_scope.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
       "name": "AT-18 [static, repo scope] privacy and secrets — key formats 0, company commit e-mail 0, EXIF 0, photo bytes 0, person names 0",
       "file": "tests/at_static.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "AT-18 still scans raw technical-token files for keys and e-mail",
+      "file": "tests/static_scope.test.ts",
       "status": "PASS",
       "reason": ""
     },
@@ -345,6 +363,12 @@
     {
       "name": "GD-05 response headers: a policy without unsafe-inline or unsafe-eval, nosniff, no referrer, no framing",
       "file": "tests/guard.test.ts",
+      "status": "PASS",
+      "reason": ""
+    },
+    {
+      "name": "history retains forbidden-text and raw key/e-mail detection after current cleanup",
+      "file": "tests/static_scope.test.ts",
       "status": "PASS",
       "reason": ""
     },

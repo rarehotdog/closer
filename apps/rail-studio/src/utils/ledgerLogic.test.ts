@@ -1126,3 +1126,20 @@ test('decision trend accepts ISO timestamps and legacy dates in the same window'
   const trend=compute30DayRotationTrend([{...base,id:'iso',lastDecision:decision},{...base,id:'legacy',lastDecision:{...decision,id:'d-date',savedAt:'2026-11-06'}}],'2026-11-06');
   assert.equal(trend.sellDecidedLast30d,2);
 });
+
+
+test('manual trousers and footwear keep their category and specialized display after hanging',()=>{
+ for (const [silhouette,category,variant] of [
+   ['trousers','trousers','trouser-clamp'],
+   ['sneaker-box','footwear','glossy-glass-box'],
+ ] as const) {
+   const hung=createHungPiece({id:`piece-custom-${silhouette}`,observationId:'obs-fixture',code:'A11',name:'Owner piece',brand:'',silhouette,currency:'KRW',price:null,platform:'KREAM',colorHex:'#000000',occlusionStatus:'front_verified'});
+   assert.equal(hung.category,category);
+   assert.equal(ledger.resolve3DDisplayVariant(hung).variant,variant);
+   assert.equal(hung.wearLogStatus,'insufficient');
+   assert.equal(hung.lastDecision,undefined);
+ }
+ assert.equal(ledger.resolve3DDisplayVariant({category:'trousers',silhouette:'tee'}).variant,'trouser-clamp');
+ assert.equal(ledger.resolve3DDisplayVariant({category:'footwear',silhouette:'tee'}).variant,'glossy-glass-box');
+ assert.equal(ledger.resolve3DDisplayVariant({category:'shirt',silhouette:'tee'}).variant,'sartorial-hanger');
+});

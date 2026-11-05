@@ -9,7 +9,7 @@ export type AccountState = {
   epoch: number; localCount: number;
 };
 export type Request = (url: string, init?: RequestInit) => Promise<Response>;
-const DEMO_IDS = new Set(['piece-j1', 'piece-j2', 'piece-t1', 'piece-j3', 'piece-t2', 'piece-b1', 'piece-j4', 'piece-k1', 'piece-t3', 'piece-s1']);
+const DEMO_IDS = new Set(['piece-j1', 'piece-j2', 'piece-t1', 'piece-j3', 'piece-t2', 'piece-b1', 'piece-j4', 'piece-k1', 'piece-t3', 'piece-s1', 'piece-p1', 'piece-p2', 'piece-f1', 'piece-f2']);
 export const LOCAL_KEY = 'closer.scannedPieces.v1';
 
 /** Built-in display fixtures must never become personal records, even when their old flag is false. */

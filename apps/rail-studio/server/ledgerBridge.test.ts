@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { AccountWardrobeStore, LedgerBridgeError } from './accountStore.ts';
+import { validateWardrobe } from './wardrobeSchema.ts';
+import { canonicalItem } from './ledgerBridge.ts';
 import { kstDateOf } from '../../../shared/dates.ts';
 import type { GarmentPiece } from '../src/types/closet.ts';
 
@@ -109,3 +111,27 @@ test('decision fee snapshots survive local-date differences and same-save regist
  save(s,'b',[{...piece(),lastDecision:newDecision}],'same-save-new-item');
  assert.equal(s.extras.decisions('b')[0].sell.scenario?.net,114625);
 }));
+
+
+test('new footwear and trouser fixtures validate, persist and project to their canonical slots',()=>fixture((s,path)=>{
+ const pieces=validateWardrobe([
+   {...piece('piece-custom-shoes'),category:'footwear',silhouette:'sneaker-box'},
+   {...piece('piece-custom-pants'),category:'trousers',silhouette:'trousers'},
+ ]);
+ save(s,'fixture-owner',pieces,'save-new-fixtures');
+ assert.deepEqual(s.read('fixture-owner').pieces,pieces);
+ assert.deepEqual(s.report('fixture-owner').state.items.map(i=>[i.type,i.slot]),[['trousers','bottom'],['sneakers','shoes']]);
+ const reopened=new AccountWardrobeStore(path);
+ try {assert.deepEqual(reopened.read('fixture-owner').pieces,pieces);assert.equal(reopened.report('fixture-owner').summary.pieces,2);} finally {reopened.close();}
+ assert.equal(s.report('other-owner').summary.pieces,0);
+ assert.throws(()=>validateWardrobe([{...piece(),category:'invented-shoe'}]));
+ assert.throws(()=>validateWardrobe([{...piece(),silhouette:'invented-fixture'}]));
+}));
+
+test('trusted shoe and trouser classifications override presentation fixture choices',()=>{
+ const shoes={...piece(),category:'footwear' as const,silhouette:'sneaker-box' as const};
+ assert.equal(canonicalItem(shoes,{type:'loafers',color:'black',formality:'high'}).type,'loafers');
+ const pants={...piece(),category:'trousers' as const,silhouette:'trousers' as const};
+ assert.equal(canonicalItem(pants,{type:'jeans',color:'blue',formality:'low'}).type,'jeans');
+ assert.equal(canonicalItem(shoes).formality,'unknown');
+});

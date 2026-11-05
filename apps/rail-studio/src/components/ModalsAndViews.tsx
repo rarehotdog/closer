@@ -1300,6 +1300,8 @@ const SILHOUETTE_LABEL: Record<GarmentSilhouette, string> = {
   blouson: 'Leather Blouson',
   knit: 'Cashmere Knit',
   tee: 'Heavyweight Tee',
+  trousers: 'Trousers · clamp hanger',
+  'sneaker-box': 'Footwear · glass display',
 };
 
 const DEFAULT_SILHOUETTE: GarmentSilhouette = 'hoodie';
@@ -2007,6 +2009,8 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
                 <option value="blouson">Leather Blouson</option>
                 <option value="knit">Cashmere Knit</option>
                 <option value="tee">Heavyweight Tee</option>
+                <option value="trousers">Trousers · clamp hanger</option>
+                <option value="sneaker-box">Footwear · glass display</option>
               </select>
             </div>
           </div>

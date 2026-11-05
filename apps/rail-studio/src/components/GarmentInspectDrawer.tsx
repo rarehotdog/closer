@@ -32,6 +32,7 @@ import {
   plural,
   PriceRecordCount,
   REFERENCE_DATE,
+  resolve3DDisplayVariant,
   sortObservationsChronologically,
   summarizeKeepSellEvidence,
 } from '../utils/ledgerLogic';
@@ -95,6 +96,12 @@ const CHIP_CLASS: Record<InspectorChipTone, string> = {
 };
 
 type MoreTarget = 'chart' | 'ask' | 'quote';
+type InspectorTab = 'market' | 'wear' | 'decide';
+const INSPECTOR_TABS: { id: InspectorTab; label: string }[] = [
+  { id: 'market', label: 'Market & Chart' },
+  { id: 'wear', label: 'Wear & Outfits' },
+  { id: 'decide', label: 'Keep vs Sell' },
+];
 
 interface GarmentInspectDrawerProps {
   garment: GarmentPiece | null;
@@ -140,6 +147,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
   onUpdateGarmentPhoto,
   onRemovePiece,
 }) => {
+  const [activeTab, setActiveTab] = useState<InspectorTab>('market');
   const [chartWindow, setChartWindow] = useState<'30d' | '90d' | 'all'>('all');
   const [showAddQuote, setShowAddQuote] = useState(false);
   const [quotePlatform, setQuotePlatform] = useState<ResalePlatform>('KREAM');
@@ -231,6 +239,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
     setShowKeepProvenance(false);
     setShowSellProvenance(false);
     setScrollTarget(null);
+    setActiveTab('market');
     bodyRef.current?.scrollTo({ top: 0 });
   }, [garment?.id]);
 
@@ -272,13 +281,14 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
       el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
     setScrollTarget(null);
-  }, [scrollTarget, moreOpen]);
+  }, [scrollTarget, moreOpen, activeTab]);
 
   if (!garment || !effectiveGarment) return null;
 
   const setMoreOpen = (open: boolean) =>
     setMoreOpenByPiece((prev) => ({ ...prev, [garment.id]: open }));
   const openMoreAt = (target: MoreTarget) => {
+    setActiveTab(target === 'chart' ? 'market' : 'decide');
     if (target !== 'chart') setMoreOpen(true);
     setScrollTarget(target);
   };
@@ -660,20 +670,50 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
             </div>
           </div>
 
-          <nav aria-label="Item sections" className="shrink-0 flex gap-1 px-5 py-2 border-b border-[#E7E2DA] bg-[#FAF8F5]">
-            <button type="button" onClick={() => bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} className="px-3 py-1.5 text-xs rounded-md hover:bg-white">Overview</button>
-            <button type="button" onClick={() => openMoreAt('chart')} className="px-3 py-1.5 text-xs font-semibold text-[#B8460F] rounded-md hover:bg-white">Market</button>
-            <button type="button" onClick={() => openMoreAt('ask')} className="px-3 py-1.5 text-xs rounded-md hover:bg-white">Selling tools</button>
-          </nav>
+          {/* Price and source remain visible across the three inspection views. */}
+          <div className="px-5 pt-3 pb-2.5 border-b border-[#E7E2DA] bg-[#FAF8F5] shrink-0 space-y-2.5">
+            <div className="flex items-center gap-3 bg-white border border-[#E7E2DA] rounded-xl px-3 py-2.5" data-testid="inspector-market-hero">
+              <div className="w-10 h-12 rounded-lg bg-[#FAF8F5] border border-[#E7E2DA] overflow-hidden shrink-0">
+                {activePhotoUrl && !imgFailed ? <img src={activePhotoUrl} alt="" referrerPolicy="no-referrer" onError={() => setImgFailed(true)} className="w-full h-full object-contain p-1" /> : <div className="w-full h-full" style={{ backgroundColor: garment.colorHex }} />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-xs font-semibold text-[#141413] truncate" title={garment.name}>{garment.name || 'Name not entered'}</h2>
+                {resolve3DDisplayVariant(garment).variant !== 'sartorial-hanger' && <span className="text-[9px] text-[#8C6B3F]" title={resolve3DDisplayVariant(garment).fixtureTitle}>{resolve3DDisplayVariant(garment).shortBadge}</span>}
+                <div className="text-[10px] text-[#8C857B] mt-0.5">{isSeed || garment.isSample ? 'Sample price on record' : 'Latest price on record'}</div>
+                <div className="text-xl font-bold font-mono-num text-[#141413]">{sortedComps.length ? formatCurrency(sortedComps[sortedComps.length - 1].price, garment.currency) : '—'}</div>
+                <div className="text-[10px] text-[#57534E]">{sortedComps.length ? `${sortedComps[sortedComps.length - 1].platform} · ${sortedComps[sortedComps.length - 1].kind === 'traded' ? 'Trade' : 'Ask'} · ${formatShortDate(sortedComps[sortedComps.length - 1].date)}` : 'No market price entered'}</div>
+              </div>
+              <div className="text-right shrink-0 pl-2 border-l border-[#E7E2DA]">
+                <div className="text-[10px] text-[#8C857B]">Net if sold</div>
+                <div className="text-xs font-mono-num font-bold text-[#141413] mt-0.5">{net.kind === 'net' ? formatCurrency(net.net, garment.currency) : net.kind === 'no_price' ? 'Ask not set' : 'Verify costs'}</div>
+              </div>
+            </div>
+            <div role="tablist" aria-label="Garment inspection sections" data-testid="inspector-ia-tabs" className="grid grid-cols-3 gap-1 bg-[#EDE9E1] p-1 rounded-xl">
+              {INSPECTOR_TABS.map((tab, index) => <button key={tab.id} type="button" role="tab" id={`inspector-tab-${tab.id}`} aria-selected={activeTab === tab.id} aria-controls="inspector-active-panel" tabIndex={activeTab === tab.id ? 0 : -1}
+                onClick={() => { setActiveTab(tab.id); bodyRef.current?.scrollTo({ top: 0 }); }}
+                onKeyDown={(event) => {
+                  const next = event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : event.key === 'Home' ? 0 : event.key === 'End' ? 2 : null;
+                  if (next === null) return;
+                  event.preventDefault(); setActiveTab(INSPECTOR_TABS[next].id); bodyRef.current?.scrollTo({ top: 0 });
+                  event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+                }}
+                className={`px-1 py-2 rounded-lg text-[10px] sm:text-[11px] font-semibold transition-colors ${activeTab === tab.id ? 'bg-white text-[#141413] shadow-sm' : 'text-[#8C857B] hover:text-[#141413]'}`}>{tab.label}</button>)}
+            </div>
+          </div>
 
           {/* Scrollable body: photo → name & chips → purchase → wear → price seen → net if sold → More */}
           <div
             ref={bodyRef}
+            role="tabpanel"
+            id="inspector-active-panel"
+            aria-labelledby={`inspector-tab-${activeTab}`}
+            tabIndex={0}
             className="inspector-body flex-1 min-h-0 overflow-y-auto px-5 py-3.5 space-y-3.5"
           >
             {/* 1. Photo (Front / Rail toggle only when the piece has both photos) + inline photo upload */}
             <div
               className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-3 space-y-2"
+              hidden={activeTab !== 'wear'}
               data-testid="front-shot-showcase"
             >
               <div className="flex items-center justify-between gap-2">
@@ -773,7 +813,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
             </div>
 
             {/* 2. Name + status chips (Sample · scan source · Keep / Sell / Undecided) */}
-            <div className="space-y-1.5" data-testid="inspector-identity">
+            <div hidden={activeTab !== 'wear'} className="space-y-1.5" data-testid="inspector-identity">
               <h2 className="text-base font-semibold text-[#141413] leading-snug">
                 {garment.name || 'Name not entered'}
               </h2>
@@ -795,7 +835,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
             </div>
 
             {/* Market stays visible: price, platform, date and comparable records. */}
-                  <section ref={chartRef} aria-label="Market prices" data-testid="inspector-market" className="scroll-mt-2">
+                  <section hidden={activeTab !== 'market'} ref={chartRef} aria-label="Market prices" data-testid="inspector-market" className="scroll-mt-2">
                     <h3 className="text-xs font-semibold tracking-wide uppercase text-[#57534E] mb-2">Market · Prices on record</h3>
                     <KalshiPriceChart
                       garment={garment}
@@ -817,6 +857,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
             {/* 3. Purchase info: only what the owner entered; blank lines stay "not entered" */}
             <section
               className="border border-[#E7E2DA] rounded-xl px-3.5 py-3 bg-white"
+              hidden={activeTab !== 'market'}
               data-testid="inspector-purchase"
               aria-label="Purchase info"
             >
@@ -851,7 +892,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <h3 className="text-xs font-semibold text-[#141413]">
-                    Keep? vs Sell? · Counted Records
+                    {activeTab === 'wear' ? 'Wear & Outfits' : activeTab === 'market' ? 'Prices on record' : 'Keep vs Sell · Counted Records'}
                   </h3>
                   <p className="text-[10px] text-[#8C857B]">
                     Both sides show counted records only. No probability is computed.
@@ -865,6 +906,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
               {/* 4. Wear record (If Kept · Counted wears) */}
               <div
                 className="border border-[#E7E2DA] rounded-xl p-3 bg-white space-y-2"
+                hidden={activeTab === 'market'}
                 data-testid="scenario-card-keep"
               >
                 <div className="flex items-center justify-between gap-1">
@@ -987,6 +1029,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
               {/* 5. Price seen: the latest record per platform (up to 3), trade vs ask, Sample marked */}
               <div
                 className="border border-[#E7E2DA] rounded-xl p-3 bg-white space-y-2"
+                hidden={activeTab === 'wear'}
                 data-testid="inspector-price-seen"
               >
                 <div className="flex items-center justify-between gap-1">
@@ -1132,6 +1175,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
               {/* 6. Net if sold: only once every cost line is ticked; "not set" with no price on record */}
               <div
                 className="border border-[#F37021]/45 rounded-xl p-3 bg-white space-y-2"
+                hidden={activeTab !== 'decide'}
                 data-testid="scenario-card-sell"
               >
                 <div className="flex items-center justify-between gap-1">
@@ -1300,7 +1344,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
             </section>
 
             {/* "More": price over time, ask slider, quote form, listing draft, provenance and limits */}
-            <div className="pt-0.5">
+            <div hidden={activeTab !== 'decide'} className="pt-0.5">
               <button
                 type="button"
                 data-testid="inspector-more"

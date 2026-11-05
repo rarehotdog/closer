@@ -3,8 +3,8 @@
 Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm test`). Mock mode only; zero real calls.
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
-- AT test cases (variants counted separately): PASS 33 · FAIL 0 · SKIP 7 · total 40.
-- Other tests (unit, fixture answer): PASS 51 · FAIL 0 · SKIP 0 · total 51.
+- AT test cases (variants counted separately): PASS 36 · FAIL 0 · SKIP 7 · total 43.
+- Other tests (unit, fixture answer): PASS 52 · FAIL 0 · SKIP 0 · total 52.
 
 | Test | Result | Note |
 |---|---|---|
@@ -27,7 +27,10 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | AT-15 [deploy] new-session persistence of /w/demo-rc1 | SKIP | deploy-only, judged at RC2 (plan §4-4) |
 | AT-16 [real] real Meta path on the deployed hero | SKIP | needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–) |
 | AT-17 [static, repo scope] labels and banned words — no PASS/LIVE/ALL_GREEN outside result objects, banned words 0, on-screen score 0 | PASS |  |
+| AT-17 permits the two exact technical tokens in text and history | PASS |  |
+| AT-17 still detects plain forbidden text and non-token substrings | PASS |  |
 | AT-18 [static, repo scope] privacy and secrets — key formats 0, company commit e-mail 0, EXIF 0, photo bytes 0, person names 0 | PASS |  |
+| AT-18 still scans raw technical-token files for keys and e-mail | PASS |  |
 | AT-19 [mock] intent kept (FX-H) — J1 kept, changes ⊆ {bottom, shoes}, A = 1, B ≤ 2, sums < O0 | PASS |  |
 | AT-19 [real] intent kept on the deployed build | SKIP | needs MODEL_API_KEY on the deployed server; runs after the key window (plan §6-1, 10/31 19:50–) |
 | AT-20 [mock] zero-change trap — unchanged O0 from the model → NO_CHANGE; "keep as is" saves via its own button | PASS |  |
@@ -71,6 +74,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | GD-03 token check: equal strings only; missing, empty or different-length values never match | PASS |  |
 | GD-04 JSON bodies: application/json only, an object only, size-limited, parser text never echoed | PASS |  |
 | GD-05 response headers: a policy without unsafe-inline or unsafe-eval, nosniff, no referrer, no framing | PASS |  |
+| history retains forbidden-text and raw key/e-mail detection after current cleanup | PASS |  |
 | live chip only for live + callId + 2xx | PASS |  |
 | mode: mock is the default; real refuses without MODEL_API_KEY and in test processes; fetch is blocked here | PASS |  |
 | PH-01 official decoder reads the docs' own lossless example (27 × 60) | PASS |  |
