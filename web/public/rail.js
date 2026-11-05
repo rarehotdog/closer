@@ -25,26 +25,91 @@ export function tagOf(row) {
 }
 
 /**
- * Lays the pieces out: tops and outerwear and bottoms on one rail (outerwear first, then tops, then
- * bottoms, each in the order given), shoes as pairs on the floor under it. `tags` is the ledger's
- * per-piece row map (GET /api/ws/:id/ledger → tags).
+ * Pure rotation tier from counted ledger facts (wearCount and 60-day review status).
+ * Computes zero probabilities: every label names only the recorded wear count or review status.
  */
-export function railLayout(pieces, tags) {
+export function rotationHeatOf(meta) {
+  const wears = meta && typeof meta.wearCount === 'number' && Number.isFinite(meta.wearCount) && meta.wearCount > 0
+    ? Math.floor(meta.wearCount)
+    : 0;
+  const review = meta && typeof meta.review === 'string' ? meta.review : null;
+  if (wears >= 3) {
+    return { tier: 'hot', wears, shortLabel: `${wears}x · Active`, detailLabel: `${wears} confirmed wears` };
+  }
+  if (wears >= 1) {
+    return { tier: 'warm', wears, shortLabel: `${wears}x`, detailLabel: `${wears} confirmed ${wears === 1 ? 'wear' : 'wears'}` };
+  }
+  if (review === 'CANDIDATE') {
+    return { tier: 'cold', wears: 0, shortLabel: '0x · Review', detailLabel: '0 confirmed wears in 60d' };
+  }
+  return { tier: 'fresh', wears: 0, shortLabel: '0x', detailLabel: 'No confirmed wear yet' };
+}
+
+/** Places prioritized items in the centre of the rail and alternates outward so spotlighted pieces stand dead-centre. */
+function centreOutward(sorted) {
+  const n = sorted.length;
+  if (n <= 2) return sorted;
+  const out = new Array(n);
+  const mid = Math.floor((n - 1) / 2);
+  for (let i = 0; i < n; i++) {
+    const offset = i === 0 ? 0 : (i % 2 === 1 ? Math.ceil(i / 2) : -Math.ceil(i / 2));
+    out[mid + offset] = sorted[i];
+  }
+  return out;
+}
+
+/**
+ * Lays the pieces out: tops and outerwear and bottoms on one rail (outerwear first, then tops, then
+ * bottoms, each in the order given by default), shoes as pairs on the floor under it. `tags` is the ledger's
+ * per-piece row map (GET /api/ws/:id/ledger → tags). Optional `opts.sort` ('rack' | 'review' | 'worn' | 'priced')
+ * reorders hanging pieces using counted ledger facts only.
+ */
+export function railLayout(pieces, tags, opts) {
   const list = Array.isArray(pieces) ? pieces : [];
+  const sortMode = opts && typeof opts.sort === 'string' ? opts.sort : 'rack';
   const hangingIn = list.filter((p) => p && p.slot in ORDER);
   const shoesIn = list.filter((p) => p && p.slot === 'shoes');
-  const hanging = hangingIn
-    .map((p, i) => ({ p, i }))
-    .sort((a, b) => ORDER[a.p.slot] - ORDER[b.p.slot] || a.i - b.i)
+  const tagMap = tags || {};
+  const rankTag = (id) => {
+    const t = tagOf(tagMap[id] || null);
+    if (!t) return 2;
+    return t.sample ? 1 : 0;
+  };
+  let hanging = hangingIn
+    .map((p, i) => ({ p, i, h: rotationHeatOf(p) }))
+    .sort((a, b) => {
+      if (sortMode === 'worn') {
+        if (b.h.wears !== a.h.wears) return b.h.wears - a.h.wears;
+      } else if (sortMode === 'priced') {
+        const ra = rankTag(a.p.itemId);
+        const rb = rankTag(b.p.itemId);
+        if (ra !== rb) return ra - rb;
+      } else if (sortMode === 'review') {
+        const ca = a.h.tier === 'cold' ? 0 : a.h.tier === 'fresh' ? 1 : 2;
+        const cb = b.h.tier === 'cold' ? 0 : b.h.tier === 'fresh' ? 1 : 2;
+        if (ca !== cb) return ca - cb;
+      }
+      return ORDER[a.p.slot] - ORDER[b.p.slot] || a.i - b.i;
+    })
     .map(({ p }) => p);
+
+  if (sortMode === 'review' && hanging.length > 2) {
+    hanging = centreOutward(hanging);
+  }
+
   const n = hanging.length;
   const span = Math.max(n - 1, 0) * RAIL.spacing;
   const m = shoesIn.length;
   const shoeSpan = Math.max(m - 1, 0) * RAIL.shoeSpacing;
-  const at = (p, x) => ({ itemId: p.itemId, slot: p.slot, type: p.type, x, tag: tagOf(tags ? tags[p.itemId] : null) });
+  const midIdx = (n - 1) / 2;
+  const at = (p, x, idx, isHanging) => {
+    const heat = rotationHeatOf(p);
+    const spotlight = Boolean(isHanging && sortMode === 'review' && heat.tier === 'cold' && Math.abs(idx - midIdx) <= 1.6);
+    return { itemId: p.itemId, slot: p.slot, type: p.type, x, tag: tagOf(tags ? tags[p.itemId] : null), ...(opts && opts.withHeat ? { heat, spotlight } : {}) };
+  };
   return {
-    hanging: hanging.map((p, i) => at(p, -span / 2 + i * RAIL.spacing)),
-    shoes: shoesIn.map((p, j) => at(p, -shoeSpan / 2 + j * RAIL.shoeSpacing)),
+    hanging: hanging.map((p, i) => at(p, -span / 2 + i * RAIL.spacing, i, true)),
+    shoes: shoesIn.map((p, j) => at(p, -shoeSpan / 2 + j * RAIL.shoeSpacing, j, false)),
     railLength: Math.max(span, shoeSpan) + 2 * RAIL.margin,
   };
 }

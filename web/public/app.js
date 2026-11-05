@@ -2488,8 +2488,22 @@ async function railView(view, ctx) {
   let curRev = v.revision;
   const cells = A.layers.flatMap((l) => l.items);
   const hasCuts = Object.keys(ctx.cuts).length > 0;
-  let drapeMode = new URLSearchParams(location.search).get('drape') === 'cut' && hasCuts ? 'cut' : 'boutique';
+  const initParams = new URLSearchParams(location.search);
+  let drapeMode = initParams.get('drape') === 'cut' && hasCuts ? 'cut' : 'boutique';
   let catFilter = 'all';
+  let camPreset = ['front', 'walk', 'left', 'right', 'overhead'].includes(initParams.get('cam')) ? initParams.get('cam') : 'front';
+  let turntable = false;
+  let heatMode = true;
+  let sortMode = ['rack', 'review', 'worn', 'priced'].includes(initParams.get('sort')) ? initParams.get('sort') : 'rack';
+  const pinnedBySlot = {};
+
+  const [mod, railRuleMod] = await Promise.all([
+    import('/static/rail3d.js').catch(() => null),
+    import('/static/rail.js').catch(() => null),
+  ]);
+  const heatOf = railRuleMod && typeof railRuleMod.rotationHeatOf === 'function'
+    ? railRuleMod.rotationHeatOf
+    : (m) => ({ tier: (m && m.wearCount >= 3) ? 'hot' : (m && m.wearCount >= 1) ? 'warm' : (m && m.review === 'CANDIDATE') ? 'cold' : 'fresh', wears: (m && m.wearCount) || 0, shortLabel: `${(m && m.wearCount) || 0}x`, detailLabel: '' });
 
   function makePieces(mode) {
     const seenType = {};
@@ -2503,7 +2517,17 @@ async function railView(view, ctx) {
       if (cut && mode === 'cut') photo = cutCanvasReady(cut);
       else if (cut) photo = boutiqueRailPhoto(c.type, measureCutRgb(cut, paletteRgb), idx, cut);
       else if (isSamplePiece) photo = boutiqueRailPhoto(c.type, paletteRgb, idx, null);
-      return { itemId: c.itemId, slot: c.slot, type: c.type, rgb: paletteRgb, availability: c.availability, photo };
+      return {
+        itemId: c.itemId,
+        slot: c.slot,
+        type: c.type,
+        rgb: paletteRgb,
+        availability: c.availability,
+        wearCount: c.wearCount || 0,
+        review: c.review || null,
+        sample: isSamplePiece,
+        photo,
+      };
     });
   }
 
@@ -2513,35 +2537,175 @@ async function railView(view, ctx) {
     h('span', null, 'Bottoms ', h('b', null, String(count(['bottom'])))),
     h('span', null, 'Shoes ', h('b', null, String(count(['shoes'])))));
 
+  const SORT_MODES = [
+    ['rack', 'Rack'],
+    ['review', 'Review 0x'],
+    ['worn', 'Worn'],
+    ['priced', 'Priced'],
+  ];
+
   const plaqueSlot = h('div', { class: 'rail-plaque-slot' });
   function paintPlaque() {
     const rows = overlayRows(Lcur);
-    if (!rows.length) { plaqueSlot.replaceChildren(); return; }
-    plaqueSlot.replaceChildren(h('div', { class: 'rail-plaque' },
+    const plaqueNode = rows.length ? h('div', { class: 'rail-plaque' },
       h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: wsParam ? `/closet?ws=${encodeURIComponent(wsParam)}` : '/closet' }, 'Full ledger')),
-      rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))));
+      rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null;
+
+    let hotCount = 0, warmCount = 0, coldCount = 0, freshCount = 0;
+    for (const c of cells) {
+      const t = heatOf(c).tier;
+      if (t === 'hot') hotCount++;
+      else if (t === 'warm') warmCount++;
+      else if (t === 'cold') coldCount++;
+      else freshCount++;
+    }
+    const pulseNode = cells.length ? h('div', { class: 'rail-pulse', id: 'rail-pulse' },
+      h('div', { class: 'rpulse-hd' },
+        h('span', { class: 'rpulse-title' }, 'Rotation pulse'),
+        h('button', {
+          type: 'button',
+          class: 'rpulse-toggle',
+          id: 'rail-heat-toggle',
+          'aria-pressed': heatMode ? 'true' : 'false',
+          onclick: () => {
+            heatMode = !heatMode;
+            if (rail) rail.setHeatMode(heatMode);
+            paintPlaque();
+          },
+        }, heatMode ? 'Highlights on' : 'Highlights off')),
+      h('div', { class: 'rpulse-stats' },
+        `${coldCount} review (0x) · ${warmCount + hotCount} worn${hotCount ? ` (${hotCount} active 3+x)` : ''}`),
+      heatMode ? h('div', { class: 'rpulse-bar', role: 'img', 'aria-label': `${coldCount} in 60-day review, ${warmCount} worn 1 to 2 times, ${hotCount} worn 3 or more times` },
+        coldCount ? h('span', { class: 'rpb-cold', style: `flex-grow:${coldCount}` }) : null,
+        freshCount ? h('span', { class: 'rpb-fresh', style: `flex-grow:${freshCount}` }) : null,
+        warmCount ? h('span', { class: 'rpb-warm', style: `flex-grow:${warmCount}` }) : null,
+        hotCount ? h('span', { class: 'rpb-hot', style: `flex-grow:${hotCount}` }) : null) : null,
+      h('div', { class: 'rpulse-sorts', role: 'group', 'aria-label': 'Rail order' },
+        SORT_MODES.map(([k, lbl]) => h('button', {
+          type: 'button',
+          class: 'rpulse-pill',
+          'data-sort': k,
+          'aria-pressed': sortMode === k ? 'true' : 'false',
+          onclick: () => {
+            if (sortMode === k) return;
+            sortMode = k;
+            paintPlaque();
+            mountStage();
+          },
+        }, lbl)))) : null;
+
+    plaqueSlot.replaceChildren(...[plaqueNode, pulseNode].filter(Boolean));
   }
   paintPlaque();
 
   const host = h('div', { class: 'stage rail-stage' });
   const RANK0 = { outer: 0, top: 1, bottom: 2, shoes: 3 };
   const ordered = cells.map((c, i) => ({ c, i })).sort((x, y) => RANK0[x.c.slot] - RANK0[y.c.slot] || x.i - y.i).map((x) => x.c);
-  const editorialSub = h('span', null, wsParam
-    ? (hasCuts ? (drapeMode === 'boutique' ? 'Boutique drape · colours from your photo' : 'Mask cut-outs from your photo') : 'Hung like a boutique rail')
-    : '3/4 studio drape · recoloured to each record');
+  function baseEditorialCopy() {
+    if (turntable || camPreset !== 'front') return 'Walk-in vault · drag 360° · wheel zoom · WASD';
+    if (!wsParam) return '3/4 studio drape · recoloured to each record';
+    if (hasCuts) return drapeMode === 'boutique' ? 'Boutique drape · colours from your photo' : 'Mask cut-outs from your photo';
+    return 'Hung like a boutique rail';
+  }
+  const editorialSub = h('span', null, baseEditorialCopy());
   const editorial = h('div', { class: 'rail-editorial', 'aria-hidden': 'true' },
     h('span', null, wsParam ? 'Your closet' : 'Sample closet'), h('i', null, '|'), editorialSub);
 
+  const CAM_PRESETS = [
+    ['front', 'Front', 'Front'],
+    ['walk', '3D Walk-Around', '3D Walk'],
+    ['left', 'Left Wing', 'Left'],
+    ['right', 'Right Wing', 'Right'],
+    ['overhead', 'Overhead', 'Top'],
+  ];
+  const camButtons = {};
+  const spinBtn = h('button', {
+    type: 'button',
+    class: 'cam-pill cam-spin',
+    id: 'cam-spin',
+    'aria-pressed': 'false',
+    onclick: () => {
+      if (!rail) return;
+      rail.setTurntable(!turntable);
+    },
+  }, '360° Spin');
+  const camBar = h('div', { class: 'rail-cam-bar', id: 'rail-cam-bar', role: 'group', 'aria-label': '3D camera view' },
+    ...CAM_PRESETS.map(([k, fullLbl, shortLbl]) => {
+      const b = h('button', {
+        type: 'button',
+        class: 'cam-pill',
+        'data-cam': k,
+        'aria-pressed': camPreset === k && !turntable ? 'true' : 'false',
+        onclick: () => {
+          if (!rail) return;
+          rail.setPreset(k);
+        },
+      }, h('span', { class: 'cam-lbl-full' }, fullLbl), h('span', { class: 'cam-lbl-short' }, shortLbl));
+      camButtons[k] = b;
+      return b;
+    }),
+    spinBtn);
+
+  function syncCamUi(st) {
+    if (st) {
+      camPreset = st.preset || 'front';
+      turntable = Boolean(st.turntable);
+    }
+    for (const [k, btn] of Object.entries(camButtons)) {
+      btn.setAttribute('aria-pressed', !turntable && camPreset === k ? 'true' : 'false');
+    }
+    spinBtn.setAttribute('aria-pressed', turntable ? 'true' : 'false');
+    editorialSub.textContent = baseEditorialCopy();
+  }
+
+  const quickLook = h('div', { class: 'rail-quicklook', id: 'rail-quicklook', hidden: true, 'aria-hidden': 'true' });
+  let quickLookItemId = null;
+  function handleHover(info) {
+    if (!info || !info.itemId || info.itemId === current || window.innerWidth <= 900) {
+      quickLook.hidden = true;
+      return;
+    }
+    const it = byId[info.itemId];
+    const c = cells.find((x) => x.itemId === info.itemId);
+    if (!it || !c) { quickLook.hidden = true; return; }
+    if (quickLookItemId !== info.itemId) {
+      quickLookItemId = info.itemId;
+      const t = Lcur && Lcur.tags ? Lcur.tags[info.itemId] : null;
+      const heat = heatOf(c);
+      const isPinned = pinnedBySlot[c.slot] === info.itemId;
+      quickLook.replaceChildren(
+        h('div', { class: 'ql-thumb' }, studioThumb(it, ctx.cuts)),
+        h('div', { class: 'ql-meta' },
+          h('div', { class: 'ql-title' }, h('b', { class: 'mono' }, info.itemId), ' · ', itemName(it)),
+          h('div', { class: 'ql-badges' },
+            h('span', { class: `ql-heat ql-${heat.tier}` }, heat.shortLabel),
+            isPinned ? h('span', { class: 'ql-pin' }, 'Today') : null,
+            c.availability !== 'AVAILABLE' ? h('span', { class: 'ql-away' }, AVAILABILITY_LABEL[c.availability] || c.availability) : null),
+          h('div', { class: 'ql-price' },
+            t ? [h('b', { class: 'mono' }, money(t.amount, t.currency)), t.source === 'sample' ? ' · Sample' : ''] : 'No price recorded')));
+    }
+    const rect = body.getBoundingClientRect();
+    const maxRight = body.classList.contains('open') ? rect.width - 392 : rect.width - 248;
+    const qx = Math.max(14, Math.min(Math.max(14, maxRight), info.clientX - rect.left + 18));
+    const qy = Math.max(66, Math.min(rect.height - 156, info.clientY - rect.top - 34));
+    quickLook.style.transform = `translate3d(${qx.toFixed(0)}px, ${qy.toFixed(0)}px, 0)`;
+    quickLook.hidden = false;
+  }
+
+  const pinnedIds = () => SLOTS.map((s) => pinnedBySlot[s]).filter(Boolean);
   const chipOf = {};
   function renderDockChipInner(b, c) {
     const t = Lcur && Lcur.tags ? Lcur.tags[c.itemId] : null;
     const rgb = META.palette && META.palette[c.color];
+    const isPinned = pinnedBySlot[c.slot] === c.itemId;
+    b.classList.toggle('is-pinned', isPinned);
     b.replaceChildren(...[
       h('span', { class: 'dot', style: rgb ? `background:rgb(${rgb.join(',')})` : null }),
       h('b', null, c.itemId),
       h('span', { class: 'nm' }, itemName(byId[c.itemId])),
       t ? h('span', { class: 'px' }, money(t.amount, t.currency)) : null,
       t && t.source === 'sample' ? h('span', { class: 'smp' }, 'Sample') : null,
+      isPinned ? h('span', { class: 'pin-mark' }, 'Today') : null,
     ].filter(Boolean));
   }
   const strip = h('div', { class: 'dock-strip', 'aria-label': 'Pieces on the rail' }, ordered.map((c) => {
@@ -2550,6 +2714,49 @@ async function railView(view, ctx) {
     chipOf[c.itemId] = b;
     return b;
   }));
+
+  const comboBar = h('div', { class: 'rail-combo-bar', id: 'rail-combo-bar', hidden: true });
+  function syncPins() {
+    const ids = pinnedIds();
+    quickLookItemId = null;
+    if (rail) rail.setPinned(ids);
+    for (const c of ordered) {
+      if (chipOf[c.itemId]) renderDockChipInner(chipOf[c.itemId], c);
+    }
+    if (!ids.length) {
+      comboBar.hidden = true;
+      comboBar.replaceChildren();
+      return;
+    }
+    comboBar.hidden = false;
+    comboBar.replaceChildren(
+      h('div', { class: 'rcb-left' },
+        h('span', { class: 'rcb-eyebrow' }, `Today combo (${ids.length}/4)`),
+        h('div', { class: 'rcb-chips' }, ids.map((pid) => {
+          const pc = cells.find((x) => x.itemId === pid);
+          return h('button', {
+            type: 'button',
+            class: 'rcb-chip',
+            title: 'Remove from Today combo',
+            onclick: () => {
+              if (pc) delete pinnedBySlot[pc.slot];
+              syncPins();
+              if (current === pid) show(pid);
+            },
+          }, h('b', { class: 'mono' }, pid), ` ${itemName(byId[pid])} ×`);
+        }))),
+      h('div', { class: 'rcb-actions' },
+        h('a', { class: 'btn small', id: 'rcb-go-today', href: wsHref('/today', wsParam, { lock: ids.join(',') }) }, 'Complete outfit →'),
+        h('button', {
+          type: 'button',
+          class: 'btn small ghost',
+          onclick: () => {
+            for (const k of Object.keys(pinnedBySlot)) delete pinnedBySlot[k];
+            syncPins();
+            if (current) show(current);
+          },
+        }, 'Clear')));
+  }
 
   const catPills = h('div', { class: 'dock-cats', role: 'group', 'aria-label': 'Category filter' },
     [['all', 'All'], ['outer', 'Outer'], ['top', 'Tops'], ['bottom', 'Bottoms'], ['shoes', 'Shoes']].map(([k, lbl]) =>
@@ -2575,7 +2782,6 @@ async function railView(view, ctx) {
   const next = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide right' }, '›');
   const sheet = h('aside', { class: 'piece-panel', id: 'piece', 'aria-live': 'polite', hidden: true });
   let rail = null;
-  let mod = null;
 
   const drapeToggle = hasCuts ? h('div', { class: 'seg drape-seg', id: 'drape-toggle', role: 'group', 'aria-label': 'Garment drape' },
     [['boutique', 'Boutique'], ['cut', 'Photo cut']].map(([m, lbl]) => h('button', {
@@ -2585,21 +2791,22 @@ async function railView(view, ctx) {
         if (drapeMode === m) return;
         drapeMode = m;
         for (const btn of drapeToggle.querySelectorAll('button')) btn.setAttribute('aria-pressed', btn.textContent === lbl ? 'true' : 'false');
-        editorialSub.textContent = m === 'boutique' ? 'Boutique drape · colours from your photo' : 'Mask cut-outs from your photo';
+        editorialSub.textContent = baseEditorialCopy();
         mountStage();
       },
     }, lbl))) : null;
 
   const dock = h('div', { class: 'rail-dock' },
+    comboBar,
     strip,
     h('div', { class: 'dock-row' },
       h('div', { class: 'row dock-left' }, catPills, counts),
       h('div', { class: 'row pg-row' }, drapeToggle, prev, next, switcher)));
   const addPhoto = h('a', { class: 'rail-add', href: '/app', id: 'rail-add' }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), 'Add from a photo');
-  const body = h('div', { class: 'immersive' }, host, plaqueSlot, editorial, addPhoto, dock, sheet);
+  const body = h('div', { class: 'immersive' }, host, plaqueSlot, camBar, editorial, addPhoto, quickLook, dock, sheet);
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List · ${A.counts.total}`),
     h('div', { class: 'chip-row' }, cells.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } }, `${c.itemId} · ${itemName(byId[c.itemId])}`))));
-  view.append(h('div', { class: 'rail-head rail-head-slim' }, h('h1', { class: 'caps-title' }, 'My closet')), body, h('p', { class: 'muted hint' }, 'Drag or ‹ › to slide · tap a piece · ← → to page'), list);
+  view.append(h('div', { class: 'rail-head rail-head-slim' }, h('h1', { class: 'caps-title' }, 'My closet')), body, h('p', { class: 'muted hint' }, 'Drag to slide · 3D Walk-Around or Shift+drag to orbit · tap a piece or tag · WASD / ← →'), list);
 
   const RANK = { outer: 0, top: 1, bottom: 2, shoes: 3 };
   const order = cells.map((c, i) => ({ c, i })).sort((x, y) => RANK[x.c.slot] - RANK[y.c.slot] || x.i - y.i).map((x) => x.c.itemId);
@@ -2608,12 +2815,30 @@ async function railView(view, ctx) {
   let mediaTab = 'photo';
   let priceFormOpen = false;
 
-  mod = await import('/static/rail3d.js').catch(() => null);
+  function onPickFromStage(itemId) {
+    if (!itemId) { close(); return; }
+    show(itemId);
+  }
+
   function mountStage() {
+    const keepSpin = turntable;
     if (rail) { rail.dispose(); rail = null; }
     const rows = overlayRows(Lcur);
     const said = rows.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, latest price seen on ${r.pieces} of ${r.of} pieces`).join('; ');
-    rail = mod ? mod.mountRail3d(host, makePieces(drapeMode), { fill: true, tags: Lcur ? Lcur.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
+    rail = mod ? mod.mountRail3d(host, makePieces(drapeMode), {
+      fill: true,
+      tags: Lcur ? Lcur.tags : null,
+      money,
+      sort: sortMode,
+      preset: camPreset,
+      heatMode,
+      pinned: pinnedIds(),
+      onPick: onPickFromStage,
+      onHover: handleHover,
+      onCameraChange: syncCamUi,
+      label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}`,
+    }) : null;
+    if (rail && keepSpin) rail.setTurntable(true);
     if (rail && current) rail.select(current);
   }
   mountStage();
@@ -2640,10 +2865,20 @@ async function railView(view, ctx) {
 
   const step = (d) => { if (!current) return; const k = order.indexOf(current); const nextId = order[(k + d + order.length) % order.length]; if (rail) rail.select(nextId); show(nextId); };
   document.addEventListener('keydown', (e) => {
+    if (!document.body.contains(body)) return;
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'ArrowRight') { if (current) step(1); else if (rail) rail.slide(1); }
     else if (e.key === 'ArrowLeft') { if (current) step(-1); else if (rail) rail.slide(-1); }
-    else if (e.key === 'Escape' && current) close();
+    else if (e.key === 'a' || e.key === 'A') { if (rail) rail.nudgeOrbit(-0.14, 0); }
+    else if (e.key === 'd' || e.key === 'D') { if (rail) rail.nudgeOrbit(0.14, 0); }
+    else if (e.key === 'w' || e.key === 'W') { if (rail) rail.nudgeOrbit(0, 0.08); }
+    else if (e.key === 's' || e.key === 'S') { if (rail) rail.nudgeOrbit(0, -0.08); }
+    else if (e.key === 'Escape') {
+      if (priceFormOpen && current) { priceFormOpen = false; show(current); }
+      else if (current) close();
+      else if (rail && (turntable || camPreset !== 'front')) rail.setPreset('front');
+    }
   });
   function close() { current = null; priceFormOpen = false; sheet.hidden = true; sheet.classList.remove('is-expanded'); body.classList.remove('open'); syncItemParam(null); for (const b of Object.values(chipOf)) b.setAttribute('aria-current', 'false'); if (rail) rail.select(null); }
 
@@ -2651,6 +2886,7 @@ async function railView(view, ctx) {
     const it = byId[itemId];
     const c = cells.find((x) => x.itemId === itemId);
     if (!it || !c) return;
+    quickLook.hidden = true;
     if (current !== itemId) priceFormOpen = false;
     current = itemId;
     syncItemParam(itemId);
@@ -2658,6 +2894,8 @@ async function railView(view, ctx) {
     if (chipOf[itemId]) chipOf[itemId].scrollIntoView({ block: 'nearest', inline: 'center' });
     const t = Lcur && Lcur.tags ? Lcur.tags[itemId] : null;
     const cut = ctx.cuts[itemId] || null;
+    const heat = heatOf(c);
+    const isPinned = pinnedBySlot[c.slot] === itemId;
     const label = (x) => h('p', { class: 'pp-label' }, x);
     sheet.hidden = false;
     body.classList.add('open');
@@ -2687,6 +2925,7 @@ async function railView(view, ctx) {
           if (r.ok) {
             c.availability = st;
             it.availability = st;
+            quickLookItemId = null;
             if (rail) rail.updatePiece(itemId, { availability: st, tagRow: Lcur && Lcur.tags ? Lcur.tags[itemId] : null });
             show(itemId, `Marked ${lbl.toLowerCase()}`);
           }
@@ -2724,6 +2963,7 @@ async function railView(view, ctx) {
             if (pr && pr.ok !== false) {
               Lcur = await closetLedger(id);
               ctx.L = Lcur;
+              quickLookItemId = null;
               paintPlaque();
               if (chipOf[itemId]) renderDockChipInner(chipOf[itemId], c);
               if (rail) rail.updatePiece(itemId, { tagRow: Lcur && Lcur.tags ? Lcur.tags[itemId] : null });
@@ -2754,6 +2994,7 @@ async function railView(view, ctx) {
             h('span', { class: 'muted pp-code mono' }, itemId)),
           h('div', { class: 'chip-row' },
             h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot),
+            h('span', { class: `chip ${heat.tier === 'hot' ? 'ok' : heat.tier === 'cold' ? 'warn' : ''}`.trim() }, heat.shortLabel),
             c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'),
             cut ? h('span', { class: 'chip' }, cut.mine ? 'Your photo' : 'Sample photo') : null,
             !wsParam || it.sample ? h('span', { class: 'chip sample' }, 'Sample') : null),
@@ -2770,11 +3011,27 @@ async function railView(view, ctx) {
         ].filter(Boolean)),
       h('div', { class: 'pp-foot-sticky' },
         h('a', { class: 'btn small pp-primary-cta', href: wsHref('/closet', wsParam, { decide: itemId }) }, 'Keep or let go? →'),
-        h('a', { class: 'btn small ghost', href: wsHref('/today', wsParam, { lock: itemId }) }, 'Wear today'),
-        h('a', { class: 'btn small ghost', href: wsHref('/closet/3d', wsParam, { view: 'layers' }) }, 'Walk-in')));
+        h('button', {
+          type: 'button',
+          class: `btn small${isPinned ? '' : ' ghost'}`,
+          id: 'pp-pin-today',
+          'aria-pressed': isPinned ? 'true' : 'false',
+          onclick: () => {
+            if (pinnedBySlot[c.slot] === itemId) {
+              delete pinnedBySlot[c.slot];
+              syncPins();
+              show(itemId, `Removed ${itemId} from Today combo`);
+            } else {
+              pinnedBySlot[c.slot] = itemId;
+              syncPins();
+              show(itemId, `Pinned ${itemId} to Today combo`);
+            }
+          },
+        }, isPinned ? `Pinned (${c.slot}) ✓` : '+ Pin combo'),
+        h('a', { class: 'btn small ghost', href: wsHref('/today', wsParam, { lock: itemId }) }, 'Wear today')));
   }
 
-  const initialItem = new URLSearchParams(location.search).get('item');
+  const initialItem = initParams.get('item');
   if (initialItem && byId[initialItem]) {
     if (rail) rail.select(initialItem);
     show(initialItem);

@@ -289,7 +289,7 @@
       "reason": ""
     },
     {
-      "name": "every adapters/ file carries the unverified header",
+      "name": "every adapters/ file carries the live-record header, and the record it names exists",
       "file": "tests/unit.test.ts",
       "status": "PASS",
       "reason": ""

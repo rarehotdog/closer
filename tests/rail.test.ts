@@ -15,11 +15,12 @@ import { ROOT } from './helpers.ts';
 type Tag = { amount: number; currency: string; sample: boolean; traded: boolean; platform: string };
 type Spot = { itemId: string; slot: string; type: string; x: number; tag: Tag | null };
 type Layout = { hanging: Spot[]; shoes: Spot[]; railLength: number };
-const { RAIL, railLayout, tagOf, tagWords } = railJs as {
+const { RAIL, railLayout, tagOf, tagWords, rotationHeatOf } = railJs as {
   RAIL: { spacing: number; shoeSpacing: number; railY: number; margin: number };
-  railLayout: (pieces: unknown, tags: unknown) => Layout;
+  railLayout: (pieces: unknown, tags: unknown, opts?: unknown) => Layout & { hanging: (Spot & { heat?: { tier: string; wears: number }; spotlight?: boolean })[] };
   tagOf: (row: unknown) => Tag | null;
   tagWords: (tag: Tag | null, money: (n: number, c: string) => string) => { amount: string; mark: string } | null;
+  rotationHeatOf: (meta: unknown) => { tier: string; wears: number; shortLabel: string; detailLabel: string };
 };
 
 const money = (n: number, c: string) => `${c} ${n}`;
@@ -96,5 +97,62 @@ describe('R rail: placement and tags', () => {
       assert.equal(buf.includes(Buffer.from('eXIf')), false, `side-${k}.png carries no eXIf chunk`);
       assert.equal(buf.includes(Buffer.from('Exif\0\0')), false, `side-${k}.png carries no Exif marker`);
     }
+  });
+
+  it('R-06 rotationHeatOf classifies pieces strictly by counted wears and 60-day review status with zero probabilities', () => {
+    assert.deepEqual(rotationHeatOf({ wearCount: 4, review: 'RECENT_WEAR' }), {
+      tier: 'hot',
+      wears: 4,
+      shortLabel: '4x · Active',
+      detailLabel: '4 confirmed wears',
+    });
+    assert.deepEqual(rotationHeatOf({ wearCount: 1, review: 'RECENT_WEAR' }), {
+      tier: 'warm',
+      wears: 1,
+      shortLabel: '1x',
+      detailLabel: '1 confirmed wear',
+    });
+    assert.deepEqual(rotationHeatOf({ wearCount: 0, review: 'CANDIDATE' }), {
+      tier: 'cold',
+      wears: 0,
+      shortLabel: '0x · Review',
+      detailLabel: '0 confirmed wears in 60d',
+    });
+    assert.deepEqual(rotationHeatOf({ wearCount: 0, review: 'INSUFFICIENT_HISTORY' }), {
+      tier: 'fresh',
+      wears: 0,
+      shortLabel: '0x',
+      detailLabel: 'No confirmed wear yet',
+    });
+  });
+
+  it('R-07 railLayout sort modes (review, worn, priced) preserve all pieces once and spotlight review candidates at centre', () => {
+    const items = [
+      { itemId: 'J1', slot: 'outer', type: 'jacket', wearCount: 5, review: 'RECENT_WEAR' },
+      { itemId: 'T1', slot: 'top', type: 'tee', wearCount: 0, review: 'CANDIDATE' },
+      { itemId: 'T2', slot: 'top', type: 'knit', wearCount: 2, review: 'RECENT_WEAR' },
+      { itemId: 'B1', slot: 'bottom', type: 'jeans', wearCount: 0, review: 'CANDIDATE' },
+      { itemId: 'B2', slot: 'bottom', type: 'trousers', wearCount: 1, review: 'RECENT_WEAR' },
+      { itemId: 'S1', slot: 'shoes', type: 'sneakers', wearCount: 3, review: 'RECENT_WEAR' },
+    ];
+    const tags = {
+      T2: { amount: 90000, currency: 'KRW', source: 'sample', priceType: 'ASK', platform: 'KARROT' },
+      B2: { amount: 140000, currency: 'KRW', source: 'owner_entered', priceType: 'TRADE', platform: 'KREAM' },
+    };
+
+    const byWorn = railLayout(items, tags, { sort: 'worn', withHeat: true });
+    assert.deepEqual(byWorn.hanging.map((h) => h.itemId), ['J1', 'T2', 'B2', 'T1', 'B1']);
+
+    const byPriced = railLayout(items, tags, { sort: 'priced' });
+    assert.equal(byPriced.hanging[0].itemId, 'B2', 'owner-entered price comes first');
+    assert.equal(byPriced.hanging[1].itemId, 'T2', 'sample price comes second');
+
+    const byReview = railLayout(items, tags, { sort: 'review', withHeat: true });
+    assert.equal(byReview.hanging.length, 5);
+    assert.equal(new Set(byReview.hanging.map((h) => h.itemId)).size, 5);
+    assert.equal(byReview.hanging[2].itemId, 'T1', 'first review candidate sits dead-centre on odd count');
+    assert.equal(byReview.hanging[2].spotlight, true);
+    assert.equal(byReview.hanging[3].itemId, 'B1', 'second review candidate flanks centre');
+    assert.equal(byReview.hanging[3].spotlight, true);
   });
 });

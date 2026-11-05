@@ -61,7 +61,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | CS-01 outfit mode rejects duplicate slots while scan mode accepts up to 16 pieces across duplicate slots | PASS |  |
 | CS-02 uploaded closet photo scans 8 garments across duplicate slots, confirms them, and powers ledger, Keep-or-let-go, Today, and Discover | PASS |  |
 | CS-03 local pixelScanPhoto + addPixelCard + subset/type-edited confirmCards works offline with zero model calls | PASS |  |
-| every adapters/ file carries the unverified header | PASS |  |
+| every adapters/ file carries the live-record header, and the record it names exists | PASS |  |
 | fixture colors map to their declared color family (12 named colors) | PASS |  |
 | FX-H pre-registered answer (§4-5) — A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1 | PASS |  |
 | GA-01 the 18 wardrobe types are all buildable | PASS |  |
