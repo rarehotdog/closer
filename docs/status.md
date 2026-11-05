@@ -1,6 +1,14 @@
 # Closer — build status (mock mode)
 
-## 0. Update 2026-11-05 08:00 KST — feature freeze
+## 0. Update 2026-11-05 10:00 KST — submission build
+
+- main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests (11/5 09:55 KST run): 179 tests · 170 pass · 0 fail · 9 skip (the real-mode cases, without a key). `npm run typecheck` passes. Static AT-17/18: 0 findings at repo scope.
+- After the freeze, at the owner's request: the flow starts with one photo (navigation Photo, My closet, Today, Discover; the landing page shows the four steps); My closet on a boutique rail (`rail3d.js`, garments modelled by code in `garments.js`, a tag only where the ledger holds a price row: R-01…R-04, GA-01…GA-04); the design handoff's plaque, page buttons and detail panel with a keep-it / let-it-go next step; fewer words; light only with one orange point colour (TH-01…TH-04).
+- Final review: five reviewers (honesty, docs, submission text, endpoints, a judge's first run) and a second reviewer per area trying to refute each finding; 90 confirmed. All blockers and majors fixed: no rain percentage on Today, no "0 wears on record" under a piece with wears, the demo clock refuses malformed input, Today's answers are buttons, the owner-token step for recording, the owner 3D wording. Minors and nits not fixed are listed in the shared doc.
+- Browser checks: the photo flow on `/try` (find the pieces → confirm 4 cards → suggest changes → wear this → worn), and every main screen at 390 and 1280 px with no console error, no horizontal overflow and no null text.
+- Still true: real calls 0 in this repository; deploy not done; demo video not recorded.
+
+## 0b. Update 2026-11-05 08:00 KST — feature freeze
 
 - main = the sha shown by `git log -1` (this freeze commit; 87 commits, the first being the 10/30 scaffold); GitHub `rarehotdog/closer` (public) tracks it, and CI passed on the commit before it. Tests (11/5 07:45 KST run): 170 tests · 161 pass · 0 fail · 9 skip (the real-mode cases, without a key). `npm run typecheck` passes. Static AT-17/18: 0 findings at repo scope.
 - Checked before the freeze: a fresh clone from GitHub installs with `npm ci` (5 packages), passes the same tests and serves every screen, with the same sha on `/version`; 15 kinds of malformed requests caused no server error (one of them, cost lines sent as text, was accepted and is now refused, next line); every screen at 390 and 1280 px in light mode and the six main screens at 390 px in dark mode show no console error, no horizontal overflow and no null, undefined or NaN text, and on the dark screens and the five other routes no text measured under 3:1 contrast; the 3D closet requests no animation frame while idle; scenes 2, 5, 5b, 6 and 7 of the demo script were walked in mock mode and its quotes now match the screen ([demo_script.md](demo_script.md)).
@@ -8,7 +16,7 @@
 - After the freeze: documents, wording and verified bug fixes only.
 - Still true: real calls 0 in this repository; deploy not done; demo video not recorded.
 
-## 0a. Update 2026-11-05 06:15 KST
+## 0c. Update 2026-11-05 06:15 KST
 
 - main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests (11/5 06:00 KST run, 170 tests): 161 pass · 0 fail · 9 skip (the real-mode cases, without a key). `npm run typecheck` passes. Static AT-17/18: 0 findings at repo scope.
 - 11/4–11/5 overnight (KST), merged after adversarial review: a market-style chart of the prices seen over time (per platform, per currency, full width under the keep-or-let-go question); a saved position says when its facts moved, and one tap saves once; Musinsa Used and StockX (ten platforms); the closet ledger and its asset board — one number per currency with the pieces it covers, owner and sample totals never added; a white walk-in closet theme (contrast pinned by tests); and the 3D closet as a white lacquer walk-in closet with brass hangers, glass towers, lit shelves, a marble island, boutique price tags and the asset overlay, all from the same ledger.
