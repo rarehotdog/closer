@@ -78,6 +78,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 .top .wrap { padding-bottom: 0; }
 .top-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; flex-wrap: wrap; }
 .brand { font-family: var(--font-display); font-weight: 400; font-size: 26px; line-height: 1.1; color: var(--ink); text-decoration: none; letter-spacing: 0.02em; display: inline-flex; align-items: baseline; }
+.brand svg { width: 20px; height: 20px; margin-right: 8px; flex: none; align-self: center; }
 .brand .noun { font-family: var(--font-sans); font-weight: 600; font-size: 11px; color: var(--ink-2); margin-left: 12px; text-transform: uppercase; letter-spacing: 0.16em; }
 .nav { display: flex; gap: 2px; flex-wrap: wrap; }
 .nav a { position: relative; text-decoration: none; color: var(--ink-2); padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13.5px; letter-spacing: 0.02em; transition: background-color 0.15s ease, color 0.15s ease; }
@@ -670,8 +671,10 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
 .stage.rail-stage { position: relative; border-radius: 14px; border: 1px solid #e7e2da; background: #f4f2ee; overflow: hidden; touch-action: pan-y; box-shadow: 0 1px 2px rgba(28, 25, 21, 0.05), 0 14px 34px rgba(28, 25, 21, 0.07); }
 .stage.rail-stage canvas { border: 0; border-radius: 0; background: transparent; cursor: grab; }
 .rail-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
-.rail-tag { position: absolute; left: 0; top: 0; margin-top: 9px; display: flex; flex-direction: column; align-items: center; padding: 3px 8px 4px; background: #fffdf9; color: #161513; border-radius: 3px; box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.16), 0 4px 10px rgba(0, 0, 0, 0.08); font-size: 12.5px; line-height: 1.2; white-space: nowrap; will-change: transform; }
+.rail-tag { position: absolute; left: 0; top: 0; margin-top: 9px; display: flex; flex-direction: column; align-items: center; padding: 2px 7px 3px; background: #fffdf9; color: #161513; border-radius: 3px; box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.16), 0 4px 10px rgba(0, 0, 0, 0.08); font-size: 12px; line-height: 1.2; white-space: nowrap; will-change: transform; }
 .rail-tag::before { content: ''; position: absolute; left: 50%; top: -9px; width: 1px; height: 10px; background: #a9a196; }
+.rail-tag.low { margin-top: 40px; }
+.rail-tag.low::before { top: -40px; height: 41px; }
 .rail-tag::after { content: ''; position: absolute; left: calc(50% - 2.5px); top: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--point); }
 .rail-tag b { font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; margin-top: 3px; }
 .rail-tag i, .rail-tag span { font-style: normal; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #5f584e; }
@@ -719,6 +722,8 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
 .rp-of { font-size: 12.5px; color: var(--ink-2); }
 .rail-plaque .chip.sample { font-size: 12px; padding: 0 6px; min-height: 0; background: transparent; }
 .piece-panel { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px 16px; }
+.pp-media { height: 108px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); margin: 10px 0; }
+.pp-media svg, .pp-media canvas { max-height: 88px; width: auto; }
 .pp-top { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .pp-count { font-size: 12.5px; color: var(--ink-2); min-width: 54px; text-align: center; font-variant-numeric: tabular-nums; }
 .pp-close { margin-left: auto; width: 36px; height: 36px; border: 0; background: transparent; font-size: 22px; color: var(--ink); cursor: pointer; }
@@ -734,7 +739,6 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
 .pp-step:hover { border-color: var(--point); box-shadow: inset 0 -3px 0 var(--point); }
 @media (max-width: 900px) {
   .rail-body.open { grid-template-columns: minmax(0, 1fr); }
-  .rail-plaque { position: static; margin: 0; border-width: 0 0 1px; box-shadow: none; background: var(--surface); }
 }
 
 /* immersive My closet (11/5, from the design handoff): the rail fills the screen; the ledger plaque, an editorial

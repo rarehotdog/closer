@@ -95,6 +95,7 @@ export type Operation = StoredOperation & {
   sessionId: string | null;
   photoId: string | null;
   sentence: string | null;
+  scan?: boolean;
   hardRules: HardRule[];
   weather: { rainPct: number } | null;
   perception: { pin: number[]; direction: string; offenders: { index: number; why: string }[]; samMode: 'mask' | 'box_crop' | null; w: number; h: number } | null;
@@ -249,14 +250,15 @@ export class CloserService {
     return ws;
   }
 
-  // ---------------- step 1: photo + sentence ----------------
+  // ---------------- step 1: photo + sentence (or whole-closet scan) ----------------
   async startPhoto(
     workspaceId: string,
-    a: { photoId: string; sentence: string; sessionId?: string | null; hardRules?: HardRule[]; weather?: { rainPct: number } | null },
+    a: { photoId: string; sentence: string; scan?: boolean; sessionId?: string | null; hardRules?: HardRule[]; weather?: { rainPct: number } | null },
   ): Promise<Operation | { ok: false; code: ReasonCode; detail: string }> {
     const ws = this.ws(workspaceId);
     if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
     const op = this.newOp(ws, 'photo', { sessionId: a.sessionId ?? null, photoId: a.photoId, sentence: a.sentence, hardRules: a.hardRules ?? [], weather: a.weather ?? null });
+    op.scan = Boolean(a.scan);
     op.labels.push(LABELS.ledgerZeroUntilConfirm);
     const g1 = this.gate(ws, op.sessionId, EST_MICRO_USD.spark1 + EST_MICRO_USD.sam);
     if (!g1.ok) return this.hold(op, ws.kind, [g1.code], null, g1.detail);
@@ -264,10 +266,10 @@ export class CloserService {
     if (!photo || Math.max(photo.w, photo.h) > 1600) return this.hold(op, ws.kind, ['UNSUPPORTED_IMAGE'], null, 'photo missing or long side over 1,600 px');
     if (a.sentence.length > 200) return this.hold(op, ws.kind, ['META_REQUEST_REJECTED'], null, 'sentence over 200 characters (not sent)');
 
-    const r1 = await this.ports.spark1.perceive({ imageUrl: photo.url, sentence: a.sentence });
+    const r1 = await this.ports.spark1.perceive({ imageUrl: photo.url, sentence: a.sentence, scan: op.scan });
     this.recordCalls(op, r1.calls);
     if (!r1.ok) return this.hold(op, ws.kind, [r1.code], null, r1.detail);
-    const v1 = validateSpark1(r1.value);
+    const v1 = validateSpark1(r1.value, { allowDuplicateSlots: op.scan });
     if (!v1.ok) return this.hold(op, ws.kind, v1.codes, null, v1.detail);
     const s1 = v1.value;
 
@@ -288,7 +290,7 @@ export class CloserService {
     } else {
       const parserNotes = rs.notes ?? [];
       this.noteLastCall(op, parserNotes); // parser diagnostics on the SAM call line
-      const vs = validateSam(objects, rs.value, photo.w, photo.h, this.maskTolerancePx);
+      const vs = validateSam(objects, rs.value, photo.w, photo.h, this.maskTolerancePx ?? (op.scan ? 120 : undefined));
       if (!vs.ok) return this.hold(op, ws.kind, vs.codes, null, [vs.detail, ...parserNotes].join(' · '));
       this.noteLastCall(op, vs.notes); // 'mask N overshoot X px': clamped, not held
       vs.records.forEach((r, i) => {
@@ -361,7 +363,7 @@ export class CloserService {
       const ans = a.answers?.[String(c.cardId)];
       return {
         itemId, slot: c.slot, type: c.type, color: ans?.color ?? c.sparkColor, formality: ans?.formality ?? c.formality,
-        ownership: 'CONFIRMED', cutoutRef: `${op.operationId}#${c.cardId}`, origin: 'photo', waterproof: null, sample: true,
+        ownership: 'CONFIRMED', cutoutRef: `${op.operationId}#${c.cardId}`, origin: 'photo', waterproof: null, sample: !op.photoId?.startsWith('up_'),
       };
     });
     const events: EventInput[] = items.map((it, i) => ({

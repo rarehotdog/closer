@@ -15,7 +15,7 @@ export type PortResult<T> =
   | { ok: true; value: T; calls: CallDraft[]; notes?: string[] }
   | { ok: false; http: number; code: ReasonCode; detail: string; calls: CallDraft[] };
 
-export type Spark1Request = { imageUrl: string; sentence: string };
+export type Spark1Request = { imageUrl: string; sentence: string; scan?: boolean };
 export type SamRequest = { imageUrl: string; prompt: string };
 
 /** Facts code sends to Spark 2: candidate IDs per slot, fact IDs, item facts. No free text from visitors. */

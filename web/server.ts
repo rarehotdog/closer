@@ -282,11 +282,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       const photoId = String(b.photoId ?? '');
       // An uploaded photo can be used only in the wardrobe it was uploaded to.
       if (photoId.startsWith('up_') && !uploads.list(wsId).some((p) => p.photoId === photoId)) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'no such photo in this wardrobe' });
+      const scan = ws.kind === 'real' && b.scan === true;
       const chip = CHIPS.find((c) => c.chipId === b.chipId);
-      // Visitors: fixed sentence chips only, no free text (RT-13). The owner may write their own sentence.
+      // Visitors: fixed sentence chips only, no free text (RT-13). The owner may write their own sentence or scan a whole closet photo.
       const free = ws.kind === 'real' && typeof b.sentence === 'string' && b.sentence.trim() ? b.sentence.trim() : null;
-      if (!chip && !free) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
-      return send(res, 200, await svc.startPhoto(wsId, { photoId, sentence: free ?? chip!.text, sessionId }));
+      const sentence = free ?? (scan ? 'Register every clearly visible garment in this closet photo.' : chip?.text ?? null);
+      if (!sentence) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
+      return send(res, 200, await svc.startPhoto(wsId, { photoId, sentence, scan, sessionId }));
     }
     case 'photodelete':
       return send(res, 200, { ok: uploads.delete(wsId, String(b.photoId ?? '')) });

@@ -98,12 +98,60 @@ function rgbOf(color) {
   const c = META.palette[color];
   return c ? `rgb(${c.join(',')})` : '#bbb';
 }
-function placeholder(color) {
+const SILHOUETTES = {
+  coat: ['M21,5 L12,11 L5,56 L13,58 L17,24 L15,75 L45,75 L43,24 L47,58 L55,56 L48,11 L39,5 Q30,10 21,5 Z', 'M23,6 L30,26 L37,6 M30,26 L30,75'],
+  jacket: ['M20,6 L11,13 L6,52 L14,54 L18,24 L17,64 L43,64 L42,24 L46,54 L54,52 L49,13 L40,6 Q30,11 20,6 Z', 'M22,7 L30,28 L38,7 M30,28 L30,64'],
+  zip: ['M21,7 L11,14 L6,52 L14,54 L18,24 L18,62 L42,62 L42,24 L46,54 L54,52 L49,14 L39,7 Q30,11 21,7 Z', 'M30,10 L30,62 M18,57 L42,57'],
+  shirt: ['M22,7 L11,14 L6,50 L14,52 L18,23 L18,63 L42,63 L42,23 L46,52 L54,50 L49,14 L38,7 L34,13 L30,10 L26,13 Z', 'M30,11 L30,63'],
+  knit: ['M21,8 L11,15 L6,51 L14,53 L18,24 L18,61 L42,61 L42,24 L46,53 L54,51 L49,15 L39,8 Q30,14 21,8 Z', 'M18,56 L42,56'],
+  tee: ['M21,9 L9,17 L13,30 L19,25 L19,62 L41,62 L41,25 L47,30 L51,17 L39,9 Q30,15 21,9 Z', ''],
+  shorts: ['M15,12 L45,12 L48,48 L33,48 L30,28 L27,48 L12,48 Z', 'M15,17 L45,17 M30,12 L30,28'],
+  trousers: ['M16,6 L44,6 L47,74 L34,74 L30,26 L26,74 L13,74 Z', 'M16,11 L44,11 M30,6 L30,26'],
+  shoes: ['M6,50 Q6,36 18,35 L25,40 Q29,43 29,50 L29,56 L6,56 Z M31,50 Q31,36 43,35 L50,40 Q54,43 54,50 L54,56 L31,56 Z', 'M6,53 L29,53 M31,53 L54,53'],
+};
+function kindShape(kind) {
+  const s = String(kind || '').toLowerCase();
+  if (!s) return null;
+  if (/coat|trench|parka/.test(s)) return SILHOUETTES.coat;
+  if (/track|hood|zip|cardigan/.test(s)) return SILHOUETTES.zip;
+  if (/jacket|blazer|suit/.test(s)) return SILHOUETTES.jacket;
+  if (/shirt|blouse|oxford/.test(s)) return SILHOUETTES.shirt;
+  if (/knit|sweater|crew|pullover/.test(s)) return SILHOUETTES.knit;
+  if (/tee|t-shirt|top|tank|polo/.test(s)) return SILHOUETTES.tee;
+  if (/short/.test(s)) return SILHOUETTES.shorts;
+  if (/shoe|derby|sneaker|loafer|boot|runner|flat|heel/.test(s)) return SILHOUETTES.shoes;
+  if (/trouser|jean|chino|pant|denim|slack|skirt/.test(s)) return SILHOUETTES.trousers;
+  return null;
+}
+function placeholder(color, kind) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 60 80');
   svg.setAttribute('width', '60');
   svg.setAttribute('height', '80');
+  const c = META && META.palette && META.palette[color];
+  const lum = c ? (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) : 180;
+  const seam = lum < 92 ? 'rgba(255,255,255,0.34)' : 'rgba(21,20,19,0.28)';
+  const shape = kindShape(kind);
+  if (shape) {
+    const body = document.createElementNS(ns, 'path');
+    body.setAttribute('d', shape[0]);
+    body.setAttribute('fill', rgbOf(color));
+    body.setAttribute('stroke', 'rgba(21,20,19,0.32)');
+    body.setAttribute('stroke-width', '1.4');
+    body.setAttribute('stroke-linejoin', 'round');
+    svg.append(body);
+    if (shape[1]) {
+      const detail = document.createElementNS(ns, 'path');
+      detail.setAttribute('d', shape[1]);
+      detail.setAttribute('fill', 'none');
+      detail.setAttribute('stroke', seam);
+      detail.setAttribute('stroke-width', '1.1');
+      detail.setAttribute('stroke-linecap', 'round');
+      svg.append(detail);
+    }
+    return svg;
+  }
   const poly = document.createElementNS(ns, 'polygon');
   poly.setAttribute('points', '8,0 52,0 60,8 60,72 52,80 8,80 0,72 0,8');
   poly.setAttribute('fill', rgbOf(color));
@@ -139,7 +187,7 @@ function cutMap(view) {
 }
 function thumb(item, cuts) {
   if (!item) return h('div', { class: 'muted' }, '—');
-  return cuts[item.itemId] ? cutCanvas(cuts[item.itemId]) : placeholder(item.color);
+  return cuts[item.itemId] ? cutCanvas(cuts[item.itemId]) : placeholder(item.color, item.type || item.slot);
 }
 
 // ---------- chrome ----------
@@ -227,7 +275,7 @@ function decisionUI(root, cfg) {
     if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  async function run() {
+  async function run(scan = false) {
     await busy(async () => {
       if (cfg.visitor) {
         const t = await postJson('/api/try/start', { photoId: S.photoId });
@@ -236,7 +284,10 @@ function decisionUI(root, cfg) {
       S.flash = [];
       S.answers = {};
       const own = !cfg.visitor && S.sentence.trim();
-      const op = await postJson(`/api/ws/${S.wsId}/photo`, own ? { photoId: S.photoId, sentence: S.sentence.trim() } : { photoId: S.photoId, chipId: S.chipId });
+      const body = !cfg.visitor && scan
+        ? { photoId: S.photoId, scan: true, ...(own ? { sentence: S.sentence.trim() } : {}) }
+        : own ? { photoId: S.photoId, sentence: S.sentence.trim() } : { photoId: S.photoId, chipId: S.chipId };
+      const op = await postJson(`/api/ws/${S.wsId}/photo`, body);
       if (op.ok === false) flash({ chip: errWords(op.code, op.detail), cls: 'bad' });
       S.ran = true;
     }, '#decision');
@@ -283,7 +334,9 @@ function decisionUI(root, cfg) {
         sentences,
         cfg.visitor ? null : h('textarea', { id: 'own-sentence', rows: '2', class: 'draft', maxlength: '200', placeholder: 'Or write your own: Keep this jacket. The rest feels too dressed-up.', oninput: (e) => { S.sentence = e.target.value; } }, S.sentence),
         h('div', { class: 'spacer' }),
-        h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: run }, S.busy ? 'Working…' : 'Find the pieces'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: () => run(false) }, S.busy ? 'Working…' : 'Find the pieces'),
+          cfg.visitor ? null : h('button', { class: 'btn ghost', type: 'button', id: 'scan-closet', disabled: S.busy, onclick: () => run(true) }, 'Scan whole closet (up to 16)'),
           cfg.visitor ? h('span', { class: 'muted' }, 'Each run uses a fresh copy of the sample wardrobe.') : null)));
   }
 
@@ -461,7 +514,12 @@ function decisionUI(root, cfg) {
         !op.context ? h('div', { class: 'row', style: 'margin-top:12px' },
           h('button', { class: 'btn', id: 'confirm', type: 'button', disabled: S.busy || op.cards.some((c) => c.question && !S.answers[c.cardId]), onclick: () => confirm(op) }, `Confirm ${op.cards.length} cards`),
           h('span', { class: 'muted' }, 'Nothing is saved until you confirm.')) : null,
-        op.context && op.state === 'DRAFT' ? h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn', id: 'propose', type: 'button', disabled: S.busy, onclick: () => propose(op) }, 'Suggest changes')) : null)));
+        op.context && op.state === 'DRAFT' ? h('div', { class: 'row', style: 'margin-top:12px' },
+          op.scan ? null : h('button', { class: 'btn', id: 'propose', type: 'button', disabled: S.busy, onclick: () => propose(op) }, 'Suggest changes'),
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/closet/3d?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-rail' }, 'Open 3D boutique rail') : null,
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/closet?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-closet' }, 'Review & prices') : null,
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/today?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-today' }, 'Today') : null,
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/discover?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-discover' }, 'Discover') : null) : null)));
     }
     if (callsBlock) parts.push(callsBlock);
     if (op.questions.length && op.state !== 'DRAFT') {
@@ -550,7 +608,7 @@ async function landingScreen(view) {
     h('ol', { class: 'flow-steps', 'aria-label': 'How it works' },
       [['Photo', 'One outfit, one sentence'], ['Cards', 'Spark finds, SAM cuts, you confirm'], ['Rail', 'Your pieces, prices seen'], ['Keep or let go', 'Counted facts, your call']]
         .map(([t, d], i) => h('li', null, h('span', { class: 'fs-n' }, String(i + 1)), h('b', null, t), h('span', { class: 'fs-d' }, d)))),
-    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/try', id: 'start' }, 'Start with a photo'), h('a', { class: 'btn ghost', href: '/closet/3d', id: 'rail-link' }, 'Open my closet'), h('a', { class: 'muted', href: '/today', id: 'try-link' }, 'Today')),
+    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/try', id: 'start' }, 'Start with a photo'), h('a', { class: 'btn ghost', href: '/app', id: 'upload-link' }, 'Upload your photo'), h('a', { class: 'btn ghost', href: '/closet/3d', id: 'rail-link' }, 'Open my closet'), h('a', { class: 'muted', href: '/today', id: 'try-link' }, 'Today')),
     railSlot,
     boardSlot,
     h('div', { class: 'grid cols-3' },
@@ -591,7 +649,10 @@ async function landingRail(slot, ws) {
 async function tryScreen(view) {
   chrome([h('span', { class: 'chip sample' }, 'Sample photos · drawn by code · demo')]);
   view.append(h('h1', null, 'Try it on three sample outfits'),
-    h('p', { class: 'lede' }, 'Pick one outfit photo and one fixed sentence. Closer keeps the piece you want, changes only what feels off, and saves nothing until you confirm.'));
+    h('p', { class: 'lede' }, 'Pick one outfit photo and one fixed sentence. Closer keeps the piece you want, changes only what feels off, and saves nothing until you confirm.'),
+    h('div', { class: 'row', style: 'margin: 0 0 14px' },
+      h('a', { class: 'btn small ghost', href: '/app', id: 'open-app-upload' }, 'Upload or take your own photo'),
+      h('span', { class: 'muted' }, 'Owner wardrobe saves your real camera photo on this server; below is a safe sandbox with three sample outfits.')));
   const root = h('div');
   view.append(root);
   const ui = decisionUI(root, { wsId: null, visitor: true });
@@ -837,6 +898,19 @@ function priceChart(series, cur, opts) {
 }
 
 async function closetWs() {
+  const wsParam = new URLSearchParams(location.search).get('ws');
+  if (wsParam) {
+    const r = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/view`, { headers: authHeaders() });
+    if (r.ok) {
+      const own = await getJson(`/api/ws/${encodeURIComponent(wsParam)}/photos`).catch(() => ({ photos: [] }));
+      for (const p of own.photos || []) {
+        if (META.photos.some((q) => q.photoId === p.photoId)) continue;
+        const b = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/photo/${p.photoId}`, { headers: authHeaders() });
+        if (b.ok) META.photos.unshift({ photoId: p.photoId, title: 'Your photo', url: URL.createObjectURL(await b.blob()), w: p.w, h: p.h, count: 0, mine: true });
+      }
+      return { id: wsParam, view: await r.json(), owner: true };
+    }
+  }
   let id = null;
   try { id = localStorage.getItem('closer.closet'); } catch {}
   if (id) {
@@ -912,7 +986,7 @@ function sampleChips() {
 }
 
 function tile(it, opts = {}) {
-  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` }, it ? placeholder(it.color) : h('span', { class: 'muted' }, '—'), h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : opts.label || 'none'), opts.badge ? h('span', { class: 'chip accent' }, opts.badge) : null);
+  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` }, it ? placeholder(it.color, it.type || it.slot) : h('span', { class: 'muted' }, '—'), h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : opts.label || 'none'), opts.badge ? h('span', { class: 'chip accent' }, opts.badge) : null);
 }
 
 async function todayScreen(view) {
@@ -1001,7 +1075,7 @@ async function todayScreen(view) {
       const on = S.locks.has(it.itemId);
       const avail = it.availability;
       return h('button', { type: 'button', class: `item pickable${on ? ' locked' : ''}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => { on ? S.locks.delete(it.itemId) : S.locks.add(it.itemId); S.op = null; S.saved = null; render(); } },
-        h('div', { class: 'thumb' }, placeholder(it.color)),
+        h('div', { class: 'thumb' }, placeholder(it.color, it.type || it.slot)),
         h('div', { class: 'meta' }, h('b', null, `${it.itemId} · ${itemName(it)}`), h('span', null, FORMALITY_LABEL[it.formality] || it.formality),
           avail !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, avail.toLowerCase()) : null,
           on ? h('span', { class: 'chip accent' }, 'Keep this today') : null));
@@ -1457,7 +1531,7 @@ async function closetScreen(view) {
       h('section', { class: 'panel' }, h('h2', null, `To look at (${cands.length})`),
         cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this window.') : null,
         h('div', { class: 'grid' }, cands.map((x) => h('div', { class: `item wide${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
-          h('div', { class: 'thumb' }, placeholder(S.items[x.itemId] ? S.items[x.itemId].color : 'unknown')),
+          h('div', { class: 'thumb' }, placeholder(S.items[x.itemId] ? S.items[x.itemId].color : 'unknown', S.items[x.itemId] ? S.items[x.itemId].type : '')),
           h('div', { class: 'meta' }, h('b', null, `${x.itemId} · ${itemName(S.items[x.itemId])}`), h('span', null, x.line),
             h('span', { class: 'muted' }, `Tracked since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays} days without any record`),
             x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
@@ -1520,7 +1594,7 @@ async function discoverScreen(view) {
       h('p', { class: 'muted' }, c.basis),
       h('h3', null, 'Item box'),
       h('div', { class: 'box' }, c.box.map((e) => h('div', { class: `box-cell ${bx[e.state][0]}` },
-        placeholder(e.color), h('b', null, e.label),
+        placeholder(e.color, e.label), h('b', null, e.label),
         h('span', { class: `chip ${e.state === 'FILLED' ? 'ok' : e.state === 'PARTIAL' ? 'warn' : 'bad'}` }, e.itemId ? `${bx[e.state][1]} · ${e.itemId}` : bx[e.state][1]),
         h('span', { class: 'muted' }, `in ${e.lookIds.length} target look${e.lookIds.length === 1 ? '' : 's'}${e.state === 'EMPTY' && e.outfitsAdded !== null ? ` · adds ${e.outfitsAdded} complete outfits` : ''}`)))),
       c.nextUp.length ? h('p', { class: 'muted' }, `Fills the most target looks next: ${c.nextUp.map((e) => `${e.label} (${e.lookIds.length} look${e.lookIds.length === 1 ? '' : 's'})`).join(', ')}. Use a similar piece you own, or register a new one from a photo; the count moves only when the closet does.`) : null);
@@ -1535,7 +1609,7 @@ async function discoverScreen(view) {
         const cov = covOf(l.lookId);
         return h('div', { class: `card look${S.look === l.lookId ? ' pinned' : ''}` },
           h('button', { type: 'button', class: 'look-select', onclick: () => open(l.lookId) },
-            h('div', { class: 'row' }, l.pieces.map((p) => placeholder(p.color))),
+            h('div', { class: 'row' }, l.pieces.map((p) => placeholder(p.color, p.label))),
             h('div', { class: 'hd' }, l.title), h('div', { class: 'muted' }, `${l.credit} · ${l.note}`)),
           h('div', { class: 'row actions' },
             cov ? h('span', { class: `chip ${cov.coverage.missing === 0 ? 'ok' : 'accent'}` }, `${cov.coverage.matched}/${cov.coverage.total} · ${cov.coverage.pct}%`) : null,
@@ -1554,7 +1628,7 @@ async function discoverScreen(view) {
       const gaps = m.gaps.filter((g) => !S.hidden.has(g.piece.label));
       if (gaps.length) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Pieces you do not have'),
         h('div', { class: 'grid' }, gaps.map((g) => h('div', { class: 'card' },
-          h('div', { class: 'hd' }, g.piece.label, placeholder(g.piece.color)),
+          h('div', { class: 'hd' }, g.piece.label, placeholder(g.piece.color, g.piece.label)),
           h('p', null, g.outfitsAdded > 0 ? `Adding it gives ${g.outfitsAdded} more complete outfits from this closet.` : 'It adds no new complete outfits to this closet.'),
           h('p', { class: 'muted' }, m.basis),
           h('div', { class: 'row' },
@@ -1683,7 +1757,7 @@ async function railView(view, ctx) {
     h('span', null, 'Bottoms ', h('b', null, String(count(['bottom'])))),
     h('span', null, 'Shoes ', h('b', null, String(count(['shoes'])))));
   const plaque = rows.length ? h('div', { class: 'rail-plaque' },
-    h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: '/closet' }, 'Full ledger')),
+    h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: wsParam ? `/closet?ws=${encodeURIComponent(wsParam)}` : '/closet' }, 'Full ledger')),
     rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null;
   const host = h('div', { class: 'stage rail-stage' });
   // Immersive (design handoff): the rail fills the screen; the ledger, the pieces and the panel float over it.
@@ -1750,6 +1824,7 @@ async function railView(view, ctx) {
         h('button', { type: 'button', class: 'pg', 'aria-label': 'Next piece', onclick: () => step(1) }, '›'),
         h('button', { type: 'button', class: 'pp-close', 'aria-label': 'Close', onclick: close }, '×')),
       h('div', { class: 'chip-row' }, h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot), c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'), cuts[itemId] ? h('span', { class: 'chip' }, cuts[itemId].mine ? 'Your photo' : 'Sample photo') : null),
+      h('div', { class: 'pp-media' }, cuts[itemId] ? cutCanvas(cuts[itemId]) : placeholder(it.color, it.type || c.slot)),
       h('h2', { class: 'pp-title' }, itemName(it)),
       h('p', { class: 'muted pp-code' }, itemId),
       label('Price seen'),
@@ -1758,11 +1833,11 @@ async function railView(view, ctx) {
       label('Wears'),
       h('p', { class: 'muted' }, c.wearLabel || 'No confirmed wear yet'),
       label('Next step'),
-      wsParam ? h('p', { class: 'muted' }, 'Decide on My wardrobe.') : h('div', { class: 'pp-steps' },
-        h('a', { class: 'pp-step', href: `/closet?decide=${itemId}` }, h('b', null, 'Keep it'), h('span', null, 'Wear, store or decide later')),
-        h('a', { class: 'pp-step', href: `/closet?decide=${itemId}` }, h('b', null, 'Let it go'), h('span', null, 'Prepare to sell or donate'))),
+      h('div', { class: 'pp-steps' },
+        h('a', { class: 'pp-step', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${itemId}` }, h('b', null, 'Keep it'), h('span', null, 'Wear, store or decide later')),
+        h('a', { class: 'pp-step', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${itemId}` }, h('b', null, 'Let it go'), h('span', null, 'Prepare to sell or donate'))),
       h('div', { class: 'row' },
-        wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear today'),
+        h('a', { class: 'btn small ghost', href: `/today?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}lock=${itemId}` }, 'Wear today'),
         h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Walk-in')));
   }
 }

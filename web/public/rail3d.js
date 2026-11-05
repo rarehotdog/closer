@@ -205,11 +205,14 @@ export function mountRail3d(host, pieces, opts) {
     scene.add(holder);
     const words = tagWords(slot.tag, opts.money);
     const state = p.availability && p.availability !== 'AVAILABLE' ? UNAVAILABLE[p.availability] || 'Away' : '';
+    const prev = entries[entries.length - 1];
+    const tag = words || state ? tagEl(words, state) : null;
+    if (tag && hanging && prev && prev.hanging && prev.tag && !prev.tag.classList.contains('low')) tag.classList.add('low');
     const e = {
       itemId: p.itemId, hanging, holder, swing, g, a: 0, v: 0, z: 0, zTo: 0, x0: slot.x, dx: 0, dxTo: 0, turn: hanging ? RACK_TURN : 0, turnTo: hanging ? RACK_TURN : 0,
-      tag: words || state ? tagEl(words, state) : null,
-      // where the tag's string meets the piece: just right of the hanger's neck, or above a pair of shoes
-      anchor: hanging ? new THREE.Vector3(0.05, -0.085, 0.03) : new THREE.Vector3(0, 0.2, 0),
+      tag,
+      // where the tag's string meets the piece: under the hanger's collar, or above a pair of shoes
+      anchor: hanging ? new THREE.Vector3(0, -0.095, 0.035) : new THREE.Vector3(0, 0.2, 0),
     };
     if (hanging && p.photo && typeof p.photo.then === 'function') {
       p.photo.then((img) => {
@@ -283,7 +286,7 @@ export function mountRail3d(host, pieces, opts) {
       v3.project(camera);
       const x = (v3.x * 0.5 + 0.5) * w;
       const y = (-v3.y * 0.5 + 0.5) * h;
-      const off = x < -60 || x > w + 60;
+      const off = v3.z > 1 || x < -60 || x > w + 60 || y < 2 || y > h - 18;
       e.tag.style.transform = `translate(calc(${(x + el.offsetLeft).toFixed(1)}px - 50%), ${(y + el.offsetTop).toFixed(1)}px)`;
       e.tag.style.visibility = off ? 'hidden' : 'visible';
     }

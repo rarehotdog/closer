@@ -26,7 +26,7 @@ export type Spark1Output = {
 const isInt = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x);
 const fail = (codes: ReasonCode[], detail: string): Fail => ({ ok: false, codes, detail });
 
-export function validateSpark1(raw: unknown): { ok: true; value: Spark1Output } | Fail {
+export function validateSpark1(raw: unknown, opts?: { allowDuplicateSlots?: boolean }): { ok: true; value: Spark1Output } | Fail {
   const o = raw as Record<string, unknown> | null;
   if (!o || typeof o !== 'object' || !Array.isArray(o.garments)) return fail(['INVALID_MODEL_OUTPUT'], 'garments missing');
   const g = o.garments as unknown[];
@@ -42,7 +42,7 @@ export function validateSpark1(raw: unknown): { ok: true; value: Spark1Output } 
     if (!isColorFamily(it.color_family)) return fail(['INVALID_MODEL_OUTPUT'], `garment ${i}: color_family`);
     if (!(FORMALITY_LEVELS as readonly unknown[]).includes(it.formality)) return fail(['INVALID_MODEL_OUTPUT'], `garment ${i}: formality`);
     const slot = GARMENT_TYPES[it.type];
-    if (slotsSeen.includes(slot)) return fail(['INVALID_MODEL_OUTPUT'], `slot rule: two garments in ${slot}`);
+    if (!opts?.allowDuplicateSlots && slotsSeen.includes(slot)) return fail(['INVALID_MODEL_OUTPUT'], `slot rule: two garments in ${slot}`);
     slotsSeen.push(slot);
   }
   const inRange = (v: unknown) => isInt(v) && v >= 0 && v < g.length;
