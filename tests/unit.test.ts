@@ -13,7 +13,7 @@ import { FXH_ROLES } from '../fixtures/fxh.ts';
 import { capBlocks, capsFromEnv, killActive, PROVISIONAL_CAPS, visitorDayCap } from '../engine/caps.ts';
 import { createRealTransport, RealModeRefused, resolveMode } from '../adapters/transport.ts';
 import { harness, ok, startHero, newId } from './helpers.ts';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from './helpers.ts';
 import { liveChip } from '../shared/labels.ts';
@@ -149,9 +149,10 @@ test('stale expectedRevision → STALE_STATE; item IDs use the lowest free numbe
   }
 });
 
-test('every adapters/ file carries the unverified header', () => {
+test('every adapters/ file carries the live-record header, and the record it names exists', () => {
+  assert.ok(existsSync(join(ROOT, 'docs', 'live', 'live_check.json')));
   const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
   for (const f of walk(join(ROOT, 'adapters'))) {
-    assert.equal(readFileSync(f, 'utf8').split('\n')[0], '// 미검증 — 문서 예시 기반, 실호출 0', f);
+    assert.equal(readFileSync(f, 'utf8').split('\n')[0], '// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반', f);
   }
 });

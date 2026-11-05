@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // SAM 3.1: same image + box prompts (object IDs 1–n chosen by code) in one request → one box and
 // one mask per ID. Non-streaming (streaming is optional per the SAM docs). store:false (§3-4).
 // Live responses are read by the official parser (@meta-sam/parser): fields by name in any order,

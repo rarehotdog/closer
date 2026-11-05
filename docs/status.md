@@ -1,5 +1,11 @@
 # Closer — build status (mock mode)
 
+## 00. Update 2026-11-05 after submission (branch post-submit, not pushed)
+
+- Submitted at main dba9ff3. The sections below are kept as written at their times.
+- Live calls: one recorded run on 2026-11-05 10:22 KST through `scripts/live_check.ts`, not through the server: 1 model-list request and 4 model calls; Spark sentence, Spark photo (a sample photo drawn by code) and the Spark function-tool turn passed the code checks; SAM 3.1 returned 4 masks and code refused one (45 px out of its box, tolerance 22), so photo -> cards -> cut-outs has not completed on a live answer yet ([docs/live/live_check.json](live/live_check.json)). The adapters' first line now points to that record instead of saying 0 real calls.
+- Still true: no live call through the server; deploy not done.
+
 ## 0. Update 2026-11-05 10:00 KST — submission build
 
 - main = the sha shown by `git log -1`; GitHub `rarehotdog/closer` (public) tracks it. Tests (11/5 09:55 KST run): 179 tests · 170 pass · 0 fail · 9 skip (the real-mode cases, without a key). `npm run typecheck` passes. Static AT-17/18: 0 findings at repo scope.
