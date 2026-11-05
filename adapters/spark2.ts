@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Spark 2: one function-tool turn inside the candidates code passed: propose_edit (≤2 options) or
 // ask_owner. parallel_tool_calls:false, tool_choice not sent (only "auto" is supported), store:false.
 // Arguments are re-checked by code (engine/validate.ts). A text reply is NO_ACTION.

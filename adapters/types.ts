@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Ports the engine uses. Real and mock share the same request builders and parsers; only the
 // transport differs (adapters/transport.ts real, adapters/mock/transport.ts mock).
 import type { ReasonCode } from '../shared/reasons.ts';

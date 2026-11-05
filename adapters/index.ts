@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Port factory. Mock is the default; tests exercise mock mode alone. Real mode needs
 // MODEL_API_KEY in the server environment and is refused in test processes.
 import type { PhotoLibrary } from '../fixtures/photos.ts';

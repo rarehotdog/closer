@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // First live run: scripts/live_check.ts, by the owner with their own key.
 // Spark reads the owner's sentence into locks, direction and rain. The schema limits `keep` to the
 // item IDs code sends, so the model cannot name a piece the wardrobe does not have; code still

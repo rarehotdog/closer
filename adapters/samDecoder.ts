@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Official SAM mask decoder (@meta-sam/parser, SAM License). The wire marker is the first character
 // after "H,W,": '~' lossless (default for text prompts), '!' one_bit (box and point prompts always).
 // The library expects the marker as part of the payload. Decoded against the docs' own example in

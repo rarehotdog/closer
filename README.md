@@ -77,7 +77,7 @@ This repository runs in **mock mode** by default: no Meta model is called and no
 
 - Live URL: not deployed yet (the kit is in [deploy/](deploy/README.md)).
 - Demo video: not recorded yet; the script is [docs/demo_script.md](docs/demo_script.md). `/w/demo-rc1` shows the read-only sample run with its state hash.
-- Live model calls recorded in this repository: 5 on 2026-11-05 (4 passed the code checks, 1 refused by the mask-in-box check), in [docs/live/live_check.json](docs/live/live_check.json).
+- Live model calls recorded in this repository: 1 model-list request and 4 model calls on 2026-11-05: 3 calls passed the code checks, 1 (SAM masks) was refused by the mask-in-box check, in [docs/live/live_check.json](docs/live/live_check.json).
 
 | Command | What it does |
 |---|---|

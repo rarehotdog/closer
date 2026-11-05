@@ -1,5 +1,5 @@
 // Response parsing for live calls (adapters/responses.ts). Synthetic JSON only, no network.
-// The live response shape is still unconfirmed (실호출 0), so these pin what each fallback does.
+// The live response shape is still unconfirmed (one live run on 2026-11-05, docs/live/live_check.json; other shapes are from the docs), so these pin what each fallback does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { functionCalls, outputText, parseJsonOutput, readUsage, sparkCostMicroUsd } from '../adapters/responses.ts';

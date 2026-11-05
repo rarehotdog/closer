@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Spark 1: one outfit photo + one sentence → garment boxes (0–1000), attributes, keep target,
 // direction, offenders. Single call, store:false, structured output via text.format (§3-3, §3-4).
 import { COLOR_FAMILIES, DIRECTIONS, FORMALITY_LEVELS, GARMENT_TYPES, OFFENDER_WHY } from '../shared/wardrobe.ts';

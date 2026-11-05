@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Transport = one POST to the Responses API. Mode resolution: mock is the default. Real mode
 // refuses to start without MODEL_API_KEY, and is always refused in test processes.
 import type { HttpResult } from '../engine/retry.ts';

@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Shared Responses-API plumbing: send with the retry policy, turn every HTTP attempt into a call
 // row, read output text / function calls, and price usage.
 import { randomUUID } from 'node:crypto';

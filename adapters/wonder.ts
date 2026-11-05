@@ -1,4 +1,4 @@
-// 미검증 — 문서 예시 기반, 실호출 0
+// 실호출 기록: docs/live/live_check.json (2026-11-05, 1회) — 그 기록 밖의 응답 형태는 문서 예시 기반
 // Muse Wonder (muse-wonder-1.0, preview) on the same Responses API as Spark: one general "ask" port
 // that the engine, the server and scripts/wonder.ts share. Text, images, a strict JSON schema,
 // function tools, web search grounding with url citations, and a follow-up turn through
