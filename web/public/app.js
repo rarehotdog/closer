@@ -1624,10 +1624,57 @@ function viewSwitch(mode) {
 
 /* The rail (11/5): every piece hung on one rail, shoes under it, a tag only where the ledger holds a price.
    Few words on screen: the count, one number per currency with its denominator, and the piece you tap. */
+// The sample closet hangs studio photos from the design kit, recoloured to each record's colour with the photo's own
+// light and shade kept (folds, seams). Only sample pieces use them; an owner's piece hangs as its own photo or the model.
+const SAMPLE_PHOTO = { coat: 'coat', jacket: 'jacket', training_top: 'hoodie', knit: 'hoodie', track_jacket: 'blouson' };
+function samplePhoto(type, rgb) {
+  const key = SAMPLE_PHOTO[type];
+  if (!key) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        const x = c.getContext('2d', { willReadFrequently: true });
+        x.drawImage(img, 0, 0);
+        if (Array.isArray(rgb) && rgb.length === 3) {
+          const d = x.getImageData(0, 0, c.width, c.height);
+          const p = d.data;
+          let sr = 0, sg = 0, sb = 0, n = 0;
+          for (let i = 0; i < p.length; i += 4) if (p[i + 3] > 200) { sr += p[i]; sg += p[i + 1]; sb += p[i + 2]; n++; }
+          if (n) {
+            const mr = sr / n, mg = sg / n, mb = sb / n;
+            // the studio light lifts a photo on the rail; dark records (navy, black) are set a little deeper to read as themselves
+            const ml = Math.max(1, 0.2126 * mr + 0.7152 * mg + 0.0722 * mb) * (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] < 60 ? 1.4 : 1);
+            for (let i = 0; i < p.length; i += 4) {
+              if (!p[i + 3]) continue;
+              const r = p[i], g = p[i + 1], b = p[i + 2];
+              const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / ml;
+              // hardware far from the cloth's own colour (the wooden hanger, a brass zip) keeps its colour
+              const w = Math.max(0, Math.min(1, 1 - (Math.hypot(r - mr, g - mg, b - mb) - 70) / 60));
+              p[i] = r + (Math.min(255, rgb[0] * l) - r) * w;
+              p[i + 1] = g + (Math.min(255, rgb[1] * l) - g) * w;
+              p[i + 2] = b + (Math.min(255, rgb[2] * l) - b) * w;
+            }
+            x.putImageData(d, 0, 0);
+          }
+        }
+        resolve(c);
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = `/static/photos/sample-${key}.png`;
+  });
+}
+
 async function railView(view, ctx) {
   const { wsParam, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher } = ctx;
   const cells = A.layers.flatMap((l) => l.items);
-  const pieces = cells.map((c) => ({ itemId: c.itemId, slot: c.slot, type: c.type, rgb: (META.palette && META.palette[c.color]) || null, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null }));
+  const pieces = cells.map((c) => { const rgb = (META.palette && META.palette[c.color]) || null; return { itemId: c.itemId, slot: c.slot, type: c.type, rgb, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : wsParam ? null : samplePhoto(c.type, rgb) }; });
   const rows = overlayRows(L);
   const count = (slots) => cells.filter((c) => slots.includes(c.slot)).length;
   // One line of counts over the rail, the closet's prices as a plaque over its top-left (the same ledger My closet shows).
@@ -1638,17 +1685,36 @@ async function railView(view, ctx) {
   const plaque = rows.length ? h('div', { class: 'rail-plaque' },
     h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: '/closet' }, 'Full ledger')),
     rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null;
-  const host = h('div', { class: 'stage rail-stage' }, plaque);
+  const host = h('div', { class: 'stage rail-stage' });
+  // Immersive (design handoff): the rail fills the screen; the ledger, the pieces and the panel float over it.
+  const RANK0 = { outer: 0, top: 1, bottom: 2, shoes: 3 };
+  const ordered = cells.map((c, i) => ({ c, i })).sort((x, y) => RANK0[x.c.slot] - RANK0[y.c.slot] || x.i - y.i).map((x) => x.c);
+  const editorial = h('div', { class: 'rail-editorial', 'aria-hidden': 'true' }, h('span', null, wsParam ? 'Your closet' : 'Sample closet'), h('i', null, '|'), h('span', null, wsParam ? 'Hung like a boutique rail' : 'Sample photos, recoloured to each record'));
+  const chipOf = {};
+  const strip = h('div', { class: 'dock-strip', 'aria-label': 'Pieces on the rail' }, ordered.map((c) => {
+    const t = L && L.tags ? L.tags[c.itemId] : null;
+    const rgb = META.palette && META.palette[c.color];
+    const b = h('button', { type: 'button', class: 'dock-chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } },
+      h('span', { class: 'dot', style: rgb ? `background:rgb(${rgb.join(',')})` : null }),
+      h('b', null, c.itemId), h('span', { class: 'nm' }, itemName(byId[c.itemId])),
+      t ? h('span', { class: 'px' }, money(t.amount, t.currency)) : null,
+      t && t.source === 'sample' ? h('span', { class: 'smp' }, 'Sample') : null);
+    chipOf[c.itemId] = b;
+    return b;
+  }));
   const prev = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide left' }, '‹');
   const next = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide right' }, '›');
   const sheet = h('aside', { class: 'piece-panel', id: 'piece', 'aria-live': 'polite', hidden: true });
-  const body = h('div', { class: 'rail-body' }, h('div', { class: 'rail-main' }, h('div', { class: 'rail-bar' }, counts, h('div', { class: 'row pg-row' }, prev, next)), host), sheet);
+  const dock = h('div', { class: 'rail-dock' }, strip, h('div', { class: 'dock-row' }, counts, h('div', { class: 'row pg-row' }, prev, next, switcher)));
+  // The flow starts with one photo: the first action over the rail opens the photo loop (the owner's own wardrobe on /app).
+  const addPhoto = h('a', { class: 'rail-add', href: wsParam ? '/app' : '/try', id: 'rail-add' }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), 'Add from a photo');
+  const body = h('div', { class: 'immersive' }, host, plaque, editorial, addPhoto, dock, sheet);
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List · ${A.counts.total}`),
     h('div', { class: 'chip-row' }, cells.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } }, `${c.itemId} · ${itemName(byId[c.itemId])}`))));
-  view.append(h('div', { class: 'rail-head' }, h('h1', { class: 'caps-title' }, 'My closet'), switcher), body, h('p', { class: 'muted hint' }, 'Drag or ‹ › to slide · tap a piece · ← → to page'), list);
+  view.append(h('div', { class: 'rail-head rail-head-slim' }, h('h1', { class: 'caps-title' }, 'My closet')), body, h('p', { class: 'muted hint' }, 'Drag or ‹ › to slide · tap a piece · ← → to page'), list);
   const said = rows.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, latest price seen on ${r.pieces} of ${r.of} pieces`).join('; ');
   const mod = await import('/static/rail3d.js').catch(() => null);
-  const rail = mod ? mod.mountRail3d(host, pieces, { tags: L ? L.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
+  const rail = mod ? mod.mountRail3d(host, pieces, { fill: true, tags: L ? L.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
   if (!rail) { host.replaceWith(h('p', { class: 'chip warn' }, 'No WebGL here, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
   prev.onclick = () => rail && rail.slide(-1);
   next.onclick = () => rail && rail.slide(1);
@@ -1664,13 +1730,15 @@ async function railView(view, ctx) {
     else if (e.key === 'ArrowLeft') { if (current) step(-1); else if (rail) rail.slide(-1); }
     else if (e.key === 'Escape' && current) close();
   });
-  function close() { current = null; sheet.hidden = true; body.classList.remove('open'); if (rail) rail.select(null); }
+  function close() { current = null; sheet.hidden = true; body.classList.remove('open'); for (const b of Object.values(chipOf)) b.setAttribute('aria-current', 'false'); if (rail) rail.select(null); }
 
   function show(itemId) {
     const it = byId[itemId];
     const c = cells.find((x) => x.itemId === itemId);
     if (!it || !c) return;
     current = itemId;
+    for (const [k, b] of Object.entries(chipOf)) b.setAttribute('aria-current', k === itemId ? 'true' : 'false');
+    if (chipOf[itemId]) chipOf[itemId].scrollIntoView({ block: 'nearest', inline: 'center' });
     const t = L && L.tags ? L.tags[itemId] : null;
     const label = (x) => h('p', { class: 'pp-label' }, x);
     sheet.hidden = false;
@@ -1696,7 +1764,6 @@ async function railView(view, ctx) {
       h('div', { class: 'row' },
         wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear today'),
         h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Walk-in')));
-    if (window.matchMedia('(max-width: 900px)').matches) sheet.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
 

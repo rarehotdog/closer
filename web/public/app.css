@@ -736,3 +736,43 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
   .rail-body.open { grid-template-columns: minmax(0, 1fr); }
   .rail-plaque { position: static; margin: 0; border-width: 0 0 1px; box-shadow: none; background: var(--surface); }
 }
+
+/* immersive My closet (11/5, from the design handoff): the rail fills the screen; the ledger plaque, an editorial
+   line, a dock with every piece and the detail drawer float over it. */
+.rail-head-slim h1 { margin: 18px 0 6px; font-size: 18px; }
+.immersive { position: relative; width: 100vw; margin-left: calc(50% - 50vw); height: calc(100svh - 168px); min-height: 540px; background: #f4f2ee; border-block: 1px solid var(--line); overflow: hidden; }
+.immersive .stage.rail-stage { position: absolute; inset: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+.immersive .rail-plaque { top: 16px; bottom: auto; left: max(16px, env(safe-area-inset-left, 0px)); }
+.rail-editorial { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; gap: 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink); pointer-events: none; white-space: nowrap; }
+.rail-editorial i { font-style: normal; color: var(--point-text); }
+.rail-editorial span:last-child { color: var(--ink-3); font-weight: 500; }
+.rail-dock { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 3; width: min(940px, calc(100% - 32px)); display: grid; gap: 8px; padding: 10px 12px; background: rgba(255, 255, 255, 0.96); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 34px rgba(21, 20, 19, 0.12); }
+.dock-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.dock-chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.dock-chip:hover { border-color: var(--brass); color: var(--ink); }
+.dock-chip[aria-current="true"] { background: var(--point-soft); border-color: var(--point); color: var(--ink); }
+.dock-chip .dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.18); flex: none; }
+.dock-chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.dock-chip .nm { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-chip .px { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; color: var(--ink); }
+.dock-chip .smp { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.dock-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--line); }
+.dock-row .view-seg { margin: 0; }
+.dock-row .pg-row { align-items: center; }
+.immersive .piece-panel { position: absolute; top: 14px; right: 14px; bottom: 14px; z-index: 4; width: min(360px, 42%); overflow-y: auto; box-shadow: 0 18px 44px rgba(21, 20, 19, 0.16); }
+@media (max-width: 900px) {
+  .immersive { height: calc(100svh - 200px); min-height: 500px; }
+  .rail-editorial { display: none; }
+  .immersive .rail-plaque { position: absolute; top: 10px; left: 10px; right: auto; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.94); }
+  .immersive .rail-plaque .rp-hd { display: none; }
+  .immersive .rail-plaque .rp-row { margin-top: 0; }
+  .immersive .rp-num { font-size: 15px; }
+  .rail-dock { bottom: 10px; width: calc(100% - 20px); padding: 8px; gap: 6px; }
+  .dock-row .rail-counts { display: none; }
+  .dock-chip .nm { display: none; }
+  .immersive .piece-panel { top: auto; left: 10px; right: 10px; bottom: 10px; width: auto; max-height: 66%; }
+}
+.rail-add { position: absolute; top: 14px; right: max(14px, env(safe-area-inset-right, 0px)); z-index: 3; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 14px; background: var(--point); color: var(--point-ink); font-weight: 600; font-size: 13.5px; text-decoration: none; border-radius: 10px; box-shadow: 0 8px 22px rgba(21, 20, 19, 0.14); }
+.rail-add:hover { background: var(--point-hover); }
+.rail-add .plus { font-size: 18px; line-height: 1; }
+@media (max-width: 900px) { .rail-add { top: 82px; right: 10px; padding: 7px 11px; font-size: 13px; } }

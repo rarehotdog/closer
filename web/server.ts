@@ -346,7 +346,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   }
 }
 
-const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const PAGES = new Set(['/', '/try', '/app', '/w/demo-rc1', '/admin', '/version', '/today', '/closet', '/closet/3d', '/discover']);
 /** Third-party browser modules served from the installed, version-pinned package (never copied into the repository). */
 const VENDOR: Record<string, string> = { '/static/vendor/three.module.min.js': join(ROOT, 'node_modules', 'three', 'build', 'three.module.min.js') };

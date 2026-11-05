@@ -246,7 +246,8 @@ export function mountRail3d(host, pieces, opts) {
   const view = { x: null, xTo: null, max: 0, half: 0, d: 6 }; // x null until the first fit: a phone opens at the left end, where the rail starts
   function fit() {
     const w = Math.max(1, host.clientWidth);
-    const h = Math.max(1, Math.round(w < 640 ? Math.min(w * 1.25, window.innerHeight * 0.66) : Math.min(w * 0.46, 560)));
+    // fill: the stage is the whole viewport (My closet); otherwise a boxed stage sized from its width (the landing page).
+    const h = Math.max(1, Math.round(opts.fill ? Math.max(320, host.clientHeight) : w < 640 ? Math.min(w * 1.25, window.innerHeight * 0.66) : Math.min(w * 0.46, 560)));
     renderer.setSize(w, h, false);
     el.style.width = `${w}px`;
     el.style.height = `${h}px`;
