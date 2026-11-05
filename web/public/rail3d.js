@@ -9,7 +9,7 @@ import { RAIL, railLayout, tagWords } from './rail.js';
 
 const WALL_Z = -0.36;
 const SHOE_Z = 0.42;
-const HOOK_Y = RAIL.railY + 0.012; // the top of a hook rests on the top of the rail
+const HOOK_Y = RAIL.railY + 0.0125 + 0.0056; // the hook wire (radius 5.6 mm) rests on top of the rail (radius 12.5 mm)
 const UNAVAILABLE = { LAUNDRY: 'Laundry', REPAIR: 'Repair', STORED: 'Stored' };
 const RACK_TURN = -0.44; // pieces hang turned along the rail, like a shop rack; the one you tap turns to face you
 const PART = 0.15; // how far the neighbours of the tapped piece make room
@@ -115,10 +115,10 @@ export function mountRail3d(host, pieces, opts) {
   key.position.set(-1.4, 4.4, 3.6);
   key.target.position.set(0, 1.0, WALL_Z);
   key.castShadow = true;
-  key.shadow.mapSize.set(phone() ? 1024 : 2048, phone() ? 1024 : 2048);
+  key.shadow.mapSize.set(1024, 1024); // soft wall shadows need no more; keeps phones cool
   Object.assign(key.shadow.camera, { left: -half - 1.2, right: half + 1.2, top: 2.4, bottom: -2.4, near: 0.5, far: 12 });
   key.shadow.radius = 9;
-  key.shadow.blurSamples = 16;
+  key.shadow.blurSamples = 8;
   key.shadow.bias = -0.0004;
   key.shadow.normalBias = 0.015;
   scene.add(key, key.target);
@@ -385,7 +385,8 @@ export function mountRail3d(host, pieces, opts) {
   ro.observe(host);
   fit();
   // As if just hung: each piece settles from a small swing, one after another.
-  if (!still) entries.forEach((e, i) => { if (e.hanging) e.a = (i % 2 ? -1 : 1) * (0.05 + (hashOf(e.itemId) % 7) / 250); });
+  // A short settle on the desktop only; a phone opens still, so the first paint is one frame.
+  if (!still && !phone()) entries.forEach((e, i) => { if (e.hanging) e.a = (i % 2 ? -1 : 1) * (0.03 + (hashOf(e.itemId) % 7) / 400); });
   invalidate();
 
   return {
