@@ -240,7 +240,7 @@ export function mountRail3d(host, pieces, opts) {
 
   // Camera: square-on to the rail like a store photograph. A phone sees about three hooks and slides along.
   const camera = new THREE.PerspectiveCamera(26, 1, 0.05, 60);
-  const view = { x: null, max: 0, half: 0, d: 6 }; // x null until the first fit: a phone opens at the left end, where the rail starts
+  const view = { x: null, xTo: null, max: 0, half: 0, d: 6 }; // x null until the first fit: a phone opens at the left end, where the rail starts
   function fit() {
     const w = Math.max(1, host.clientWidth);
     const h = Math.max(1, Math.round(w < 640 ? Math.min(w * 1.25, window.innerHeight * 0.66) : Math.min(w * 0.46, 560)));
@@ -280,7 +280,7 @@ export function mountRail3d(host, pieces, opts) {
       const x = (v3.x * 0.5 + 0.5) * w;
       const y = (-v3.y * 0.5 + 0.5) * h;
       const off = x < -60 || x > w + 60;
-      e.tag.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+      e.tag.style.transform = `translate(${(x + el.offsetLeft).toFixed(1)}px, ${(y + el.offsetTop).toFixed(1)}px)`;
       e.tag.style.visibility = off ? 'hidden' : 'visible';
     }
   }
@@ -309,6 +309,11 @@ export function mountRail3d(host, pieces, opts) {
       e.holder.position.x = e.x0 + e.dx;
       if (e.hanging) e.holder.rotation.y = e.turn;
     }
+    if (view.xTo !== null) { // ‹ › glide along the rail
+      const d = view.xTo - view.x;
+      if (Math.abs(d) > 1e-3) { view.x += d * Math.min(1, dt * 7); moving = true; } else { view.x = view.xTo; view.xTo = null; }
+      aim();
+    }
     renderer.render(scene, camera);
     placeTags();
     if (moving) invalidate(); else last = 0;
@@ -329,7 +334,7 @@ export function mountRail3d(host, pieces, opts) {
   }
   let down = null;
   let hovered = null;
-  const onDown = (ev) => { down = { x: ev.clientX, y: ev.clientY, vx: view.x, t: performance.now(), moved: false }; };
+  const onDown = (ev) => { view.xTo = null; down = { x: ev.clientX, y: ev.clientY, vx: view.x, t: performance.now(), moved: false }; };
   const onMove = (ev) => {
     if (down) {
       const dx = ev.clientX - down.x;
@@ -391,6 +396,8 @@ export function mountRail3d(host, pieces, opts) {
 
   return {
     select,
+    /** Slide about two thirds of a view along the rail (‹ = -1, › = 1). */
+    slide(dir) { if (view.max <= 0) return; view.xTo = Math.max(-view.max, Math.min(view.max, (view.xTo ?? view.x) + dir * view.half * 1.35)); invalidate(); },
     reset() { view.x = 0; for (const e of entries) { e.zTo = 0; e.dxTo = 0; e.turnTo = e.hanging ? RACK_TURN : 0; } aim(); invalidate(); },
     state() { return { x: view.x, max: view.max, pieces: entries.length, tags: entries.filter((e) => e.tag).map((e) => e.itemId), selected: entries.filter((e) => e.zTo > 0).map((e) => e.itemId) }; },
     dispose() {
