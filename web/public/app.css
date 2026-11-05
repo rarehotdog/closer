@@ -1,7 +1,9 @@
-/* Theme: a white, quiet walk-in closet. Warm white and ivory surfaces, greige hairlines, black primary buttons.
-   Champagne brass (--brass, --trim) is ornament only: hairlines and small details, never text or state.
-   WCAG contrast, light / dark: ink 16.46+ / 15.56+, ink-2 8.25+ / 10.35+, ink-3 5.24+ / 6.69+ on every surface;
-   focus ring 3.84+ / 9.85+ and control borders (--line-strong) 3.23+ / 3.89+ against every surface. */
+/* Theme: a white, quiet walk-in closet with one warm saddle orange as its point colour. Light only (11/5).
+   --point (bright orange) fills primary buttons, the selected control, active marks and lines, always with dark ink
+   on it (6.26:1). Orange text uses --point-text (4.79:1 or more on every surface). --brass and --trim are ornament
+   only: hairlines and small details in the point colour family, never text or state.
+   WCAG contrast: ink 16.46+, ink-2 8.25+, ink-3 5.24+ on every surface; focus ring 4.79+ and control borders
+   (--line-strong) 3.23+ against every surface. */
 :root {
   --bg: #faf9f7;
   --surface: #ffffff;
@@ -11,16 +13,21 @@
   --ink-3: #69645d;
   --line: #e6e2db;
   --line-strong: #8c867d;
-  --primary: #151413;
-  --primary-ink: #ffffff;
-  --primary-hover: #34312d;
-  --accent: var(--ink);
-  --accent-ink: var(--primary-ink);
+  --point: #f37021;
+  --point-ink: #151413;
+  --point-hover: #e5631a;
+  --point-text: #b8460f;
+  --point-soft: #fde3d1;
+  --primary: var(--point);
+  --primary-ink: var(--point-ink);
+  --primary-hover: var(--point-hover);
+  --accent: var(--point-text);
+  --accent-ink: var(--point-ink);
   --accent-soft: var(--surface-2);
-  --brass: #c6ab7c;
-  --brass-ink: #7a5b2a;
-  --trim: #dccaa6;
-  --focus: #957540;
+  --brass: #f37021;
+  --brass-ink: #b8460f;
+  --trim: #f6c3a0;
+  --focus: #b8460f;
   --amber: #a8690f;
   --ok: #2f6b45;
   --ok-soft: #e7f1ea;
@@ -31,7 +38,7 @@
   --mask: rgba(255, 186, 40, 0.42);
   --scrim: rgba(255, 255, 255, 0.86);
   --frost: rgba(255, 255, 255, 0.86);
-  --select: #ecdfc6;
+  --select: #fde3d1;
   --radius: 6px;
   --radius-sm: 4px;
   --hair: 1px;
@@ -40,23 +47,6 @@
   --font-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Noto Serif", "Noto Serif KR", "Nanum Myeongjo", "AppleMyungjo", "Times New Roman", serif;
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   color-scheme: light;
-}
-/* Dark: a night boutique. Espresso and charcoal surfaces, ivory text, champagne-tinted hairlines, the same meanings. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #110f0d; --surface: #1b1815; --surface-2: #151210; --ink: #f5f0e6; --ink-2: #cec5b7; --ink-3: #a89e8f;
-    --line: #3a3329; --line-strong: #7e7567; --primary: #f5f0e6; --primary-ink: #14110f; --primary-hover: #dcd3c4;
-    --brass: #b59a6a; --brass-ink: #dcc69c; --trim: #4d4231; --focus: #d6bf8f; --ok: #8fd0a6; --ok-soft: #1b2d21;
-    --warn: #e6bd73; --warn-soft: #332818; --bad: #ef9f97; --bad-soft: #3a2220; --scrim: rgba(20, 17, 15, 0.8);
-    --frost: rgba(27, 24, 21, 0.88); --select: #4a3f2e; --shadow: none; color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #110f0d; --surface: #1b1815; --surface-2: #151210; --ink: #f5f0e6; --ink-2: #cec5b7; --ink-3: #a89e8f;
-  --line: #3a3329; --line-strong: #7e7567; --primary: #f5f0e6; --primary-ink: #14110f; --primary-hover: #dcd3c4;
-  --brass: #b59a6a; --brass-ink: #dcc69c; --trim: #4d4231; --focus: #d6bf8f; --ok: #8fd0a6; --ok-soft: #1b2d21;
-  --warn: #e6bd73; --warn-soft: #332818; --bad: #ef9f97; --bad-soft: #3a2220; --scrim: rgba(20, 17, 15, 0.8);
-  --frost: rgba(27, 24, 21, 0.88); --select: #4a3f2e; --shadow: none; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -299,7 +289,7 @@ button.btn.small, a.btn.small { padding: 6px 14px; font-size: 13px; min-height: 
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; margin-top: 4px; flex-wrap: wrap; background: var(--surface); }
 .seg button { font: inherit; font-size: 12.5px; letter-spacing: 0.01em; padding: 6px 12px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; transition: background-color 0.12s ease, color 0.12s ease; }
 .seg button:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--surface-2); color: var(--ink); }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--point); color: var(--point-ink); font-weight: 600; }
 .seg button:disabled { cursor: not-allowed; opacity: 0.6; }
 
 table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -609,8 +599,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--ink); }
 h1::before { content: ""; display: block; width: 32px; height: 1px; margin: 0 0 16px; background: var(--brass); }
 h1, h2, .brand { font-variant-numeric: lining-nums; }
 h3 { font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: 0.01em; }
-.nav a.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px; height: 1px; background: var(--ink); }
-.tabbar a.on::before { content: ""; position: absolute; top: 5px; left: 50%; width: 20px; height: 2px; margin-left: -10px; border-radius: 2px; background: var(--ink); }
+.nav a.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px; height: 2px; background: var(--point); }
+.tabbar a.on::before { content: ""; position: absolute; top: 5px; left: 50%; width: 20px; height: 2px; margin-left: -10px; border-radius: 2px; background: var(--point); }
 .seg button + button { border-left: 1px solid var(--line); }
 button.btn.ghost:disabled { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
 /* Small uppercase tracked labels for section headers (CSS only; the source text stays in sentence case). */
@@ -664,3 +654,34 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
   .asset-overlay .ao-line { font-size: 12.5px; }
   .asset-overlay .ao-note { font-size: 12.5px; margin-top: 8px; }
 }
+
+/* the rail (11/5): the 3D closet's first view. A white studio photograph of the closet: few words, real tags. */
+.rail-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.rail-head h1 { margin-bottom: 8px; }
+.view-seg { margin-bottom: 12px; }
+.view-seg button { min-width: 72px; }
+.rail-hud { display: flex; align-items: baseline; gap: 6px 18px; flex-wrap: wrap; margin: 2px 0 8px; color: var(--ink); }
+.rail-count { font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+.rail-sum { display: flex; gap: 4px 18px; flex-wrap: wrap; }
+.rail-cur { display: inline-flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+.rail-num { font-family: var(--font-display); font-size: 24px; line-height: 1.1; font-variant-numeric: lining-nums tabular-nums; letter-spacing: -0.01em; }
+.rail-of { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.rail-hud .chip.sample { align-self: center; font-size: 12px; line-height: 1.3; padding: 0 7px; min-height: 0; background: transparent; }
+.stage.rail-stage { position: relative; border-radius: 14px; border: 1px solid #e7e2da; background: #f4f2ee; overflow: hidden; touch-action: pan-y; box-shadow: 0 1px 2px rgba(28, 25, 21, 0.05), 0 14px 34px rgba(28, 25, 21, 0.07); }
+.stage.rail-stage canvas { border: 0; border-radius: 0; background: transparent; cursor: grab; }
+.rail-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+.rail-tag { position: absolute; left: 0; top: 0; margin-top: 9px; display: flex; flex-direction: column; align-items: center; padding: 3px 8px 4px; background: #fffdf9; color: #161513; border-radius: 3px; box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.16), 0 4px 10px rgba(0, 0, 0, 0.08); font-size: 12.5px; line-height: 1.2; white-space: nowrap; will-change: transform; }
+.rail-tag::before { content: ''; position: absolute; left: 50%; top: -9px; width: 1px; height: 10px; background: #a9a196; }
+.rail-tag::after { content: ''; position: absolute; left: calc(50% - 2.5px); top: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--point); }
+.rail-tag b { font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; margin-top: 3px; }
+.rail-tag i, .rail-tag span { font-style: normal; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #5f584e; }
+.rail-tag span:only-child { margin-top: 3px; }
+.rail-sheet { padding-top: 14px; }
+.rail-sheet-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 16px; }
+.rail-sheet-price { margin: 8px 0 2px; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.rail-sheet-num { font-family: var(--font-display); font-size: 24px; font-variant-numeric: lining-nums tabular-nums; }
+@media (max-width: 640px) {
+  .rail-num { font-size: 20px; }
+  .rail-head h1 { font-size: 30px; }
+}
+.land-rail { margin: 4px 0 18px; }

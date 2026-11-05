@@ -4,7 +4,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
 - AT test cases (variants counted separately): PASS 33 · FAIL 0 · SKIP 7 · total 40.
-- Other tests (unit, fixture answer): PASS 46 · FAIL 0 · SKIP 0 · total 46.
+- Other tests (unit, fixture answer): PASS 51 · FAIL 0 · SKIP 0 · total 51.
 
 | Test | Result | Note |
 |---|---|---|
@@ -61,6 +61,11 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | every adapters/ file carries the unverified header | PASS |  |
 | fixture colors map to their declared color family (12 named colors) | PASS |  |
 | FX-H pre-registered answer (§4-5) — A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1 | PASS |  |
+| GA-01 the 18 wardrobe types are all buildable | PASS |  |
+| GA-02 every type at high: group, finite positions, budget, scale, placement, dispose | PASS |  |
+| GA-02 every type at low: group, finite positions, budget, scale, placement, dispose | PASS |  |
+| GA-03 the same seed gives the same garment; another seed changes the drape | PASS |  |
+| GA-04 the reported triangle count is the geometry it holds, and hanger "none" leaves the hanger out | PASS |  |
 | GD-01 rate limiter: a burst of `limit`, then one token per window/limit, forgotten once full again | PASS |  |
 | GD-02 client address: socket by default; the last X-Forwarded-For entry only when the proxy is trusted | PASS |  |
 | GD-03 token check: equal strings only; missing, empty or different-length values never match | PASS |  |
@@ -96,8 +101,8 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | SL-06 service: a SAM box 2 px outside its prompt box is clamped (DRAFT, noted on the call line); a 401 names the key | PASS |  |
 | stale expectedRevision → STALE_STATE; item IDs use the lowest free number per slot | PASS |  |
 | states (§4-1) | PASS |  |
-| TH-01 text pairs reach 4.5:1 and control edges 3:1 in light and dark | PASS |  |
-| TH-02 champagne brass is ornament: no text colour is set in --brass or --trim | PASS |  |
-| TH-03 the two dark blocks define the same tokens with the same values | PASS |  |
-| TH-04 nothing loads from outside the app, and the browser bar has a theme colour for both schemes | PASS |  |
+| TH-01 text pairs reach 4.5:1 and control edges 3:1, the point orange included | PASS |  |
+| TH-02 the bright point orange and the ornament tokens never colour text | PASS |  |
+| TH-03 light only: no dark palette, and the page tells the browser so | PASS |  |
+| TH-04 nothing loads from outside the app, and the browser bar has one light theme colour | PASS |  |
 | transition table rows 1–13 and illegal transitions are rejected with the right code | PASS |  |
