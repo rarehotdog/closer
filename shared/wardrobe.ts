@@ -14,6 +14,7 @@ export const GARMENT_TYPES = {
   coat: 'outer',
   dress_shirt: 'top',
   knit: 'top',
+  hoodie: 'top',
   tee: 'top',
   trousers: 'bottom',
   jeans: 'bottom',
@@ -68,7 +69,7 @@ export type Item = {
   /** Reference to the mask cutout (operation + SAM object id), or null for seeded samples. */
   cutoutRef: string | null;
   /** 'seed' = sample wardrobe item inserted with the workspace (not a confirmation event). */
-  origin: 'photo' | 'seed';
+  origin: 'photo' | 'seed' | 'manual';
   /** null = not known. Needed by the rain hard rule (FX-E8). */
   waterproof: boolean | null;
   /** Shown with the 'Sample item' chip. */

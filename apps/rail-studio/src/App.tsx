@@ -99,10 +99,12 @@ export default function App() {
   const [looksOpen, setLooksOpen] = useState<boolean>(false);
   const [addModalOpen, setAddModalOpen] = useState<boolean>(false);
   // The Meta photo scan (Spark + SAM) opens from the design's photo flow, or directly with ?scan=1.
-  const [scanOpen, setScanOpen] = useState<boolean>(() => {
+  const [initialScanRequested] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return new URLSearchParams(window.location.search).get('scan') === '1';
   });
+  const [scanOpen, setScanOpen] = useState(false);
+  const initialScanResolved = useRef(false);
   const [githubShareOpen, setGithubShareOpen] = useState<boolean>(false);
   const lastIdentityEpoch = useRef(wardrobe.epoch);
   useEffect(() => {
@@ -112,6 +114,14 @@ export default function App() {
     setLedgerOpen(false); setLooksOpen(false); setAddModalOpen(false);
     setScanOpen(false); setGithubShareOpen(false); setReviewOpen(false);
   }, [wardrobe.epoch]);
+
+  useEffect(() => {
+    if (initialScanResolved.current) return;
+    const current = controller.getSnapshot();
+    if (current.busy || current.status === 'loading') return;
+    initialScanResolved.current = true;
+    if (initialScanRequested) setScanOpen(true);
+  }, [initialScanRequested, wardrobe.busy, wardrobe.status, wardrobe.epoch, controller]);
 
 
   // Resolve a reload link once the initial session and its wardrobe have finished loading.
@@ -287,24 +297,18 @@ export default function App() {
           typeof customAskPrice === 'number' && customAskPrice > 0
             ? customAskPrice
             : latest?.price ?? g.purchasePrice ?? 0;
-        const snapshotPlatform = latest?.platform ?? g.feeConfig.platform;
+        const snapshotPlatform = g.feeConfig.platform;
 
-        // Idempotent check: if choice and price are identical, keep existing decision ID
-        if (
-          g.lastDecision &&
-          g.lastDecision.choice === choice &&
-          g.lastDecision.snapshotPrice === snapshotPrice
-        ) {
-          return g;
-        }
-
-        const shortHash = Math.random().toString(36).slice(2, 6);
+        // Each explicit save captures a new decision, including changed fee lines.
+        // Transport retries are deduplicated by the account save request, not by price.
+        const decisionId = `d_${crypto.randomUUID()}`;
         return {
           ...g,
           lastDecision: {
-            id: `d_${shortHash}`,
+            id: decisionId,
             choice,
-            savedAt: todayDate(),
+            savedAt: new Date().toISOString(),
+            feeSnapshot: { ...g.feeConfig },
             snapshotPrice,
             snapshotCurrency: g.currency,
             snapshotPlatform,
@@ -397,7 +401,9 @@ export default function App() {
   const handleHangScanned = async (pieces: GarmentPiece[]) => {
     if (pieces.length === 0) return;
     try {
-      const prepared = await Promise.all(pieces.map(preparePiecePhotos));
+      // Server receipts bind the original PNG bytes. Already bounded server cutouts
+      // must survive the browser unchanged so the server can verify their source.
+      const prepared = await Promise.all(pieces.map(piece => piece.scanReceiptId ? piece : preparePiecePhotos(piece)));
       if (controller.getSnapshot().epoch !== renderEpoch) return;
       setGarments(prev => [...prev, ...prepared]);
       setFilterTab('all'); setSelectedId(prepared[0].id);
@@ -411,7 +417,7 @@ export default function App() {
       const prepared = await preparePhotoUrl(dataUrl);
       if (controller.getSnapshot().epoch !== renderEpoch) return;
       setGarments(prev => prev.map(g => g.id === garmentId ? {
-        ...g, imageUrl: prepared, frontImageUrl: prepared, cutoutSource: undefined, scanMode: undefined,
+        ...g, imageUrl: prepared, frontImageUrl: prepared, cutoutSource: undefined, scanMode: undefined, scanReceiptId: undefined, scanCardId: undefined, scanColor: undefined,
       } : g));
     } catch (error) {
       if (controller.getSnapshot().epoch === renderEpoch) controller.reportError(error instanceof Error ? error.message : 'Could not prepare the photo.');
@@ -955,12 +961,13 @@ export default function App() {
         )}
       </main>
 
-      <ScanPhotoModal key={`scan-${wardrobe.epoch}`} isOpen={scanOpen} onClose={() => setScanOpen(false)} garments={garments} onHang={handleHangScanned} />
+      <ScanPhotoModal key={`scan-${wardrobe.epoch}`} isOpen={scanOpen} onClose={() => setScanOpen(false)} garments={garments} onHang={handleHangScanned} workspaceId={privateView ? wardrobe.account?.workspaceId : null} />
 
       {/* Modals for Full Asset Ledger, Target Looks, Hang New Piece, and Share link / GitHub command (copy only) */}
       <LedgerModal
         isOpen={ledgerOpen}
         scope={privateView ? 'account' : wardrobe.sampleView ? 'sample' : 'browser'}
+        accountState={wardrobe}
         onClose={() => setLedgerOpen(false)}
         garments={garments}
         summary={ledgerSummary}
@@ -980,7 +987,9 @@ export default function App() {
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onAddGarment={handleAddGarment}
+        onScanCloset={() => { setAddModalOpen(false); setScanOpen(true); }}
         nextIndex={nextHangIndex}
+        workspaceId={privateView ? wardrobe.account?.workspaceId : null}
       />
 
       <AccountPanel isOpen={accountOpen} onClose={() => setAccountOpen(false)} state={wardrobe} controller={controller} persistenceNotice={wardrobe.persistenceNotice} />

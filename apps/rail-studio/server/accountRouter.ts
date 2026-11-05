@@ -4,7 +4,9 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ExtrasStore, type AccountSummary } from '../../../store/extras.ts';
 import { formatAccountCookie, hashPassword, hashSessionToken, normalizeHandle, readCookie, SESSION_TTL_MS, validPassword, verifyPassword, RateLimiter } from '../../../web/guard.ts';
-import { AccountWardrobeStore } from './accountStore.ts';
+import type { GarmentPiece } from '../src/types/closet.ts';
+import type { ScanItemResolver } from './ledgerBridge.ts';
+import { AccountWardrobeStore, LedgerBridgeError } from './accountStore.ts';
 import { InvalidWardrobe, MAX_WARDROBE_BYTES, validateWardrobe } from './wardrobeSchema.ts';
 
 export interface AccountRouterOptions {
@@ -12,12 +14,14 @@ export interface AccountRouterOptions {
   allowedOrigins?: string[];
   secureCookies?: boolean;
   cookieName?: string;
+  resolveScanItem?: ScanItemResolver;
+  validateScanPieces?: (workspaceId:string,pieces:GarmentPiece[],previousPieces:GarmentPiece[])=>void;
 }
 /** Mount at /api/account. The caller owns close(), including test teardown. */
 export function createAccountRouter(options: AccountRouterOptions) {
   if (options.dbPath !== ':memory:') mkdirSync(dirname(options.dbPath), { recursive: true, mode: 0o700 });
   const accounts = new ExtrasStore(options.dbPath);
-  const wardrobe = new AccountWardrobeStore(options.dbPath);
+  const wardrobe = new AccountWardrobeStore(options.dbPath,options.resolveScanItem);
   const cookieName = options.cookieName ?? 'closer_rail_acct';
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(cookieName)) throw new Error('Invalid account cookie name');
   const router = express.Router();
@@ -37,6 +41,10 @@ export function createAccountRouter(options: AccountRouterOptions) {
     if (wait === null) return false;
     res.setHeader('Retry-After', String(Math.max(1, Math.ceil(wait / 1000))));
     problem(res,429,'RATE_LIMITED','Too many requests. Please try again shortly.'); return true;
+  };
+  const originAllowed = (req:Request) => {
+    const allowed=options.allowedOrigins??[`${req.protocol}://${req.get('host')}`];
+    return !!req.headers.origin && allowed.includes(req.headers.origin) && req.headers['sec-fetch-site']!=='cross-site';
   };
   router.use((req,res,next) => {
     res.setHeader('Cache-Control','no-store'); res.setHeader('X-Content-Type-Options','nosniff');
@@ -94,6 +102,11 @@ export function createAccountRouter(options: AccountRouterOptions) {
     const value = token(req); if (value) accounts.deleteAccountSession(hashSessionToken(value));
     cookie(req,res,null); res.json(state(null));
   });
+  router.get('/ledger',(req,res,next)=>{
+    try { const a=session(req);if(!a){problem(res,401,'SESSION_REQUIRED','Sign in to open your ledger.');return;}
+      res.json({ok:true,...wardrobe.report(a.workspaceId)});
+    }catch(error){next(error);}
+  });
   router.get('/wardrobe',(req,res) => {
     const a = session(req); if (!a) { problem(res,401,'SESSION_REQUIRED','Sign in to open your saved wardrobe.'); return; }
     res.json({ok:true,...wardrobe.read(a.workspaceId)});
@@ -106,12 +119,17 @@ export function createAccountRouter(options: AccountRouterOptions) {
       const revision = req.body.expectedRevision;
       if (!Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) { problem(res,400,'BAD_INPUT','A valid wardrobe revision is required.'); return; }
       const pieces = validateWardrobe(req.body.pieces);
-      const saved = wardrobe.save(a.workspaceId,revision,pieces);
+      const ledgerRevision=req.body.expectedLedgerRevision,requestId=req.body.requestId;
+      if(!Number.isSafeInteger(ledgerRevision)||ledgerRevision<0||typeof requestId!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(requestId)){problem(res,400,'BAD_INPUT','A ledger revision and save identifier are required. Reload the app before saving.');return;}
+      options.validateScanPieces?.(a.workspaceId,pieces,wardrobe.read(a.workspaceId).pieces);
+      const saved = wardrobe.save(a.workspaceId,revision,pieces,requestId,ledgerRevision);
       if (!saved) { problem(res,409,'REVISION_CONFLICT','This wardrobe changed in another window. Reload its latest version before saving.'); return; }
       res.json({ok:true,...saved});
     } catch(error) { next(error); }
   });
   router.use((error: unknown,_req:Request,res:Response,_next:express.NextFunction) => {
+    if (error instanceof LedgerBridgeError) { problem(res,409,error.code,error.message); return; }
+    if (error instanceof Error && error.message==='DECISION_CONFLICT') { problem(res,409,'DECISION_CONFLICT','A saved decision cannot be changed. Save a new decision instead.');return;}
     if (error instanceof InvalidWardrobe) { problem(res,400,'INVALID_WARDROBE',error.message); return; }
     const type = (error as {type?:string})?.type;
     if (type === 'entity.too.large') { problem(res,413,'TOO_LARGE','This wardrobe is too large to save. Use smaller photos.'); return; }
@@ -121,5 +139,5 @@ export function createAccountRouter(options: AccountRouterOptions) {
     }
     problem(res,500,'SAVE_FAILED','The request could not be completed. Please try again.');
   });
-  return {router,close:()=>{wardrobe.close();accounts.close();}};
+  return {router,accountForRequest:session,originAllowed,close:()=>{wardrobe.close();accounts.close();}};
 }

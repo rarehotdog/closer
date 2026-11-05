@@ -156,8 +156,8 @@ test('status chips: Sample alone for a sample piece; a decision chip for owned p
       ['decision', 'Undecided'],
     ],
   );
-  assert.equal(scanSourceLabel(scannedPiece({ cutoutSource: 'box-crop', scanMode: 'live' })), 'Spark box · LIVE');
-  assert.equal(scanSourceLabel(scannedPiece({ cutoutSource: 'sam-mask', scanMode: 'live' })), 'SAM mask · LIVE');
+  assert.equal(scanSourceLabel(scannedPiece({ cutoutSource: 'box-crop', scanMode: 'live', scanReceiptId:'receipt-a', scanCardId:'1' })), 'Spark box · LIVE');
+  assert.equal(scanSourceLabel(scannedPiece({ cutoutSource: 'sam-mask', scanMode: 'live', scanReceiptId:'receipt-a', scanCardId:'1' })), 'SAM mask · LIVE');
   assert.equal(scanSourceLabel(seed('J2')), null);
   // No model version is named on the chip.
   for (const g of [scannedPiece(), scannedPiece({ scanMode: 'live' })]) {
@@ -233,4 +233,8 @@ test('bottom sheet: about 70% tall, dragged up to full, dragged down to close', 
   assert.equal(sheetHeightWhileDragging('half', 100, 844), 491);
   assert.equal(sheetHeightWhileDragging('half', -400, 844), 844);
   assert.equal(sheetHeightWhileDragging('full', 900, 844), 96);
+});
+
+test('older live claims without server receipts remain explicitly unverified', () => {
+  assert.equal(scanSourceLabel(scannedPiece({scanMode:'live'})), 'Prior scan · source unverified');
 });

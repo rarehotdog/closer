@@ -7,11 +7,30 @@ import { join } from 'node:path';
 import { scanPhoto, type ScanDeps } from './scan.ts';
 import { createFakeMetaTransport, FAKE_CLOSET_ANSWER, FAKE_SPARK_ANSWER } from './fakeMeta.ts';
 import type { Transport } from './closer/adapters/transport.ts';
+import { decodePng, encodePng } from './closer/engine/png.ts';
 
 const dir = join(import.meta.dirname, 'test', 'fixtures');
 const jpegBase64 = readFileSync(join(dir, 'outfit.jpg')).toString('base64');
 const pngBase64 = readFileSync(join(dir, 'outfit.png')).toString('base64');
 const deps = (transport: Transport): ScanDeps => ({ transport, source: 'mock', sleep: async () => {}, nowMs: () => 0, nowIso: () => '2026-11-05T00:00:00.000Z' });
+
+test('PNG decompression is bounded by declared pixels and rejects mismatched data before any model call', async () => {
+  const small = encodePng({ w: 1, h: 1, data: new Uint8Array(4).fill(255) });
+  const large = encodePng({ w: 64, h: 64, data: new Uint8Array(64 * 64 * 4).fill(255) });
+  // Each original chunk retains a valid CRC. Only the relationship between IHDR and IDAT is wrong.
+  const oversized = Buffer.concat([small.subarray(0, 33), large.subarray(33)]);
+  const truncated = Buffer.concat([large.subarray(0, 33), small.subarray(33)]);
+  assert.throws(() => decodePng(oversized), { code: 'ERR_BUFFER_TOO_LARGE' });
+  assert.throws(() => decodePng(truncated), /data size does not match dimensions/);
+  let calls = 0;
+  const transport: Transport = async () => { calls++; throw new Error('A rejected image must not reach a model'); };
+  for (const malformed of [oversized, truncated]) {
+    const result = await scanPhoto({ jpegBase64, pngBase64: malformed.toString('base64'), sentence: '' }, deps(transport));
+    assert.equal(result.ok, false);
+    if (!result.ok) { assert.equal(result.status, 400); assert.equal(result.code, 'BAD_INPUT'); }
+  }
+  assert.equal(calls, 0);
+});
 
 test('SC-01 one photo -> one card per garment, cut out by its mask, colour measured from the pixels', async () => {
   const r = await scanPhoto({ jpegBase64, pngBase64, sentence: 'Keep this jacket. The rest feels too dressed-up.' }, deps(createFakeMetaTransport()));

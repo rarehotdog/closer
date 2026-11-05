@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
@@ -28,6 +29,10 @@ async function start(db: string) {
 async function request(base:string,path:string,method='GET',body?:unknown,cookie?:string,origin:string|false=base) {
   const headers:Record<string,string>={};if(cookie) headers.Cookie=cookie;
   if(method!=='GET') {headers['Content-Type']='application/json';if(origin)headers.Origin=origin;}
+  if(path==='/wardrobe'&&method==='PUT'&&body&&typeof body==='object'){
+    const current=await fetch(base+'/api/account/wardrobe',{headers:cookie?{Cookie:cookie}:{}}).then(r=>r.json());
+    body={expectedLedgerRevision:current.ledgerRevision??0,requestId:randomUUID(),...body};
+  }
   const response=await fetch(base+'/api/account'+path,{method,headers,...(body!==undefined?{body:JSON.stringify(body)}:{})});
   return {status:response.status,body:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0]??'',headers:response.headers};
 }

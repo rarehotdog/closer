@@ -57,6 +57,7 @@ export class SqliteLedger {
     this.path = path;
     this.defaultFlags = defaultFlags;
     this.db = new DatabaseSync(path);
+    this.db.exec('PRAGMA busy_timeout=5000');
     if (path !== ':memory:') this.db.exec('PRAGMA journal_mode=WAL;');
     this.db.exec(SCHEMA);
     // Files from before the created_at column (the age the visitor sweep reads): add it and date the
@@ -148,7 +149,7 @@ export class SqliteLedger {
   }
 
   // ---------- write ----------
-  write(req: WriteRequest, decide: (state: LedgerState, ws: WorkspaceRow) => Decision, recordedAt: string): WriteResponse {
+  write(req: WriteRequest, decide: (state: LedgerState, ws: WorkspaceRow) => Decision, recordedAt: string, project?: (connection: DatabaseSync, response: Extract<WriteResponse, { ok: true }>) => void): WriteResponse {
     const ws = this.getWorkspace(req.workspaceId);
     if (!ws) return { ok: false, code: 'SCOPE_DENIED', detail: 'unknown workspace' };
     if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
@@ -187,6 +188,9 @@ export class SqliteLedger {
       for (const m of d.mutations) this.apply(req.workspaceId, m);
       this.db.prepare('UPDATE workspaces SET ledger_revision = ? WHERE workspace_id = ?').run(rev, req.workspaceId);
       const response: WriteResponse = { ok: true, workspaceId: req.workspaceId, eventIds: req.events.map((e) => e.eventId), ledgerRevision: rev, result: d.result ?? null };
+      // Side projections use this same transaction and connection. Any failure rolls back
+      // events, items, revision and the projection together; callbacks must not make I/O calls.
+      project?.(this.db, response);
       const json = JSON.stringify(response);
       for (const e of req.events) this.db.prepare('UPDATE events SET response_json = ? WHERE event_id = ?').run(json, e.eventId);
       this.db.exec('COMMIT');
@@ -224,6 +228,10 @@ export class SqliteLedger {
     this.db
       .prepare('INSERT INTO calls VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(c.callId, c.operationId, c.workspaceId, c.sessionId, c.model, c.http, c.latencyMs, c.usage ? JSON.stringify(c.usage) : null, c.costMicroUsd, c.estLiveCostMicroUsd, c.source, c.createdAt);
+  }
+
+  callsForWorkspace(workspaceId: string, limit = 100): CallRow[] {
+    return (this.db.prepare('SELECT * FROM calls WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?').all(workspaceId, limit) as Row[]).map(toCall);
   }
 
   listCalls(limit = 50): CallRow[] {
@@ -310,6 +318,10 @@ export class SqliteLedger {
     switch (m.op) {
       case 'putItem':
         return this.putItem(ws, m.item);
+      case 'removeItem':
+        this.db.prepare('DELETE FROM availability WHERE workspace_id = ? AND item_id = ?').run(ws, m.itemId);
+        this.db.prepare('DELETE FROM items WHERE workspace_id = ? AND item_id = ?').run(ws, m.itemId);
+        return;
       case 'putAvailability':
         return this.putAvailability(ws, m.row);
       case 'putPlan':

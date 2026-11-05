@@ -83,9 +83,17 @@ function image(value: unknown): string {
   return `data:image/jpeg;base64,${stripJpegMetadata(bytes).toString('base64')}`;
 }
 
+function fees(raw: unknown) {
+  const fee = record(raw); keys(fee,['platform','feeRatePct','shippingCost','feeRateConfirmed','shippingConfirmed','confirmed']);
+  const parsed = { platform:enumeration(fee.platform,PLATFORMS),feeRatePct:number(fee.feeRatePct,100),shippingCost:number(fee.shippingCost),confirmed:boolean(fee.confirmed),
+    ...(fee.feeRateConfirmed !== undefined ? {feeRateConfirmed:boolean(fee.feeRateConfirmed)} : {}), ...(fee.shippingConfirmed !== undefined ? {shippingConfirmed:boolean(fee.shippingConfirmed)} : {}) };
+  if (fee.confirmed !== (fee.feeRateConfirmed === true && fee.shippingConfirmed === true)) return fail();
+  return parsed;
+}
+
 function piece(raw: unknown): GarmentPiece {
   const g = record(raw);
-  keys(g, ['id','code','name','brand','category','silhouette','currency','purchasePrice','isSample','colorHex','secondaryColorHex','fabricLabel','hangerType','wearsLast60Days','wearLogStatus','lastWornDate','conditionGrade','upcomingOccasions','lockedForToday','occlusionStatus','imageUrl','frontImageUrl','cutoutSource','scanMode','observations','feeConfig','lastDecision']);
+  keys(g, ['id','code','name','brand','category','silhouette','currency','purchasePrice','isSample','colorHex','secondaryColorHex','fabricLabel','hangerType','wearsLast60Days','wearLogStatus','lastWornDate','conditionGrade','upcomingOccasions','lockedForToday','occlusionStatus','imageUrl','frontImageUrl','cutoutSource','scanMode','scanReceiptId','scanCardId','scanColor','observations','feeConfig','lastDecision']);
   const id = string(g.id, 120);
   if (!/^(scan-|piece-custom-)[A-Za-z0-9_-]+$/.test(id) || SEED_IDS.has(id.toUpperCase()) || g.isSample !== false || g.scanMode === 'fake') return fail();
   const out: Record<string, unknown> = {
@@ -99,6 +107,19 @@ function piece(raw: unknown): GarmentPiece {
   for (const key of ['colorHex','secondaryColorHex']) { if (typeof g[key] !== 'string' || !/^#[A-Fa-f0-9]{6}$/.test(g[key] as string)) return fail(); out[key] = g[key]; }
   const enums: Record<string,string[]> = {wearLogStatus:['verified','insufficient'],conditionGrade:['Mint (S)','Excellent (A+)','Good (A)'],occlusionStatus:['front_verified','side_occluded'],cutoutSource:['sam-mask','box-crop'],scanMode:['live']};
   for (const [key, allowed] of Object.entries(enums)) if (g[key] !== undefined) out[key] = enumeration(g[key], allowed);
+  for (const key of ['scanReceiptId','scanCardId']) {
+    if (g[key] !== undefined) {
+      const value = string(g[key], 128);
+      if (!/^[A-Za-z0-9_-]+$/.test(value)) return fail();
+      out[key] = value;
+    }
+  }
+  if (g.scanColor !== undefined) {
+    if (!g.scanReceiptId) return fail();
+    out.scanColor = enumeration(g.scanColor,['black','charcoal','gray','white','beige','brown','navy','blue','green','red','yellow','pink','unknown']);
+  }
+  if ((g.scanReceiptId === undefined) !== (g.scanCardId === undefined)) return fail();
+  if (g.scanReceiptId !== undefined && g.scanMode !== 'live') return fail();
   if (g.lastWornDate !== undefined) out.lastWornDate = g.lastWornDate === null ? null : date(g.lastWornDate);
   if (g.lockedForToday !== undefined) out.lockedForToday = boolean(g.lockedForToday);
   if (g.upcomingOccasions !== undefined) {
@@ -114,14 +135,11 @@ function piece(raw: unknown): GarmentPiece {
     if (p.currency !== g.currency) return fail();
     return { id:pid, date:date(p.date), platform:enumeration(p.platform,PLATFORMS), price:number(p.price), currency:enumeration(p.currency,CURRENCIES), kind:enumeration(p.kind,['traded','listed']), ...(p.isSample === false ? {isSample:false}: {}) };
   });
-  const fee = record(g.feeConfig); keys(fee,['platform','feeRatePct','shippingCost','feeRateConfirmed','shippingConfirmed','confirmed']);
-  out.feeConfig = { platform:enumeration(fee.platform,PLATFORMS),feeRatePct:number(fee.feeRatePct,100),shippingCost:number(fee.shippingCost),confirmed:boolean(fee.confirmed),
-    ...(fee.feeRateConfirmed !== undefined ? {feeRateConfirmed:boolean(fee.feeRateConfirmed)} : {}), ...(fee.shippingConfirmed !== undefined ? {shippingConfirmed:boolean(fee.shippingConfirmed)} : {}) };
-  if (fee.confirmed !== (fee.feeRateConfirmed === true && fee.shippingConfirmed === true)) return fail();
+  out.feeConfig = fees(g.feeConfig);
   if (g.lastDecision !== undefined) {
-    const d = record(g.lastDecision); keys(d,['id','choice','savedAt','snapshotPrice','snapshotCurrency','snapshotPlatform','note']);
+    const d = record(g.lastDecision); keys(d,['id','choice','savedAt','snapshotPrice','snapshotCurrency','snapshotPlatform','feeSnapshot','note']);
     if (d.snapshotCurrency !== g.currency) return fail();
-    out.lastDecision = {id:string(d.id,120), choice:enumeration(d.choice,['keep','sell']),savedAt:date(d.savedAt,true),snapshotPrice:number(d.snapshotPrice),snapshotCurrency:enumeration(d.snapshotCurrency,CURRENCIES),snapshotPlatform:enumeration(d.snapshotPlatform,PLATFORMS), ...(d.note !== undefined ? {note:string(d.note,2000,true)}:{})};
+    out.lastDecision = {id:string(d.id,120), choice:enumeration(d.choice,['keep','sell']),savedAt:date(d.savedAt,true),snapshotPrice:number(d.snapshotPrice),snapshotCurrency:enumeration(d.snapshotCurrency,CURRENCIES),snapshotPlatform:enumeration(d.snapshotPlatform,PLATFORMS), ...(d.feeSnapshot !== undefined ? {feeSnapshot:fees(d.feeSnapshot)} : {}), ...(d.note !== undefined ? {note:string(d.note,2000,true)}:{})};
   }
   return out as unknown as GarmentPiece;
 }

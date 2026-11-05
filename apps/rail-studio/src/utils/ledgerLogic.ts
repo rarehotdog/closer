@@ -482,7 +482,8 @@ export function compute30DayRotationTrend(
 
   for (const g of owned) {
     if (!g.lastDecision) continue;
-    const decTime = new Date(`${g.lastDecision.savedAt}T12:00:00Z`).getTime();
+    const savedAt = g.lastDecision.savedAt;
+    const decTime = new Date(/^\d{4}-\d{2}-\d{2}$/.test(savedAt) ? `${savedAt}T12:00:00Z` : savedAt).getTime();
     if (Number.isNaN(decTime) || decTime < cutoff30d || decTime > refTime) {
       continue;
     }
@@ -1373,6 +1374,7 @@ export function countRotationTiers(garments: GarmentPiece[]): {
  * and only the one that actually produced its cut-out.
  */
 export function describePhotoSource(garment: GarmentPiece): string {
+  if (garment.scanMode === 'live' && !garment.scanReceiptId) return 'Prior scan · source unverified';
   if (garment.cutoutSource) {
     const cut = garment.cutoutSource === 'sam-mask' ? 'SAM 3.1 mask' : 'Spark box';
     const mode =

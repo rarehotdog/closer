@@ -3,7 +3,7 @@
 // refuses to start without MODEL_API_KEY, and is always refused in test processes.
 import type { HttpResult } from '../engine/retry.ts';
 
-export type TransportRequest = { path: '/responses'; body: Record<string, unknown> };
+export type TransportRequest = { path: '/responses'; body: Record<string, unknown>; signal?: AbortSignal };
 export type Transport = (req: TransportRequest) => Promise<HttpResult>;
 
 /** Base URL from the Model API docs' examples. */
@@ -33,11 +33,15 @@ export function createRealTransport(env: Record<string, string | undefined>): Tr
   const key = env.MODEL_API_KEY;
   if (!key || key.trim() === '') throw new RealModeRefused('MODEL_API_KEY is not set; real mode refuses to run');
   const base = ((env.META_API_BASE_URL ?? '').trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
-  return async ({ path, body }) => {
+  return async ({ path, body, signal }) => {
+    const requested = Number(env.CLOSER_META_TIMEOUT_MS ?? 45_000);
+    const timeoutMs = Number.isFinite(requested) ? Math.max(1000, Math.min(60_000, requested)) : 45_000;
+    const timeout = AbortSignal.timeout(timeoutMs);
     const res = await fetch(base + path, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => {

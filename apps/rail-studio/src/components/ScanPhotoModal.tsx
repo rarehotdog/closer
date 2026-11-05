@@ -11,6 +11,8 @@ export type ScanMode = 'live' | 'fake' | 'no_key' | 'off';
 export type CallLine = { model: string; http: number; latencyMs: number; source: string };
 export type ScanCard = {
   cardId: number;
+  scanReceiptId?: string;
+  scanCardId?: string;
   slot: string;
   type: string;
   sparkColor: string;
@@ -25,8 +27,28 @@ export type ScanCard = {
   box: Rect;
 };
 export type ScanKind = 'outfit' | 'closet';
-export type ScanOk = { ok: true; kind: ScanKind; cards: ScanCard[]; direction: string; moreNotListed: boolean | null; samMode: 'mask' | 'box_crop'; notes: string[]; calls: CallLine[]; mode: ScanMode; w: number; h: number };
+export type ScanOk = { ok: true; receiptId?: string; kind: ScanKind; cards: ScanCard[]; direction: string; moreNotListed: boolean | null; samMode: 'mask' | 'box_crop'; notes: string[]; calls: CallLine[]; mode: ScanMode; w: number; h: number };
 export type ScanFail = { ok: false; code: string; detail: string; calls?: CallLine[]; mode?: ScanMode };
+
+/** Missing transport evidence is unknown, not proof that no paid request happened. */
+export function scanAttempted(failure: ScanFail): boolean | null {
+  if (failure.calls?.length) return true;
+  if (failure.mode === 'fake') return false;
+  return ['META_DISABLED','META_KEY_MISSING','SESSION_REQUIRED','ORIGIN_DENIED','ACCOUNT_CHANGED','CALL_CAP_REACHED','BAD_INPUT'].includes(failure.code) ? false : null;
+}
+
+export function samplePreviewOnly(fromSample: boolean, workspaceId?: string | null): boolean {
+  return fromSample && !!workspaceId;
+}
+
+export function cutoutSummary(cards: Pick<ScanCard, 'cutoutKind'>[]): string {
+  const masks = cards.filter(card => card.cutoutKind === 'mask').length;
+  const crops = cards.length - masks;
+  if (!cards.length) return 'No garment cut-outs';
+  if (!crops) return `${masks} SAM mask${masks === 1 ? '' : 's'}`;
+  if (!masks) return `${crops} box crop${crops === 1 ? '' : 's'} (no masks)`;
+  return `${masks} SAM mask${masks === 1 ? '' : 's'} · ${crops} box crop${crops === 1 ? '' : 's'}`;
+}
 
 export const NAMED_HEX: Record<string, string> = {
   black: '#141416', charcoal: '#3A3C42', gray: '#808082', white: '#F0F0EC', beige: '#D4C2A0', brown: '#704C32',
@@ -53,7 +75,9 @@ export async function prepare(file: File) {
     c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
     return c.toDataURL(type, q);
   };
-  return { jpeg: draw(1600, 'image/jpeg', 0.9), png: draw(800, 'image/png') };
+  try {
+    return { jpeg: draw(1600, 'image/jpeg', 0.9), png: draw(800, 'image/png') };
+  } finally { bmp.close(); }
 }
 
 /** One part of the photo at full resolution, encoded like prepare(). k = scale of the JPEG that was sent. */
@@ -81,7 +105,7 @@ const toPhoto = (b: Rect, k: number, off: { x1: number; y1: number }): Rect => (
 });
 
 export function modeLine(mode: ScanMode | null): string {
-  if (mode === 'live') return 'LIVE · muse-spark-1.3 + sam-3.1 (Meta Model API)';
+  if (mode === 'live') return 'Meta ready · muse-spark-1.3 + sam-3.1';
   if (mode === 'fake') return 'Test fake · no Meta call';
   if (mode === 'no_key') return 'No Meta key on this server · scanning is off';
   if (mode === 'off') return 'Model calls switched off on this server';
@@ -122,6 +146,14 @@ export async function sampleFile(kind: 'outfit' | 'closet'): Promise<File> {
   return new File([blob], 'sample-rail.jpg', { type: 'image/jpeg' });
 }
 
+export function receiptCards(result: ScanOk): ScanCard[] {
+  if (result.mode !== 'live') return result.cards;
+  if (!result.receiptId || !/^[A-Za-z0-9_-]{1,128}$/.test(result.receiptId)) {
+    throw new Error('The server did not return a scan receipt. No pieces were added.');
+  }
+  return result.cards.map(card => ({ ...card, scanReceiptId: result.receiptId, scanCardId: String(card.cardId) }));
+}
+
 export function cardsToPieces(cards: ScanCard[], chosen: Record<number, string>, mode: 'live' | 'fake', existing: GarmentPiece[], stamp: number, sample = false): GarmentPiece[] {
   const used = new Set(existing.map((g) => g.code));
   const next = (prefix: string) => {
@@ -155,6 +187,7 @@ export function cardsToPieces(cards: ScanCard[], chosen: Record<number, string>,
       frontImageUrl: c.cutout,
       cutoutSource: c.cutoutKind === 'mask' ? 'sam-mask' : 'box-crop',
       scanMode: mode,
+      ...(mode === 'live' && c.scanReceiptId ? { scanReceiptId: c.scanReceiptId, scanCardId: c.scanCardId ?? String(c.cardId), scanColor: color } : {}),
       observations: [],
       feeConfig: { platform: 'Karrot', feeRatePct: 0, shippingCost: 0, confirmed: false },
     } satisfies GarmentPiece;
@@ -166,9 +199,10 @@ interface ScanPhotoModalProps {
   onClose: () => void;
   garments: GarmentPiece[];
   onHang: (pieces: GarmentPiece[]) => void;
+  workspaceId?: string | null;
 }
 
-export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose, garments, onHang }) => {
+export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose, garments, onHang, workspaceId = null }) => {
   const [mode, setMode] = useState<ScanMode | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [fromSample, setFromSample] = useState(false);
@@ -183,6 +217,16 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
   const [keep, setKeep] = useState<Record<number, boolean>>({});
   const [chosen, setChosen] = useState<Record<number, string>>({});
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const scanToken = useRef(0);
+  const identity = useRef({ workspaceId, isOpen });
+  identity.current = { workspaceId, isOpen };
+  useEffect(() => {
+    scanToken.current++;
+    setResult(null); setFailure(null); setKeep({}); setChosen({});
+    setFile(null); setPreview(null); setSentence(''); setFromSample(false);
+    setBusy(false); setMoreBusy(false); setPartsDone(false);
+    return () => { scanToken.current++; };
+  }, [workspaceId, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -206,22 +250,27 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
     setChosen({});
   };
   const pick = (f: File | null, sample = false) => {
+    scanToken.current++; setBusy(false); setMoreBusy(false);
     setFromSample(sample && !!f);
     reset();
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
   };
   const scan = async () => {
-    if (!file) return;
+    if (!file || samplePreviewOnly(fromSample, workspaceId) || (mode === 'live' && !workspaceId)) return;
+    const token = ++scanToken.current;
+    const current = () => token === scanToken.current && identity.current.isOpen && identity.current.workspaceId === workspaceId;
     setBusy(true);
     reset();
     try {
       const { jpeg, png } = await prepare(file);
-      const res = await fetch('/api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jpegBase64: jpeg, pngBase64: png, sentence: kind === 'outfit' ? sentence : '', mode: kind }) });
+      if (!current()) return;
+      const res = await fetch('/api/scan', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceId, jpegBase64: jpeg, pngBase64: png, sentence: kind === 'outfit' ? sentence : '', mode: kind }) });
       const j = (await res.json().catch(() => null)) as ScanOk | ScanFail | null;
+      if (!current()) return;
       if (!j) setFailure({ ok: false, code: 'NO_ANSWER', detail: `the server answered ${res.status} without a body` });
       else if (j.ok) {
-        setResult(j);
+        setResult({ ...j, cards: receiptCards(j) });
         setKeep(Object.fromEntries(j.cards.filter((c) => c.slot !== 'shoes').map((c) => [c.cardId, true])));
         if (j.mode) setMode(j.mode);
       } else {
@@ -229,15 +278,17 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
         if (j.mode) setMode(j.mode);
       }
     } catch (e) {
-      setFailure({ ok: false, code: 'NETWORK', detail: e instanceof Error ? e.message : String(e) });
+      if (current()) setFailure({ ok: false, code: 'NETWORK', detail: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   };
   // Closet photos with more than one scan can list: scan two overlapping parts at full resolution
   // and merge, keeping one card per garment (the larger box when two parts saw the same piece).
   const scanRest = async () => {
-    if (!file || !result) return;
+    if (!file || !result || samplePreviewOnly(fromSample, workspaceId) || (mode === 'live' && !workspaceId)) return;
+    const token = ++scanToken.current;
+    const current = () => token === scanToken.current && identity.current.isOpen && identity.current.workspaceId === workspaceId;
     setMoreBusy(true);
     try {
       const bmp = await createImageBitmap(file);
@@ -250,17 +301,22 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
       const notes = [...result.notes];
       let failed = 0;
       for (const t of tiles) {
+        if (!current()) { bmp.close(); return; }
         const part = await preparePart(bmp, t);
-        const res = await fetch('/api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jpegBase64: part.jpeg, pngBase64: part.png, sentence: '', mode: 'closet' }) });
+        if (!current()) { bmp.close(); return; }
+        const res = await fetch('/api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ workspaceId, jpegBase64: part.jpeg, pngBase64: part.png, sentence: '', mode: 'closet' }) });
         const j = (await res.json().catch(() => null)) as ScanOk | ScanFail | null;
+        if (!current()) { bmp.close(); return; }
         if (j?.calls) calls.push(...j.calls);
         if (!j || !j.ok) {
           failed++;
           continue;
         }
-        for (const card of j.cards) finds.push({ card, box: toPhoto(card.box, part.k, t), first: false });
+        for (const card of receiptCards(j)) finds.push({ card, box: toPhoto(card.box, part.k, t), first: false });
         for (const n of j.notes) if (!n.includes('more garments than it listed') && !notes.includes(n)) notes.push(n);
       }
+      bmp.close();
+      if (!current()) return;
       const kept = mergeTileFinds(finds);
       let next = Math.max(0, ...result.cards.map((c) => c.cardId)) + 1;
       const stay = result.cards.filter((c) => kept.some((k) => k.first && k.card === c));
@@ -270,22 +326,23 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
       setResult({ ...result, cards: [...stay, ...added], calls, notes });
       setPartsDone(true);
     } catch (e) {
-      setFailure({ ok: false, code: 'PARTS_FAILED', detail: e instanceof Error ? e.message : String(e) });
+      if (current()) setFailure({ ok: false, code: 'PARTS_FAILED', detail: e instanceof Error ? e.message : String(e) });
     } finally {
-      setMoreBusy(false);
+      if (current()) setMoreBusy(false);
     }
   };
   const open = result ? result.cards.filter((c) => keep[c.cardId] && c.colorChoices && !chosen[c.cardId]) : [];
   const picked = result ? result.cards.filter((c) => keep[c.cardId]) : [];
   const hang = () => {
-    if (!result || picked.length === 0 || open.length > 0) return;
+    if (!result || samplePreviewOnly(fromSample, workspaceId) || picked.length === 0 || open.length > 0) return;
     onHang(cardsToPieces(picked, chosen, result.mode === 'live' ? 'live' : 'fake', garments, Date.now(), fromSample));
     pick(null);
     setSentence('');
     onClose();
   };
   const live = mode === 'live';
-  const canScan = !!file && !busy && (mode === 'live' || mode === 'fake');
+  const previewOnly = samplePreviewOnly(fromSample, workspaceId);
+  const canScan = !!file && !previewOnly && !busy && !moreBusy && ((mode === 'live' && !!workspaceId) || mode === 'fake');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141413]/40 p-4" role="dialog" aria-modal="true" aria-labelledby="scan-title">
@@ -296,7 +353,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
             <p className="text-xs text-[#6B665E] mt-1">Each garment in the photo becomes a card. Nothing joins your closet until you confirm.</p>
             <div className="mt-2 inline-flex rounded-lg border border-[#E7E2DA] overflow-hidden text-[11px] font-semibold" role="group" aria-label="What the photo shows" data-testid="scan-kind">
               {(['outfit', 'closet'] as const).map((k) => (
-                <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); reset(); }} className={`px-3 py-1.5 ${kind === k ? 'bg-[#141413] text-white' : 'bg-white text-[#141413] hover:bg-[#F6F3EE]'}`}>
+                <button key={k} type="button" aria-pressed={kind === k} onClick={() => { scanToken.current++; setBusy(false); setMoreBusy(false); setKind(k); reset(); }} className={`px-3 py-1.5 ${kind === k ? 'bg-[#141413] text-white' : 'bg-white text-[#141413] hover:bg-[#F6F3EE]'}`}>
                   {k === 'outfit' ? 'One outfit' : 'Closet or rail (up to 16)'}
                 </button>
               ))}
@@ -308,6 +365,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
 
         <div className="px-6 py-5 grid gap-5 md:grid-cols-[220px_1fr]">
           <div className="flex flex-col gap-3">
+            {live && !workspaceId && <p className="text-xs text-[#B8460F]" role="status">Sign in to scan with Meta and save the results to your wardrobe. You can still explore the sample closet.</p>}
             <button type="button" onClick={() => inputRef.current?.click()} className="aspect-[3/4] w-full rounded-xl border-2 border-dashed border-[#D9D3C9] bg-[#FAF8F4] flex flex-col items-center justify-center gap-2 overflow-hidden hover:border-[#F37021]" data-testid="scan-pick">
               {preview ? <img src={preview} alt="Chosen photo" className="w-full h-full object-cover" /> : (<><Camera className="w-6 h-6 text-[#B8460F]" /><span className="text-sm font-semibold text-[#141413]">Take or choose a photo</span><span className="text-[11px] text-[#6B665E]">one outfit, front on</span></>)}
             </button>
@@ -320,7 +378,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
             >
               {kind === 'outfit' ? 'Or try a sample photo (a blazer)' : 'Or try a sample rail (4 pieces)'}
             </button>
-            {fromSample && <span className="text-[10px] text-[#6B665E]">Sample photo from the design kit: pieces from it are marked Sample.</span>}
+            {fromSample && <span className="text-[10px] text-[#6B665E]" role="status">{previewOnly ? 'Sample preview only · no Meta call. Choose your own photo to scan and save to your wardrobe.' : 'Sample photo from the design kit: pieces from it are marked Sample.'}</span>}
             {kind === 'outfit' && (
               <>
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-[#6B665E]" htmlFor="scan-sentence">What feels off? (optional)</label>
@@ -340,7 +398,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
                   <li>{kind === 'outfit' ? 'Muse Spark reads the photo and your sentence: one box per garment, the piece to keep, the pieces that feel off.' : 'Muse Spark lists each garment it can see on the rail or in the closet, up to 16, one box each.'}</li>
                   <li>SAM 3.1 cuts each garment out with its own mask.</li>
                   <li>Code checks both answers and measures each colour from the mask pixels. It asks you when the two disagree.</li>
-                  <li>You confirm; the pieces hang on the rail and stay in this browser. No price, wear or decision is added for you.</li>
+                  <li>You confirm; the pieces join your signed-in wardrobe. No price, wear or decision is added for you.</li>
                 </ol>
               </div>
             )}
@@ -360,7 +418,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
                   ) : (
                     <span className="px-2 py-0.5 rounded bg-[#F6F3EE]">{result.moreNotListed ? 'more in the photo than listed' : 'closet photo'}</span>
                   )}
-                  <span className="px-2 py-0.5 rounded bg-[#F6F3EE]">{result.samMode === 'mask' ? 'cut out by SAM masks' : 'box crops (no masks)'}</span>
+                  <span className="px-2 py-0.5 rounded bg-[#F6F3EE]">{cutoutSummary(result.cards)}</span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {result.cards.map((c) => {
@@ -403,7 +461,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
                   })}
                 </div>
                 {result.kind === 'closet' && result.moreNotListed && !partsDone && (
-                  <button type="button" onClick={scanRest} disabled={moreBusy} data-testid="scan-rest" className="self-start px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-[#F37021] text-[#B8460F] disabled:opacity-40 inline-flex items-center gap-1.5">
+                  <button type="button" onClick={scanRest} disabled={previewOnly || moreBusy || busy || (live && !workspaceId)} data-testid="scan-rest" className="self-start px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-[#F37021] text-[#B8460F] disabled:opacity-40 inline-flex items-center gap-1.5">
                     {moreBusy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Scanning the parts…</> : 'Find the rest: scan 2 overlapping parts (2 more Spark + SAM scans)'}
                   </button>
                 )}
@@ -421,7 +479,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
         {result && (
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-[#E7E2DA] bg-[#FAF8F4] rounded-b-2xl">
             <span className="text-[11px] text-[#6B665E]">{open.length > 0 ? `Pick a colour on ${open.length} card${open.length > 1 ? 's' : ''} first.` : 'New pieces start with no price, no wear record and no decision.'}</span>
-            <button type="button" onClick={hang} disabled={picked.length === 0 || open.length > 0} className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#141413] text-white disabled:opacity-40 inline-flex items-center gap-2" data-testid="scan-hang">
+            <button type="button" onClick={hang} disabled={previewOnly || busy || moreBusy || picked.length === 0 || open.length > 0} className="px-4 py-2 text-sm font-semibold rounded-lg bg-[#141413] text-white disabled:opacity-40 inline-flex items-center gap-2" data-testid="scan-hang">
               <Check className="w-4 h-4" />Hang {picked.length} piece{picked.length === 1 ? '' : 's'}
             </button>
           </div>

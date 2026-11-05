@@ -11,8 +11,8 @@ post-submission addition and runs as a separate app from the root interface.
 
 One outfit or closet photo becomes pieces you can inspect and act on. The face
 is a 3D boutique rail; the records, their sources and the next decision remain
-visible in the inspector. Account storage now reuses the root project's account
-implementation while keeping this app's data separate from the root ledger.
+visible in the inspector. Account storage uses the root project's account store,
+canonical event ledger and price/decision engine in this app's account database.
 
 ## What it does
 
@@ -21,7 +21,8 @@ implementation while keeping this app's data separate from the root ledger.
   `sam-3.1` for masks, validates the answers, measures colour from mask pixels
   and returns cut-out cards for confirmation. Closet mode reads up to 16
   garments and can scan the remainder in overlapping parts. A confirmed real
-  piece stays in the guest browser or saves to the signed-in account.
+  piece saves to its signed-in account with a server-issued scan receipt. Live
+  analysis requires sign-in; guests can explore samples or add a manual photo.
 - **Spatial browsing.** Front Rail, 3D Walk-Around, Left Wing, Right Wing and
   Overhead are real camera positions. Drag can sweep the rail or orbit the room;
   wheel zoom and WASD navigation are available in the room. Auto orbit moves
@@ -40,7 +41,8 @@ implementation while keeping this app's data separate from the root ledger.
 - **Accounts and saving.** Account registration, sign-in, sign-out and account
   wardrobes are available from this surface. Save state distinguishes loading,
   saving, verified saved, errors and another-tab conflicts. Local personal
-  pieces can be imported explicitly after sign-in.
+  pieces can be imported explicitly after sign-in. The Account panel and Asset
+  Ledger show canonical saved activity, recorded prices and model requests.
 - **Review and fallback.** Review compares Sell and Undecided pieces and sums
   eligible net proceeds separately by currency. Grid provides the same records
   when WebGL cannot run or reduced motion requests a static first view. The
@@ -61,14 +63,32 @@ sample pieces, fake scans and sample observations. Signed-in private wardrobes
 are not copied into guest localStorage. Sample-view edits do not save into the
 account, and switching identities clears the displayed account scene.
 
-`server/accountRouter.ts` reuses the root `store/extras.ts` account/session store
-and `web/guard.ts` password, session-cookie and request-guard helpers. The
-Rail Studio wardrobe document lives in a separate `rail_studio_wardrobes` table,
-keyed by the authenticated account workspace. Saves require that workspace ID
-and the expected revision, perform a transaction and read back the stored
-result; stale revisions produce a conflict rather than overwriting another tab.
-This integrates the existing account code, not an automatic migration or shared
-login to the root app's existing database or event ledger.
+`server/accountRouter.ts` reuses root `store/extras.ts` and `web/guard.ts` for
+accounts and sessions. `AccountWardrobeStore` uses root `SqliteLedger` and
+`FeatureService`: registration/removal/update events, the presentation snapshot,
+price evidence and immutable decisions commit in one SQLite transaction on one
+connection. A failed projection rolls back the whole save. Successful saves are
+read back; request IDs make an uncertain retry idempotent, while both the
+presentation and canonical revisions prevent stale edits from overwriting data.
+
+Existing account snapshots migrate on authenticated read. Photos, presentation
+revision and original update time are preserved; no sample pieces are seeded.
+Dated wear history is never invented from a reported aggregate. Removing a piece
+with canonical wear or outfit references is refused to preserve that history.
+Otherwise an explicit removal event remains after the current item is removed.
+A new explicit Keep/Sell save creates a new decision with its own cost snapshot;
+subsequent cost edits do not rewrite previous decisions. Legacy decisions without
+cost snapshots retain unknown net proceeds.
+
+Root platform/currency rules remain explicit. For example, Vinted USD is preserved
+in the presentation document but excluded from canonical totals because the root
+engine's Vinted contract uses EUR. The app reports partial projection and the
+reason; it does not convert money or silently count it as another currency.
+
+This uses the submitted project's **actual ledger implementation**, with an
+account-scoped `GET /api/account/ledger` report. It does not share another running
+app's database or cookies, merge existing port-8789 accounts, or expose its admin
+API. Those existing data stores remain independent.
 
 ## Run
 
@@ -106,27 +126,54 @@ disabling local account or wardrobe work.
 | `CLOSER_APP_ORIGIN` | Optional comma-separated exact allowed origins, including scheme and port. Without it, the request's own origin is used. Account mutations require a matching Origin and JSON; sibling-port and cross-site writes are rejected. |
 | `CLOSER_ACCOUNT_COOKIE_SECURE` | Set to `1` for HTTPS deployment, particularly behind TLS termination. Cookies also use Secure when Express recognizes an HTTPS request; they are HttpOnly and SameSite=Strict. Do not enable Secure for plain-HTTP localhost testing. |
 
-The default database is separate from the original root app's ledger. Do not
+The default database contains this surface's canonical ledger and is separate
+from any already-running root app's database. Do not
 point a test server at an existing personal database. Database files and their
 SQLite sidecars are denied by the application's private-file guards; keep the
 database out of public asset directories and deployment artifacts.
 
 ### Model configuration
 
-`GET /api/scan/status` reports `live` with `MODEL_API_KEY` or `META_API_KEY`,
-`fake` only with `CLOSER_SCAN_FAKE=1` and no key, `no_key` without either, or `off`
-with `CLOSER_KILL=1`. The process spend cap is `CLOSER_SCAN_BUDGET_USD` (default
-2). Configure keys in the server environment, not browser code. With a key
-already configured, `npm run live:scan` performs a real scan check and prints
-statuses, timings and counts. See [server/README.md](server/README.md).
+The local `dev` and `start` commands load the repository-root `.env` if it
+exists. Put `MODEL_API_KEY` there (file permissions `600`), or supply it through
+the process environment. Existing environment values take precedence. AI Studio
+can still inject `MODEL_API_KEY` through Settings → Secrets. Never use a `VITE_`
+prefix or commit a key. From the root, `npm run rail:live` uses the existing
+`scripts/with-key.sh` launcher without printing its secret.
+
+`GET /api/scan/status` reports `live` when a key is configured, `fake` only with
+`CLOSER_SCAN_FAKE=1` and no key, `no_key` without either, or `off` with
+`CLOSER_KILL=1`. Configuration alone does not prove a successful model call.
+Recorded successful calls, reservations and estimates are separate status fields.
+
+Live `POST /api/scan` requires the current account, matching `workspaceId` and
+same-origin request. Each real HTTP attempt has a durable reservation and call
+record, including failures. The `CLOSER_SCAN_BUDGET_USD` cap (default 2, maximum
+50) applies across restarts of this account database. Costs use local estimates,
+not provider invoices; a processed response can exceed its pre-call estimate.
+Uncertain requests retain their allocation. Each request times out after at most
+45 seconds, within a 90-second scan deadline. The process also limits scan rate.
+
+The server binds each returned garment to its account, original card, cutout
+pixels and mask/crop source. Confirmed choices retain the server's type and
+formality and the owner's allowed color selection in the canonical ledger.
+A rejected SAM mask is explicitly shown as a box crop; HTTP 200 alone does not
+mean a usable mask. A legacy record without a receipt is labelled unverified.
+Signed-in sample-photo previews do not make paid calls or enter private records.
+
+For an end-to-end live check, use the UI to sign in, choose a personal or synthetic
+test image, scan, confirm, then inspect **Saved ledger & photo analysis history**.
+The older `npm run live:scan` script is a standalone adapter diagnostic: it does
+not exercise account authentication, the HTTP budget or canonical persistence.
+Do not use its output as evidence that those boundaries passed.
 
 ## Verification scope
 
 Tests, type checks and a production build are separate from browser and provider
 verification. The account tests use isolated databases; the scan tests can use
 a labelled fake without calling Meta. Neither proves a successful live model
-request. Live Meta scanning from this integrated surface still requires a
-configured key and a real end-to-end run.
+request. Live Meta scanning must be checked with a configured key and a real end-to-end
+run; record model HTTP statuses and mask/crop validation separately.
 
 For browser review, check desktop and phone widths, Walk-Around → Front Rail,
 selection during orbit, camera-bar spacing with the dock open and closed,
@@ -149,7 +196,10 @@ than treating an old screenshot or build as current UI evidence.
 - `server/scan.ts`, `server/closetSpark.ts`, `server/closer/` — photo pipeline,
   adapters and validation; `server/fakeMeta.ts` is the test transport.
 - `server/accountRouter.ts`, `accountStore.ts`, `wardrobeSchema.ts` — account
-  boundary, revisioned wardrobe persistence and incoming-record validation.
+  boundary, revisioned persistence and incoming-record validation.
+- `server/ledgerBridge.ts` — canonical item, price and immutable decision mapping.
+- `server/scanJournal.ts` — durable call reservations, receipts and provenance.
+- `src/components/CanonicalLedgerPanel.tsx` — account-scoped canonical readback.
 - `src/utils/accountWardrobe.ts`, `src/hooks/useAccountWardrobe.ts` — guest and
   account state, explicit imports, save queue and conflict handling.
 - `src/App.tsx` — rail/grid, dock, account surface, scan flow and selection.

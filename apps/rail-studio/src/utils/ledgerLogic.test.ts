@@ -1014,7 +1014,7 @@ test('createHungPiece from a scan keeps the cut-out, its source and mode, and th
   assert.equal(piece.cutoutSource, 'box-crop');
   assert.equal(piece.scanMode, 'live');
   assert.equal(isKeptAfterReload(piece), true);
-  assert.equal(describePhotoSource(piece), '1 photo · Spark box · LIVE');
+  assert.equal(describePhotoSource(piece), 'Prior scan · source unverified');
 
   const sample = createHungPiece({
     id: 'scan-upload-3',
@@ -1039,7 +1039,7 @@ test('createHungPiece from a scan keeps the cut-out, its source and mode, and th
 test('photo provenance names a model only for a scanned cut-out', () => {
   assert.equal(describePhotoSource(scannedPiece()), '1 photo · SAM 3.1 mask · Test fake · no Meta call');
   assert.equal(
-    describePhotoSource(scannedPiece({ scanMode: 'live' })),
+    describePhotoSource(scannedPiece({ scanMode: 'live', scanReceiptId:'receipt-a', scanCardId:'1' })),
     '1 photo · SAM 3.1 mask · LIVE',
   );
   for (const g of INITIAL_GARMENTS) {
@@ -1117,4 +1117,12 @@ test('banned words do not appear in the app source or its page metadata', () => 
     }
   }
   assert.deepEqual(hits, []);
+});
+
+
+test('decision trend accepts ISO timestamps and legacy dates in the same window', () => {
+  const base = {...mockGarments[0], isSample:false};
+  const decision = {id:'d-iso',choice:'sell' as const,savedAt:'2026-11-06T03:04:05.000Z',snapshotPrice:125000,snapshotCurrency:'KRW' as const,snapshotPlatform:'Karrot' as const};
+  const trend=compute30DayRotationTrend([{...base,id:'iso',lastDecision:decision},{...base,id:'legacy',lastDecision:{...decision,id:'d-date',savedAt:'2026-11-06'}}],'2026-11-06');
+  assert.equal(trend.sellDecidedLast30d,2);
 });

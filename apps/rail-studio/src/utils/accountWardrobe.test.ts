@@ -7,7 +7,7 @@ import type { GarmentPiece } from '../types/closet';
 const own = (id = 'piece-custom-one'): GarmentPiece => ({ ...structuredClone(INITIAL_GARMENTS[0]), id, code: 'A11', isSample: false,
   observations: [], wearsLast60Days: 0, wearLogStatus: 'insufficient', imageUrl: undefined,
   frontImageUrl: undefined, lastDecision: undefined, scanMode: undefined });
-const response = (data: object, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+const response = (data: any, status = 200) => new Response(JSON.stringify({ ...(typeof data.revision === 'number' ? {ledgerRevision: data.revision, ledgerStatus: 'verified', ledgerWarnings: []} : {}), ...data }), { status, headers: { 'Content-Type': 'application/json' } });
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 function fixture() {
@@ -179,4 +179,59 @@ for (const failureStatus of [401, 403, 500]) test(`late hydration failure ${fail
   assert.equal(ctl.getSnapshot().status, 'saved');
   assert.equal(ctl.getSnapshot().error, null);
   assert.equal(ctl.getSnapshot().busy, false);
+});
+
+
+test('lost save response replays the identical request before a later edit', async () => {
+  const f = fixture(); await f.ctl.authenticate('login', 'a', 'password');
+  const committed = new Map<string, object>(); let calls = 0;
+  f.onPut(async body => {
+    if (committed.has(body.requestId)) return response(committed.get(body.requestId)!);
+    const saved = {ok: true, workspaceId: 'a', revision: body.expectedRevision + 1,
+      ledgerRevision: body.expectedLedgerRevision + 2, pieces: structuredClone(body.pieces)};
+    committed.set(body.requestId, saved);
+    if (calls++ === 0) throw new Error('Response lost after commit');
+    return response(saved);
+  });
+  f.ctl.update([own()]); await tick();
+  assert.equal(f.ctl.getSnapshot().status, 'error');
+  f.ctl.update([{ ...own(), name: 'Newer local edit' }]);
+  await f.ctl.retry();
+  assert.equal(f.writes.length, 3);
+  assert.deepEqual(f.writes[0], f.writes[1]);
+  assert.notEqual(f.writes[1].requestId, f.writes[2].requestId);
+  assert.equal(f.writes[2].expectedLedgerRevision, 2);
+  assert.equal(f.ctl.getSnapshot().ledgerRevision, 4);
+  assert.equal(f.ctl.getSnapshot().pieces[0].name, 'Newer local edit');
+  assert.equal(committed.size, 2);
+});
+
+test('a snapshot-only response cannot be displayed as a verified ledger save', async () => {
+  const f = fixture(); await f.ctl.authenticate('login', 'a', 'password');
+  f.onPut(async body => new Response(JSON.stringify({ok:true,workspaceId:'a',revision:1,pieces:body.pieces})));
+  f.ctl.update([own()]); await tick();
+  assert.equal(f.ctl.getSnapshot().status, 'error');
+  assert.equal(f.ctl.getSnapshot().revision, 0);
+});
+
+test('partial ledger projections retain the warning for the owner', async () => {
+  const f = fixture(); await f.ctl.authenticate('login', 'a', 'password');
+  f.onPut(async body => response({ok:true,workspaceId:'a',revision:1,ledgerRevision:3,
+    ledgerStatus:'partial',ledgerWarnings:['A platform currency needs review.'],pieces:body.pieces}));
+  f.ctl.update([own()]); await f.ctl.flush();
+  assert.equal(f.ctl.getSnapshot().ledgerStatus, 'partial');
+  assert.deepEqual(f.ctl.getSnapshot().ledgerWarnings, ['A platform currency needs review.']);
+});
+
+
+test('a rejected photo can be corrected without replaying the invalid save forever', async () => {
+  const f=fixture(); await f.ctl.authenticate('login','a','password');
+  f.onPut(async () => response({ok:false,detail:'This photo has no matching receipt.'},400));
+  f.ctl.update([own('scan-invalid')]); await tick();
+  assert.equal(f.ctl.getSnapshot().status,'error');
+  f.ctl.update([own('piece-custom-corrected')]);
+  f.onPut(null); await f.ctl.retry();
+  assert.equal(f.ctl.getSnapshot().status,'saved');
+  assert.notEqual(f.writes[0].requestId,f.writes[1].requestId);
+  assert.equal(f.writes[1].pieces[0].id,'piece-custom-corrected');
 });

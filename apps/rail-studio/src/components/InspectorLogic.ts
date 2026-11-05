@@ -35,6 +35,7 @@ export interface InspectorChip {
  */
 export function scanSourceLabel(garment: GarmentPiece): string | null {
   if (!garment.cutoutSource) return null;
+  if (garment.scanMode === 'live' && !garment.scanReceiptId) return 'Prior scan · source unverified';
   const how = garment.cutoutSource === 'sam-mask' ? 'SAM mask' : 'Spark box';
   const mode = garment.scanMode === 'live' ? 'LIVE' : 'Test fake · no Meta call';
   return `${how} · ${mode}`;

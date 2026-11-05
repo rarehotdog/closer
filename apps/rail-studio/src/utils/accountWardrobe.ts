@@ -3,7 +3,8 @@ import type { GarmentPiece } from '../types/closet';
 export type Account = { handle: string; workspaceId: string };
 export type SaveStatus = 'local' | 'loading' | 'saving' | 'saved' | 'error' | 'conflict';
 export type AccountState = {
-  account: Account | null; pieces: GarmentPiece[]; revision: number;
+  account: Account | null; pieces: GarmentPiece[]; revision: number; ledgerRevision: number;
+  ledgerStatus: 'verified' | 'partial' | null; ledgerWarnings: string[];
   status: SaveStatus; error: string | null; busy: boolean; sampleView: boolean;
   epoch: number; localCount: number;
 };
@@ -33,7 +34,9 @@ export function loadLocalPieces(storage?: Pick<Storage, 'getItem'>): GarmentPiec
 class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
-type SavedDocument = { workspaceId: string; revision: number; pieces: GarmentPiece[] };
+type SavedDocument = { workspaceId: string; revision: number; ledgerRevision: number;
+  ledgerStatus: 'verified' | 'partial'; ledgerWarnings?: string[]; pieces: GarmentPiece[] };
+type PendingSave = { requestId: string; workspaceId: string; expectedRevision: number; expectedLedgerRevision: number; pieces: GarmentPiece[]; version: number };
 
 /** One queue per signed-in identity; private records never pass through the local storage callback. */
 export class AccountWardrobeController {
@@ -48,11 +51,12 @@ export class AccountWardrobeController {
   private checking = false;
   private initialized = false;
   private sessionOperation = 0;
+  private pendingSave: PendingSave | null = null;
 
   constructor(private request: Request, private seed: GarmentPiece[], guestPieces: GarmentPiece[],
     private saveLocal: (pieces: GarmentPiece[]) => void = () => {}) {
     this.guest = [...seed, ...guestPieces];
-    this.state = { account: null, pieces: this.guest, revision: 0, status: 'local', error: null,
+    this.state = { account: null, pieces: this.guest, revision: 0, ledgerRevision: 0, ledgerStatus: null, ledgerWarnings: [], status: 'local', error: null,
       busy: false, sampleView: false, epoch: 0, localCount: guestPieces.filter(isPersonalPiece).length };
   }
   getSnapshot = (): AccountState => this.state;
@@ -74,26 +78,29 @@ export class AccountWardrobeController {
   }
   private document(data: any, workspaceId: string): SavedDocument {
     if (data?.workspaceId !== workspaceId || !Number.isInteger(data?.revision) || data.revision < 0 ||
+      !Number.isSafeInteger(data?.ledgerRevision) || data.ledgerRevision < 0 ||
+      !['verified', 'partial'].includes(data?.ledgerStatus) ||
       !Array.isArray(data?.pieces) || !data.pieces.every(isPersonalPiece)) {
       throw new ApiError('The saved wardrobe could not be verified. Please reload it.', 502);
     }
     return data;
   }
   private becomeGuest(message: string | null = null) {
-    this.privatePieces = []; this.editVersion = 0; this.savedVersion = 0;
-    this.emit({ account: null, pieces: this.guest, revision: 0, sampleView: false,
+    this.privatePieces = []; this.editVersion = 0; this.savedVersion = 0; this.pendingSave = null;
+    this.emit({ account: null, pieces: this.guest, revision: 0, ledgerRevision: 0, ledgerStatus: null, ledgerWarnings: [], sampleView: false,
       status: 'local', busy: false, error: message, epoch: this.state.epoch + 1 });
   }
   private async hydrate(account: Account, operation: number) {
     if (operation !== this.sessionOperation) return;
     const epoch = this.state.epoch + 1;
-    this.privatePieces = []; this.editVersion = 0; this.savedVersion = 0;
-    this.emit({ account, pieces: [], revision: 0, sampleView: false, status: 'loading', error: null, epoch });
+    this.privatePieces = []; this.editVersion = 0; this.savedVersion = 0; this.pendingSave = null;
+    this.emit({ account, pieces: [], revision: 0, ledgerRevision: 0, ledgerStatus: null, ledgerWarnings: [], sampleView: false, status: 'loading', error: null, epoch });
     try {
       const data = this.document(await this.api('/wardrobe'), account.workspaceId);
       if (this.disposed || this.state.epoch !== epoch || operation !== this.sessionOperation) return;
       this.privatePieces = data.pieces;
-      this.emit({ pieces: data.pieces, revision: data.revision, status: 'saved' });
+      this.emit({ pieces: data.pieces, revision: data.revision, ledgerRevision: data.ledgerRevision,
+        ledgerStatus: data.ledgerStatus, ledgerWarnings: data.ledgerWarnings ?? [], status: 'saved' });
     } catch (error) {
       // Failed requests need the same ownership check as successful responses.
       if (!this.disposed && this.state.epoch === epoch && operation === this.sessionOperation) this.fail(error);
@@ -172,19 +179,31 @@ export class AccountWardrobeController {
     if (!workspaceId || this.state.sampleView) return Promise.resolve();
     this.running = (async () => {
       while (!this.disposed && this.state.epoch === epoch && this.savedVersion < this.editVersion) {
-        const version = this.editVersion;
-        const pieces = this.privatePieces;
-        const revision = this.state.revision;
+        // Keep the exact request across an uncertain network result. A later local edit
+        // waits behind this request, so retry cannot create a duplicate ledger event.
+        const pending = this.pendingSave ??= {
+          requestId: crypto.randomUUID(), workspaceId, expectedRevision: this.state.revision,
+          expectedLedgerRevision: this.state.ledgerRevision,
+          pieces: structuredClone(this.privatePieces), version: this.editVersion,
+        };
+        const { version, expectedRevision: revision, ...body } = pending;
         this.emit({ status: 'saving', error: null });
         try {
-          const data = this.document(await this.api('/wardrobe', 'PUT', { workspaceId, expectedRevision: revision, pieces }), workspaceId);
+          const data = this.document(await this.api('/wardrobe', 'PUT', { ...body, expectedRevision: revision }), workspaceId);
           if (this.state.epoch !== epoch || this.disposed) return;
-          if (data.revision !== revision + 1) throw new ApiError('The save revision could not be verified.', 502);
+          if (data.revision !== revision + 1 || data.ledgerRevision <= pending.expectedLedgerRevision) throw new ApiError('The save revision could not be verified.', 502);
+          this.pendingSave = null;
           this.savedVersion = version;
           if (this.editVersion === version) this.privatePieces = data.pieces;
-          this.emit({ revision: data.revision, pieces: this.privatePieces });
+          this.emit({ revision: data.revision, ledgerRevision: data.ledgerRevision, ledgerStatus: data.ledgerStatus,
+            ledgerWarnings: data.ledgerWarnings ?? [], pieces: this.privatePieces });
         } catch (error) {
-          if (this.state.epoch === epoch) this.fail(error);
+          if (this.state.epoch === epoch) {
+            // The server rejected this body before committing it. A corrected edit
+            // needs a new request; only uncertain results retain the exact retry.
+            if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 409) this.pendingSave = null;
+            this.fail(error);
+          }
           return;
         }
       }

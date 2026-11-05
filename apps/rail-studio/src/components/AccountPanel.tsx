@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, UserRound, LogOut, RefreshCw } from 'lucide-react';
+import { CanonicalLedgerPanel } from './CanonicalLedgerPanel';
 import type { AccountState, AccountWardrobeController } from '../utils/accountWardrobe';
 
 type Props = {
@@ -48,7 +49,8 @@ export function AccountPanel({ isOpen, onClose, state, controller, persistenceNo
           <p className="text-sm text-[#57534E]">Signed in as</p><p className="font-semibold break-all">{state.account.handle}</p>
           <p role="status" className="text-sm mt-2 text-[#57534E]">{persistenceNotice}</p>
         </div>
-        <p className="text-sm text-[#57534E]">Your own photos, prices and decisions are saved to this server. The sample closet stays separate.</p>
+        <p className="text-sm text-[#57534E]">Your photos, prices and decisions are saved with your personal ledger. The sample closet stays separate.</p>
+        <CanonicalLedgerPanel key={state.account.workspaceId} state={state} />
         {state.status === 'error' && <button type="button" className={button} onClick={() => void act(() => controller.retry())} disabled={state.busy}><RefreshCw className="inline mr-2" size={15} />Retry save</button>}
         {state.status === 'conflict' && <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
           <p>Another tab saved a newer version. Your changes have not replaced it.</p>

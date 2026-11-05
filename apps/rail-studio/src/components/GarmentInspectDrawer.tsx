@@ -293,12 +293,14 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
       : garment.imageUrl || garment.frontImageUrl;
 
   const factsMoved = hasFactsMoved(garment);
+  const displayDate = /^(scan-|piece-custom-)/.test(garment.id) && !garment.isSample
+    ? new Date().toLocaleDateString('en-CA') : REFERENCE_DATE;
 
   const evidence = summarizeKeepSellEvidence(
     effectiveGarment,
     askPrice,
     looks,
-    REFERENCE_DATE,
+    displayDate,
   );
   const { keepScenario, sellScenario, summary } = evidence;
 
@@ -856,7 +858,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                   </p>
                 </div>
                 <span className="text-[10px] font-mono-num px-2 py-0.5 rounded bg-white border border-[#E7E2DA] text-[#57534E] whitespace-nowrap shrink-0">
-                  As of {REFERENCE_DATE}
+                  As of {displayDate}
                 </span>
               </div>
 
@@ -1656,7 +1658,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                       <span aria-hidden="true">→</span>
                       <span className="font-mono-num font-semibold text-[#F37021]">
                         {garment.lastDecision
-                          ? `④ ${keptAfterReload ? 'Saved in this browser' : 'This tab only'} (${garment.lastDecision.id})`
+                          ? `④ ${storageNote}`
                           : '④ No decision yet'}
                       </span>
                     </div>
@@ -1741,7 +1743,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                               <strong className="font-mono-num text-[#141413]">
                                 {sellScenario.listed.count}
                               </strong>{' '}
-                              (as of {REFERENCE_DATE}).
+                              (as of {displayDate}).
                             </p>
                             <p className="text-[10px] text-[#8C857B] mt-1 leading-normal">
                               ※ {summary.limitsNotice}
@@ -1882,7 +1884,6 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                   {garment.lastDecision.choice === 'keep'
                     ? 'Keep'
                     : 'Prepare to Sell'}{' '}
-                  · {garment.lastDecision.id}
                 </span>
                 <span>
                   Price at decision{' '}

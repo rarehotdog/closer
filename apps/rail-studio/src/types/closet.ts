@@ -61,6 +61,8 @@ export interface DecisionRecord {
   snapshotPrice: number;
   snapshotCurrency: CurrencyCode;
   snapshotPlatform: ResalePlatform;
+  /** Costs explicitly captured when the owner saved this decision. */
+  feeSnapshot?: FeeStructure;
   note?: string;
 }
 
@@ -91,6 +93,11 @@ export interface GarmentPiece {
   cutoutSource?: 'sam-mask' | 'box-crop';
   /** Which server answered the scan: live Meta models, or the local test fake. */
   scanMode?: 'live' | 'fake';
+  /** Server-issued proof of the scan; the card ID stays stable when tile cards are renumbered. */
+  scanReceiptId?: string;
+  scanCardId?: string;
+  /** Owner-confirmed color from the choices in the server scan receipt. */
+  scanColor?: string;
   observations: PriceObservation[];
   feeConfig: FeeStructure;
   lastDecision?: DecisionRecord;

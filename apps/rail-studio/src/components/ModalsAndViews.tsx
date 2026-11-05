@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import type { AccountState } from '../utils/accountWardrobe';
+import { CanonicalLedgerPanel } from './CanonicalLedgerPanel';
 import {
   X,
   Check,
@@ -45,6 +47,8 @@ import {
 } from '../utils/ledgerLogic';
 import {
   modeLine,
+  scanAttempted,
+  samplePreviewOnly,
   NAMED_HEX,
   prepare,
   SHAPE,
@@ -210,6 +214,7 @@ const LedgerD3Sparkline: React.FC<LedgerD3SparklineProps> = ({ piece }) => {
 interface LedgerModalProps {
   isOpen: boolean;
   scope?: 'account' | 'sample' | 'browser';
+  accountState?: AccountState;
   onClose: () => void;
   garments: GarmentPiece[];
   summary: LedgerSummary;
@@ -219,6 +224,7 @@ interface LedgerModalProps {
 export const LedgerModal: React.FC<LedgerModalProps> = ({
   isOpen,
   scope = 'browser',
+  accountState,
   onClose,
   garments,
   summary,
@@ -278,6 +284,10 @@ export const LedgerModal: React.FC<LedgerModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {isAccount && accountState && <details className="px-6 py-3 border-b border-[#E7E2DA]">
+            <summary className="text-sm font-medium cursor-pointer min-h-9 flex items-center">Saved ledger &amp; photo analysis history</summary>
+            <CanonicalLedgerPanel key={accountState.account?.workspaceId} state={accountState} />
+          </details>}
           {/* Summary Cards by Currency + 30-Day Decision Donut & Progress Bar */}
           <div className="px-6 py-4 bg-[#FAF8F5] border-b border-[#E7E2DA] space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -1255,6 +1265,8 @@ interface AddGarmentModalProps {
   onClose: () => void;
   onAddGarment: (piece: GarmentPiece) => void;
   nextIndex: number;
+  workspaceId?: string | null;
+  onScanCloset?: () => void;
 }
 
 // Studio shots from the design kit, for trying the photo scan without a photo of your own.
@@ -1320,6 +1332,9 @@ type PhotoScanState =
       cutout: string;
       cutoutSource: 'sam-mask' | 'box-crop';
       scanMode: 'live' | 'fake';
+      scanReceiptId?: string;
+      scanCardId?: string;
+      scanColor?: string;
       line: string;
       detail: string;
     }
@@ -1335,9 +1350,13 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
   onClose,
   onAddGarment,
   nextIndex,
+  workspaceId = null,
+  onScanCloset,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scanToken = useRef(0);
+  const scanIdentity = useRef({ workspaceId, isOpen });
+  scanIdentity.current = { workspaceId, isOpen };
   const [serverMode, setServerMode] = useState<ScanMode | null>(null);
   // True only when this app's server itself answered the status check (not a network fallback).
   const [statusFromServer, setStatusFromServer] = useState(false);
@@ -1368,6 +1387,13 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
     'front_verified' | 'side_occluded'
   >('front_verified');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    scanToken.current++;
+    setPhoto({ state: 'idle' }); setScanPrefilled(false); setScannedColor(null);
+    setSilhouette(DEFAULT_SILHOUETTE); setCategory(null); setColorHex(DEFAULT_COLOR);
+    return () => { scanToken.current++; };
+  }, [workspaceId, isOpen]);
 
   // Which server answers the scan (live Meta models, the test fake, or none): shown as is.
   useEffect(() => {
@@ -1419,17 +1445,29 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
    */
   const scanPhotoFile = async (file: File, fromSample: boolean) => {
     const token = ++scanToken.current;
+    const current = () => token === scanToken.current && scanIdentity.current.isOpen && scanIdentity.current.workspaceId === workspaceId;
     undoScanPrefill();
     setError('');
     let plainUrl = '';
     try {
       plainUrl = await readAsDataUrl(file);
     } catch {
+      if (!current()) return;
       setPhoto({ state: 'idle' });
       setError('The photo could not be read.');
       return;
     }
-    if (token !== scanToken.current) return;
+    if (!current()) return;
+
+    if (samplePreviewOnly(fromSample, workspaceId)) {
+      setPhoto({ state: 'kept', plainUrl, fromSample, line: 'Sample preview only · no Meta call. Choose your own photo to scan and save to your wardrobe.' });
+      return;
+    }
+
+    if (!workspaceId && serverMode !== 'fake') {
+      setPhoto({ state: 'kept', plainUrl, fromSample, line: 'Photo kept as is · sign in to scan with Meta and save to your wardrobe.' });
+      return;
+    }
 
     // The server already said it cannot scan: keep the photo without sending it.
     if (statusFromServer && (serverMode === 'no_key' || serverMode === 'off')) {
@@ -1452,10 +1490,13 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
     let networkError = '';
     try {
       const { jpeg, png } = await prepare(file);
+      if (!current()) return;
       const res = await fetch('/api/scan', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          workspaceId,
           jpegBase64: jpeg,
           pngBase64: png,
           sentence: '',
@@ -1467,32 +1508,34 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
     } catch (e) {
       networkError = e instanceof Error ? e.message : String(e);
     }
-    if (token !== scanToken.current) return; // a newer photo was chosen meanwhile
+    if (!current()) return; // A newer photo or account superseded this result.
 
-    const keep = (reason: string, modelAnswered: boolean) => {
+    const keep = (reason: string, modelAnswered: boolean | null) => {
       setPhoto({
         state: 'kept',
         plainUrl,
         fromSample,
-        line: `Photo kept as is · ${modelAnswered ? 'model answer not used' : 'no model call'} (${reason})`,
+        line: `Photo kept as is · ${modelAnswered === null ? 'scan outcome unknown' : modelAnswered ? 'scan attempted; result not used' : 'no model call'} (${reason})`,
       });
     };
 
     if (!body || !body.ok || status < 200 || status >= 300) {
       if (body && !body.ok) {
-        const answered =
-          body.mode === 'live' && Array.isArray(body.calls) && body.calls.length > 0;
-        keep(`${body.code}: ${body.detail}`, answered);
+        keep(`${body.code}: ${body.detail}`, scanAttempted(body));
       } else if (networkError) {
-        keep(`NETWORK: ${networkError}`, false);
+        keep(`NETWORK: ${networkError}`, null);
       } else {
-        keep(`HTTP ${status}: no scan result`, false);
+        keep(`HTTP ${status}: no scan result`, null);
       }
       return;
     }
 
     const card = body.cards.find((c) => SHAPE[c.type]);
     const live = body.mode === 'live';
+    if (live && (!body.receiptId || !/^[A-Za-z0-9_-]{1,128}$/.test(body.receiptId))) {
+      keep('SCAN_RECEIPT_MISSING: the result could not be verified', true);
+      return;
+    }
     if (!card) {
       keep(
         `NO_GARMENT: the scan found ${plural(body.cards.length, 'card')} but none that hangs on the rail`,
@@ -1525,6 +1568,7 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
       cutout: card.cutout,
       cutoutSource,
       scanMode: live ? 'live' : 'fake',
+      ...(live ? { scanReceiptId: body.receiptId, scanCardId: String(card.cardId), scanColor: colorName } : {}),
       line,
       detail,
     });
@@ -1603,6 +1647,10 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
       setError('Wait for the scan to finish.');
       return;
     }
+    if (photo.state !== 'idle' && samplePreviewOnly(photo.fromSample, workspaceId)) {
+      setError('This sample is a preview only. Choose your own photo to save a personal piece.');
+      return;
+    }
     if (!name.trim()) {
       setError('Type a name for the piece (brand and price are optional).');
       return;
@@ -1655,6 +1703,11 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
       isSample: photo.state !== 'idle' && photo.fromSample,
     });
 
+    if (photo.state === 'read' && photo.scanReceiptId) {
+      newPiece.scanReceiptId = photo.scanReceiptId;
+      newPiece.scanCardId = photo.scanCardId;
+      newPiece.scanColor = photo.scanColor;
+    }
     onAddGarment(newPiece);
     resetForm();
     onClose();
@@ -1712,6 +1765,20 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
           </button>
         </div>
 
+        {workspaceId && onScanCloset && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <button
+              type="button"
+              onClick={onScanCloset}
+              data-testid="open-closet-scan"
+              className="min-h-9 font-semibold text-[#B8460F] underline underline-offset-2"
+            >
+              Scan a closet photo
+            </button>
+            <span className="text-[#8C857B]">Find and review multiple pieces in one photo.</span>
+          </div>
+        )}
+
         {/* STEP 1: PHOTO UPLOAD FILE INPUT & SAMPLE STUDIO PHOTOS */}
         <div className="mt-4 p-3.5 rounded-xl bg-[#FFF3EB]/60 border border-[#F37021]/40 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
@@ -1723,7 +1790,7 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
               className="text-[10px] font-mono-num text-[#F37021] font-semibold"
               data-testid="upload-scan-server-mode"
             >
-              {modeLine(serverMode)}
+              {serverMode === 'live' && !workspaceId ? 'Sign in for Meta scanning · manual photo entry is available' : modeLine(serverMode)}
             </span>
           </div>
 
@@ -1739,11 +1806,10 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
             />
           </div>
 
-          {/* Design-kit sample photos: same scan, pieces marked Sample */}
+          {/* Private wardrobes preview design-kit samples without making a paid request. */}
           <div className="space-y-1">
             <div className="text-[10px] text-[#8C857B]">
-              Or try a design-kit sample photo (same scan; the piece is marked
-              Sample):
+              Or preview a design-kit sample photo (samples stay outside your personal wardrobe):
             </div>
             <div className="grid grid-cols-3 gap-1.5">
               {SAMPLE_CAMERA_CAPTURES.map((sample) => (
@@ -2141,7 +2207,7 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
             <button
               type="submit"
               data-testid="confirm-hang-piece-btn"
-              disabled={photo.state === 'scanning'}
+              disabled={photo.state === 'scanning' || (photo.state !== 'idle' && samplePreviewOnly(photo.fromSample, workspaceId))}
               className="px-5 py-2 text-xs font-semibold bg-[#F37021] text-white rounded-lg hover:bg-[#D95D12] transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
             >
               <Upload className="w-3.5 h-3.5" />

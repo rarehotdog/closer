@@ -29,7 +29,7 @@ export function useAccountWardrobe() {
     };
   }, [controller]);
   const persistenceNotice = state.sampleView ? 'Sample closet · changes reset when you leave this view' : state.account
-    ? ({ local: 'Local only', loading: 'Loading your wardrobe…', saving: 'Saving to account…', saved: 'Saved to account · verified after save', error: 'Could not save · retry from Account', conflict: 'Another tab saved changes · review from Account' })[state.status]
+    ? ({ local: 'Local only', loading: 'Loading your wardrobe…', saving: 'Saving to account…', saved: state.ledgerStatus === 'partial' ? 'Saved · some details need ledger review' : 'Saved to your wardrobe and ledger', error: 'Could not save · retry from Account', conflict: 'Another tab saved changes · review from Account' })[state.status]
     : 'This browser only · sign in to save your own pieces across visits';
   return { ...state, controller, persistenceNotice };
 }

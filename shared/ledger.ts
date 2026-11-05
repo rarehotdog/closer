@@ -20,6 +20,8 @@ export const WRITE_CHECK_ORDER = [
 
 export const EVENT_KINDS = [
   'REGISTRATION_CONFIRMED',
+  'WARDROBE_UPDATED',
+  'ITEM_REMOVED',
   'PLAN_LOCKED',
   'PLAN_UNLOCKED',
   'PLAN_CANCELLED',
@@ -120,6 +122,7 @@ export type WriteRequest = {
 
 export type Mutation =
   | { op: 'putItem'; item: ItemRow }
+  | { op: 'removeItem'; itemId: string }
   | { op: 'putAvailability'; row: AvailabilityRow }
   | { op: 'putPlan'; plan: PlanRow }
   | { op: 'insertWear'; row: WearRow }

@@ -35,9 +35,11 @@ export function decodePng(buf: Buffer): Rgba {
   if (depth !== 8 || (color !== 2 && color !== 6) || interlace !== 0) throw new Error(`unsupported PNG (depth ${depth}, color type ${color}, interlace ${interlace})`);
   if (w * h > 4_000_000) throw new Error('PNG too large');
   const bpp = color === 6 ? 4 : 3;
-  const raw = inflateSync(Buffer.concat(idat));
   const stride = w * bpp;
-  if (raw.length < h * (stride + 1)) throw new Error('PNG data truncated');
+  const expected = h * (stride + 1);
+  // Bound decompression itself: a small declared image must not inflate an arbitrarily large IDAT.
+  const raw = inflateSync(Buffer.concat(idat), { maxOutputLength: expected });
+  if (raw.length !== expected) throw new Error('PNG data size does not match dimensions');
   const px = new Uint8Array(h * stride);
   for (let y = 0; y < h; y++) {
     const f = raw[y * (stride + 1)];
