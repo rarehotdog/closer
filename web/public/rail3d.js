@@ -192,7 +192,7 @@ export function mountRail3d(host, pieces, opts) {
   const shadowsOn = (o) => o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
   const tagEl = (words, state) => {
     const t = document.createElement('div');
-    t.className = 'rail-tag';
+    t.className = `rail-tag${words && words.mark ? ' is-sample' : ''}${state ? ' has-state' : ''}`;
     if (words) {
       const b = document.createElement('b');
       b.textContent = words.amount;

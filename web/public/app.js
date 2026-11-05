@@ -1405,7 +1405,7 @@ async function closetScreen(view) {
   const { id, view: v, owner } = await closetWs();
   const wsParam = owner ? id : null;
   const cuts = cutMap(v);
-  const S = { window: 60, candFilter: 'all', ledger: null, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
+  const S = { window: 60, candFilter: 'all', selected: new Set(), ledger: null, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
   const boardSlot = h('div', { id: 'asset-slot' });
   view.append(
@@ -1812,36 +1812,70 @@ async function closetScreen(view) {
     });
     const others = r.rows.filter((x) => x.status !== 'CANDIDATE');
     const actions = [['restyle', 'Wear it again'], ['keep', 'Keep it'], ['repair_check', 'Check repair'], ['sell_review', 'Look at selling'], ['donate_review', 'Look at donating']];
+    const selIds = [...S.selected].filter((k) => S.items[k]);
+    const ownerTotals = {};
+    const sampleTotals = {};
+    let selUnpriced = 0;
+    for (const sid of selIds) {
+      const tg = tags[sid];
+      if (!tg) { selUnpriced++; continue; }
+      const bucket = tg.source === 'sample' ? sampleTotals : ownerTotals;
+      if (!bucket[tg.currency]) bucket[tg.currency] = { sum: 0, n: 0 };
+      bucket[tg.currency].sum += tg.amount;
+      bucket[tg.currency].n += 1;
+    }
+    const selBar = selIds.length ? h('div', { class: 'tidy-tally', role: 'status' },
+      h('span', null, h('b', null, `${selIds.length} selected`), ' · latest seen prices: '),
+      ...Object.entries(ownerTotals).map(([cur, v0]) => h('span', { class: 'chip accent' }, `${money(v0.sum, cur)} (${v0.n})`)),
+      ...Object.entries(sampleTotals).map(([cur, v0]) => h('span', { class: 'chip sample' }, `${money(v0.sum, cur)} · sample (${v0.n})`)),
+      selUnpriced ? h('span', { class: 'chip' }, `${selUnpriced} without price`) : null,
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.selected.clear(); render(); } }, 'Clear')) : null;
+
+    const decideNode = decidePanel();
+    const candSection = h('section', { class: 'panel tidy-queue' },
+      h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:10px' },
+        h('h2', { style: 'margin:0' }, `To look at (${cands.length})`),
+        filterDefs.length > 1 ? h('div', { class: 'dock-cats', role: 'group', 'aria-label': 'Filter candidates' }, filterDefs.map(([k, lbl]) =>
+          h('button', { type: 'button', class: 'cat-pill', 'aria-pressed': S.candFilter === k ? 'true' : 'false', onclick: () => { S.candFilter = k; render(); } }, lbl))) : null),
+      selBar,
+      cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this view.') : null,
+      h('div', { class: 'grid' }, cands.map((x) => {
+        const it = S.items[x.itemId];
+        const tg = tags[x.itemId];
+        const activeDecide = !!(S.decide && S.decide.itemId === x.itemId);
+        return h('div', { class: `item wide cand-card${(S.open && S.open.itemId === x.itemId) || activeDecide ? ' locked' : ''}` },
+          h('div', { class: 'thumb' }, thumb(it, cuts)),
+          h('div', { class: 'meta' },
+            h('div', { class: 'cand-hd' },
+              h('label', { class: 'cand-check' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: S.selected.has(x.itemId) ? true : null,
+                  'aria-label': `Select ${x.itemId}`,
+                  onchange: (ev) => {
+                    if (ev.target.checked) S.selected.add(x.itemId);
+                    else S.selected.delete(x.itemId);
+                    render();
+                  },
+                }),
+                h('b', null, `${x.itemId} · ${itemName(it)}`)),
+              tg ? h('span', { class: 'cand-price' }, money(tg.amount, tg.currency), tg.source === 'sample' ? h('i', null, ' Sample') : null) : null),
+            h('span', null, x.line),
+            h('div', { class: 'row', style: 'margin-top:2px' },
+              h('span', { class: 'muted' }, `Since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays}d unknown`),
+              x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
+              x.lastChoice ? h('span', { class: 'chip' }, `Last: ${x.lastChoice.action.replace('_', ' ')}`) : null),
+            h('div', { class: 'row' },
+              h('button', { class: 'btn small', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'),
+              actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))));
+      })));
+
     const parts = [
       h('section', { class: 'panel' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('h2', { style: 'margin:0' }, 'Review window'), win),
         h('p', { class: 'muted' }, r.note),
         h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, k === 'CANDIDATE' ? `No confirmed wear in ${S.window} days: ${n}` : k === 'RECENT_WEAR' ? `Worn recently: ${n}` : `${k.toLowerCase().replace(/_/g, ' ')}: ${n}`)), coverageChips())),
-      h('section', { class: 'panel' },
-        h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:10px' },
-          h('h2', { style: 'margin:0' }, `To look at (${cands.length})`),
-          filterDefs.length > 1 ? h('div', { class: 'dock-cats', role: 'group', 'aria-label': 'Filter candidates' }, filterDefs.map(([k, lbl]) =>
-            h('button', { type: 'button', class: 'cat-pill', 'aria-pressed': S.candFilter === k ? 'true' : 'false', onclick: () => { S.candFilter = k; render(); } }, lbl))) : null),
-        cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this view.') : null,
-        h('div', { class: 'grid' }, cands.map((x) => {
-          const it = S.items[x.itemId];
-          const tg = tags[x.itemId];
-          return h('div', { class: `item wide cand-card${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
-            h('div', { class: 'thumb' }, thumb(it, cuts)),
-            h('div', { class: 'meta' },
-              h('div', { class: 'cand-hd' },
-                h('b', null, `${x.itemId} · ${itemName(it)}`),
-                tg ? h('span', { class: 'cand-price' }, money(tg.amount, tg.currency), tg.source === 'sample' ? h('i', null, ' Sample') : null) : null),
-              h('span', null, x.line),
-              h('div', { class: 'row', style: 'margin-top:2px' },
-                h('span', { class: 'muted' }, `Since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays}d unknown`),
-                x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
-                x.lastChoice ? h('span', { class: 'chip' }, `Last: ${x.lastChoice.action.replace('_', ' ')}`) : null),
-              h('div', { class: 'row' },
-                h('button', { class: 'btn small', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'),
-                actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))));
-        }))),
+      decideNode ? h('div', { class: 'tidy-workspace has-decide' }, candSection, decideNode) : candSection,
     ];
-    parts.push(decidePanel());
     if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel', id: 'selling' }, h('h2', null, `Prices you saw for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), sellCharts(), evidenceForm(), calcPanel(), priceCards()));
     if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
     parts.push(draftPanel());
@@ -2094,14 +2128,19 @@ function assetOverlay(L, overlayRows) {
 
 /** Rail · Items · Ledger · Tidy up · Walk-in: switches views of the same closet, keeping ?ws= intact. */
 function viewSwitch(mode, explicitWs) {
-  const curWs = explicitWs !== undefined ? explicitWs : new URLSearchParams(location.search).get('ws');
+  const sp = new URLSearchParams(location.search);
+  const curWs = explicitWs !== undefined ? explicitWs : sp.get('ws');
+  const curItem = sp.get('item');
   const go = (k) => {
     if (k === mode) return;
     if (k === 'tidy') {
-      location.assign(wsHref('/closet', curWs));
+      location.assign(wsHref('/closet', curWs, curItem ? { decide: curItem } : null));
       return;
     }
-    location.assign(wsHref('/closet/3d', curWs, k === 'rail' ? null : { view: k }));
+    const extra = {};
+    if (k !== 'rail') extra.view = k;
+    if (curItem && (k === 'rail' || k === 'items')) extra.item = curItem;
+    location.assign(wsHref('/closet/3d', curWs, Object.keys(extra).length ? extra : null));
   };
   return h('div', { class: 'seg view-seg', role: 'group', 'aria-label': 'View' },
     [['rail', 'Rail'], ['items', 'Items'], ['ledger', 'Ledger'], ['tidy', 'Tidy up'], ['layers', 'Walk-in']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
@@ -2578,9 +2617,26 @@ async function railView(view, ctx) {
     if (rail && current) rail.select(current);
   }
   mountStage();
-  if (!rail) { host.replaceWith(h('p', { class: 'chip warn' }, 'No WebGL here, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
+  if (!rail) {
+    body.remove();
+    const fallbackNotice = h('p', { class: 'chip warn', style: 'margin:0 0 12px' }, 'No WebGL on this device · showing the 2D studio grid instead.');
+    const fallbackHost = h('div', { class: 'rail-fallback-grid' });
+    view.insertBefore(fallbackNotice, list);
+    view.insertBefore(fallbackHost, list);
+    itemsGalleryView(fallbackHost, ctx);
+    return;
+  }
   prev.onclick = () => rail && rail.slide(-1);
   next.onclick = () => rail && rail.slide(1);
+
+  function syncItemParam(val) {
+    try {
+      const u = new URL(location.href);
+      if (val) u.searchParams.set('item', val);
+      else u.searchParams.delete('item');
+      history.replaceState(null, '', u.pathname + u.search);
+    } catch {}
+  }
 
   const step = (d) => { if (!current) return; const k = order.indexOf(current); const nextId = order[(k + d + order.length) % order.length]; if (rail) rail.select(nextId); show(nextId); };
   document.addEventListener('keydown', (e) => {
@@ -2589,7 +2645,7 @@ async function railView(view, ctx) {
     else if (e.key === 'ArrowLeft') { if (current) step(-1); else if (rail) rail.slide(-1); }
     else if (e.key === 'Escape' && current) close();
   });
-  function close() { current = null; priceFormOpen = false; sheet.hidden = true; body.classList.remove('open'); for (const b of Object.values(chipOf)) b.setAttribute('aria-current', 'false'); if (rail) rail.select(null); }
+  function close() { current = null; priceFormOpen = false; sheet.hidden = true; sheet.classList.remove('is-expanded'); body.classList.remove('open'); syncItemParam(null); for (const b of Object.values(chipOf)) b.setAttribute('aria-current', 'false'); if (rail) rail.select(null); }
 
   function show(itemId, flashText = '') {
     const it = byId[itemId];
@@ -2597,6 +2653,7 @@ async function railView(view, ctx) {
     if (!it || !c) return;
     if (current !== itemId) priceFormOpen = false;
     current = itemId;
+    syncItemParam(itemId);
     for (const [k, b] of Object.entries(chipOf)) b.setAttribute('aria-current', k === itemId ? 'true' : 'false');
     if (chipOf[itemId]) chipOf[itemId].scrollIntoView({ block: 'nearest', inline: 'center' });
     const t = Lcur && Lcur.tags ? Lcur.tags[itemId] : null;
@@ -2676,38 +2733,51 @@ async function railView(view, ctx) {
           },
         }, 'Save'))) : null;
 
-    sheet.replaceChildren(...[
+    sheet.replaceChildren(
+      h('button', {
+        type: 'button',
+        class: 'pp-sheet-handle',
+        'aria-label': 'Expand or collapse inspector',
+        onclick: () => sheet.classList.toggle('is-expanded'),
+      }, h('span', null)),
       h('div', { class: 'pp-top' },
         h('button', { type: 'button', class: 'pg', 'aria-label': 'Previous piece', onclick: () => step(-1) }, '‹'),
         h('span', { class: 'pp-count' }, `${order.indexOf(itemId) + 1} / ${order.length}`),
         h('button', { type: 'button', class: 'pg', 'aria-label': 'Next piece', onclick: () => step(1) }, '›'),
         h('button', { type: 'button', class: 'pp-close', 'aria-label': 'Close', onclick: close }, '×')),
-      h('div', { class: 'chip-row' },
-        h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot),
-        c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'),
-        cut ? h('span', { class: 'chip' }, cut.mine ? 'Your photo' : 'Sample photo') : null),
-      mediaTabs,
-      mediaBox,
-      h('h2', { class: 'pp-title' }, itemName(it)),
-      h('p', { class: 'muted pp-code' }, itemId),
-      availSeg,
-      flashText ? h('div', { class: 'flash', role: 'status' }, h('span', { class: 'chip ok' }, flashText)) : null,
-      h('div', { class: 'pp-label-row' },
-        label('Price seen'),
-        writable ? h('button', { type: 'button', class: 'pp-inline-link', id: 'pp-add-price-btn', onclick: () => { priceFormOpen = !priceFormOpen; show(itemId); } }, priceFormOpen ? 'Cancel' : t ? '+ Update price' : '+ Add price') : null),
-      t ? h('p', { class: 'pp-price' }, h('span', { class: 'pp-num' }, money(t.amount, t.currency)), ` ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
-        : h('p', { class: 'muted' }, 'No price yet. The price stays blank.'),
-      inlinePriceForm,
-      label('Wears'),
-      h('p', { class: 'muted' }, c.wearLabel || 'No confirmed wear yet'),
-      label('Next step'),
-      h('div', { class: 'pp-steps' },
-        h('a', { class: 'pp-step', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${itemId}` }, h('b', null, 'Keep it'), h('span', null, 'Wear, store or decide later')),
-        h('a', { class: 'pp-step', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${itemId}` }, h('b', null, 'Let it go'), h('span', null, 'Prepare to sell or donate'))),
-      h('div', { class: 'row' },
-        h('a', { class: 'btn small ghost', href: `/today?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}lock=${itemId}` }, 'Wear today'),
-        h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Walk-in')),
-    ].filter(Boolean));
+      h('div', { class: 'pp-body' },
+        ...[
+          mediaTabs,
+          mediaBox,
+          h('div', { class: 'pp-id-hd' },
+            h('h2', { class: 'pp-title' }, itemName(it)),
+            h('span', { class: 'muted pp-code mono' }, itemId)),
+          h('div', { class: 'chip-row' },
+            h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot),
+            c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'),
+            cut ? h('span', { class: 'chip' }, cut.mine ? 'Your photo' : 'Sample photo') : null,
+            !wsParam || it.sample ? h('span', { class: 'chip sample' }, 'Sample') : null),
+          availSeg,
+          flashText ? h('div', { class: 'flash', role: 'status' }, h('span', { class: 'chip ok' }, flashText)) : null,
+          label('Wears (counted record)'),
+          h('p', { class: 'muted pp-wear-line' }, c.wearLabel || 'No confirmed wear yet · days without a record stay unknown'),
+          h('div', { class: 'pp-label-row' },
+            label('Price seen'),
+            writable ? h('button', { type: 'button', class: 'pp-inline-link', id: 'pp-add-price-btn', onclick: () => { priceFormOpen = !priceFormOpen; show(itemId); } }, priceFormOpen ? 'Cancel' : t ? '+ Update price' : '+ Add price') : null),
+          t ? h('p', { class: 'pp-price' }, h('span', { class: 'pp-num' }, money(t.amount, t.currency)), ` ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
+            : h('p', { class: 'muted' }, 'No price yet. Unpriced pieces are never counted as zero.'),
+          inlinePriceForm,
+        ].filter(Boolean)),
+      h('div', { class: 'pp-foot-sticky' },
+        h('a', { class: 'btn small pp-primary-cta', href: wsHref('/closet', wsParam, { decide: itemId }) }, 'Keep or let go? →'),
+        h('a', { class: 'btn small ghost', href: wsHref('/today', wsParam, { lock: itemId }) }, 'Wear today'),
+        h('a', { class: 'btn small ghost', href: wsHref('/closet/3d', wsParam, { view: 'layers' }) }, 'Walk-in')));
+  }
+
+  const initialItem = new URLSearchParams(location.search).get('item');
+  if (initialItem && byId[initialItem]) {
+    if (rail) rail.select(initialItem);
+    show(initialItem);
   }
 }
 
