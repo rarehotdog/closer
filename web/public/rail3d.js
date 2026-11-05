@@ -85,6 +85,8 @@ export function mountRail3d(host, pieces, opts) {
   renderer.toneMappingExposure = 1.02;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.VSMShadowMap;
+  renderer.shadowMap.autoUpdate = false; // shadows are redrawn only when a piece moves, not when the camera slides
+  renderer.shadowMap.needsUpdate = true;
   const el = renderer.domElement;
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', opts.label || 'Closet on a rail');
@@ -229,6 +231,7 @@ export function mountRail3d(host, pieces, opts) {
         hanger.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); o.castShadow = true; } });
         swing.add(hanger, cut);
         swing.traverse((o) => { o.userData.itemId = p.itemId; });
+        renderer.shadowMap.needsUpdate = true;
         invalidate();
       }).catch(() => {});
     }
@@ -280,7 +283,7 @@ export function mountRail3d(host, pieces, opts) {
       const x = (v3.x * 0.5 + 0.5) * w;
       const y = (-v3.y * 0.5 + 0.5) * h;
       const off = x < -60 || x > w + 60;
-      e.tag.style.transform = `translate(${(x + el.offsetLeft).toFixed(1)}px, ${(y + el.offsetTop).toFixed(1)}px)`;
+      e.tag.style.transform = `translate(calc(${(x + el.offsetLeft).toFixed(1)}px - 50%), ${(y + el.offsetTop).toFixed(1)}px)`;
       e.tag.style.visibility = off ? 'hidden' : 'visible';
     }
   }
@@ -289,22 +292,23 @@ export function mountRail3d(host, pieces, opts) {
     const dt = last ? Math.min(0.05, (t - last) / 1000) : 1 / 60;
     last = t;
     let moving = false;
+    let stirred = false; // a piece moved this frame, so its shadow on the wall moves too
     for (const e of entries) {
       if (e.hanging) {
-        const acc = -19 * e.a - 1.5 * e.v;
+        const acc = -19 * e.a - 3 * e.v; // settles in about two seconds, then the page draws nothing
         e.v += acc * dt;
         e.a += e.v * dt;
-        if (Math.abs(e.a) < 1e-4 && Math.abs(e.v) < 1e-4) { e.a = 0; e.v = 0; } else moving = true;
+        if (Math.abs(e.a) < 5e-4 && Math.abs(e.v) < 5e-4) { e.a = 0; e.v = 0; } else { moving = true; stirred = true; }
         e.swing.rotation.z = e.a;
         e.swing.rotation.x = -e.a * 0.35;
       }
       const ease = Math.min(1, dt * 9);
       const dz = e.zTo - e.z;
-      if (Math.abs(dz) > 1e-4) { e.z += dz * ease; moving = true; } else e.z = e.zTo;
+      if (Math.abs(dz) > 1e-4) { e.z += dz * ease; moving = true; stirred = true; } else e.z = e.zTo;
       const ddx = e.dxTo - e.dx;
-      if (Math.abs(ddx) > 1e-4) { e.dx += ddx * ease; moving = true; } else e.dx = e.dxTo;
+      if (Math.abs(ddx) > 1e-4) { e.dx += ddx * ease; moving = true; stirred = true; } else e.dx = e.dxTo;
       const dt2 = e.turnTo - e.turn;
-      if (Math.abs(dt2) > 1e-4) { e.turn += dt2 * ease; moving = true; } else e.turn = e.turnTo;
+      if (Math.abs(dt2) > 1e-4) { e.turn += dt2 * ease; moving = true; stirred = true; } else e.turn = e.turnTo;
       e.holder.position.z = (e.hanging ? 0 : SHOE_Z) + e.z;
       e.holder.position.x = e.x0 + e.dx;
       if (e.hanging) e.holder.rotation.y = e.turn;
@@ -314,6 +318,7 @@ export function mountRail3d(host, pieces, opts) {
       if (Math.abs(d) > 1e-3) { view.x += d * Math.min(1, dt * 7); moving = true; } else { view.x = view.xTo; view.xTo = null; }
       aim();
     }
+    if (stirred) renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, camera);
     placeTags();
     if (moving) invalidate(); else last = 0;
@@ -398,7 +403,7 @@ export function mountRail3d(host, pieces, opts) {
     select,
     /** Slide about two thirds of a view along the rail (‹ = -1, › = 1). */
     slide(dir) { if (view.max <= 0) return; view.xTo = Math.max(-view.max, Math.min(view.max, (view.xTo ?? view.x) + dir * view.half * 1.35)); invalidate(); },
-    reset() { view.x = 0; for (const e of entries) { e.zTo = 0; e.dxTo = 0; e.turnTo = e.hanging ? RACK_TURN : 0; } aim(); invalidate(); },
+    reset() { view.x = phone() ? -view.max : 0; view.xTo = null; for (const e of entries) { e.zTo = 0; e.dxTo = 0; e.turnTo = e.hanging ? RACK_TURN : 0; } aim(); invalidate(); },
     state() { return { x: view.x, max: view.max, pieces: entries.length, tags: entries.filter((e) => e.tag).map((e) => e.itemId), selected: entries.filter((e) => e.zTo > 0).map((e) => e.itemId) }; },
     dispose() {
       disposed = true;
