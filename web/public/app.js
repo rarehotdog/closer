@@ -20,6 +20,8 @@ function h(tag, attrs, ...kids) {
 }
 // Owner sign-in: the admin token lives in this tab's sessionStorage only and goes out as a header.
 function ownerToken() { try { return sessionStorage.getItem('closer.ownerToken') || ''; } catch { return ''; } }
+function preferOwner() { try { return sessionStorage.getItem('closer.preferOwner') === '1'; } catch { return false; } }
+function setPreferOwner(on) { try { if (on) sessionStorage.setItem('closer.preferOwner', '1'); else sessionStorage.removeItem('closer.preferOwner'); } catch {} }
 function authHeaders(extra) { const t = ownerToken(); return Object.assign({}, extra || {}, t ? { 'x-admin-token': t } : {}); }
 const getJson = async (url, headers) => (await fetch(url, { headers: authHeaders(headers) })).json();
 async function postJson(url, body) {
@@ -248,13 +250,20 @@ function keepFocus(root, paint) {
   if (twin && typeof twin.focus === 'function') twin.focus({ preventScroll: true });
 }
 
+const EDITABLE_TYPES = ['coat', 'jacket', 'track_jacket', 'knit', 'dress_shirt', 'tee', 'blouse', 'training_top', 'trousers', 'jeans', 'chinos', 'skirt', 'shorts', 'derby', 'sneakers', 'loafers', 'running_shoes'];
+const EDITABLE_COLORS = ['black', 'charcoal', 'gray', 'white', 'beige', 'brown', 'navy', 'blue', 'green', 'red', 'yellow', 'pink'];
+
 // ---------- decision component (Try and App) ----------
 function decisionUI(root, cfg) {
-  const S = { wsId: cfg.wsId, view: null, photoId: 'p1', chipId: 'c1', sentence: '', flash: [], busy: false, painted: new Set(), answers: {}, ran: false };
+  const S = { wsId: cfg.wsId, view: null, photoId: 'p1', chipId: 'c1', sentence: '', flash: [], busy: false, painted: new Set(), answers: {}, typeEdits: {}, priceEdits: {}, unchecked: new Set(), ran: false };
 
   async function refresh() {
     if (S.wsId) S.view = await getJson(`/api/ws/${S.wsId}/view`);
-    if (S.wsId && !cfg.visitor && !cfg.readOnly) await listUploads();
+    if (S.wsId && !cfg.visitor && !cfg.readOnly) {
+      await listUploads();
+      const firstMine = META.photos.find((p) => p.mine);
+      if (firstMine && S.photoId === 'p1' && !S.ran) S.photoId = firstMine.photoId;
+    }
     render();
   }
   /** Photos uploaded to this wardrobe earlier, fetched with the owner header, so each can be picked or deleted after a reload. */
@@ -283,6 +292,9 @@ function decisionUI(root, cfg) {
       }
       S.flash = [];
       S.answers = {};
+      S.typeEdits = {};
+      S.priceEdits = {};
+      S.unchecked = new Set();
       const own = !cfg.visitor && S.sentence.trim();
       const body = !cfg.visitor && scan
         ? { photoId: S.photoId, scan: true, ...(own ? { sentence: S.sentence.trim() } : {}) }
@@ -293,51 +305,85 @@ function decisionUI(root, cfg) {
     }, '#decision');
   }
 
+  async function handleFileUpload(f) {
+    if (!f) return;
+    let uploadedId = null;
+    await busy(async () => {
+      try {
+        const { jpeg, png } = await prepareUpload(f);
+        const r = await postJson(`/api/ws/${S.wsId}/upload`, { jpegBase64: jpeg.url.split(',')[1], pngBase64: png.url.split(',')[1] });
+        if (r.ok === false) { flash({ chip: errWords(r.code, r.detail), cls: 'bad' }); return; }
+        META.photos.unshift({ photoId: r.photoId, title: 'Your closet photo', url: jpeg.url, w: r.w, h: r.h, count: 0, mine: true });
+        S.photoId = r.photoId;
+        uploadedId = r.photoId;
+        flash({ chip: 'Photo uploaded (EXIF removed) · scanning visible pieces…', cls: 'ok' });
+      } catch (err) { flash({ chip: errWords('UNSUPPORTED_IMAGE', err && err.message ? err.message : 'could not read the photo'), cls: 'bad' }); }
+    });
+    if (uploadedId) await run(true);
+  }
+
   function inputs() {
-    const photos = h('div', { class: 'photos' }, META.photos.map((p) =>
+    const minePhotos = META.photos.filter((p) => p.mine);
+    const samplePhotos = META.photos.filter((p) => !p.mine);
+    const activePhoto = META.photos.find((p) => p.photoId === S.photoId) || META.photos[0];
+    const isMineSelected = !!(activePhoto && activePhoto.mine);
+    const photoTile = (p) =>
       h('button', { class: 'photo-pick', type: 'button', 'aria-pressed': String(S.photoId === p.photoId), onclick: () => { S.photoId = p.photoId; render(); } },
         h('img', { src: p.url, alt: `${p.title}${p.mine ? ', your photo' : ', sample photo'}` }),
         h('div', { class: 'cap' }, `${p.title}`),
-        p.mine ? h('span', { class: 'chip accent' }, 'Your photo') : null)));
-    const fileInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/heic', capture: 'environment', id: 'upload-file', hidden: true, onchange: async (e) => {
-      const f = e.target.files && e.target.files[0];
-      if (!f) return;
-      await busy(async () => {
-        try {
-          const { jpeg, png } = await prepareUpload(f);
-          const r = await postJson(`/api/ws/${S.wsId}/upload`, { jpegBase64: jpeg.url.split(',')[1], pngBase64: png.url.split(',')[1] });
-          if (r.ok === false) { flash({ chip: errWords(r.code, r.detail), cls: 'bad' }); return; }
-          META.photos.unshift({ photoId: r.photoId, title: 'Your photo', url: jpeg.url, w: r.w, h: r.h, count: 0, mine: true });
-          S.photoId = r.photoId;
-          flash({ chip: 'Photo saved on your server (EXIF removed). Delete it any time.', cls: 'ok' });
-        } catch (err) { flash({ chip: errWords('UNSUPPORTED_IMAGE', err && err.message ? err.message : 'could not read the photo'), cls: 'bad' }); }
-      });
-    } });
+        p.mine ? h('span', { class: 'chip accent' }, 'Your photo') : null);
+    const fileInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/heic', capture: 'environment', id: 'upload-file', hidden: true, onchange: (e) => handleFileUpload(e.target.files && e.target.files[0]) });
+    const dropzone = cfg.visitor ? null : h('div', {
+      class: 'upload-drop',
+      ondragover: (e) => { e.preventDefault(); e.currentTarget.classList.add('drag'); },
+      ondragleave: (e) => { e.currentTarget.classList.remove('drag'); },
+      ondrop: (e) => { e.preventDefault(); e.currentTarget.classList.remove('drag'); handleFileUpload(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]); },
+    },
+      fileInput,
+      h('button', { class: 'btn', type: 'button', id: 'upload', disabled: S.busy || !S.wsId ? true : null, onclick: () => fileInput.click() }, '+ Upload closet or outfit photo'),
+      isMineSelected ? h('button', { class: 'btn ghost small', type: 'button', id: 'photo-delete', disabled: S.busy ? true : null, onclick: () => busy(async () => {
+        const photoId = S.photoId;
+        const r = await postJson(`/api/ws/${S.wsId}/photodelete`, { photoId });
+        if (!r.ok) { flash({ chip: 'Could not delete this photo', cls: 'bad' }); return; }
+        META.photos.splice(META.photos.findIndex((p) => p.photoId === photoId), 1);
+        S.photoId = META.photos.length ? META.photos[0].photoId : null;
+        flash({ chip: 'Photo deleted from your server.', cls: 'ok' });
+      }) }, 'Delete') : null,
+      h('span', { class: 'muted' }, 'Drop JPEG/PNG here · EXIF stripped locally'));
     const sentences = h('div', { class: 'sentences' }, META.chips.map((c) =>
       h('button', { class: 'sentence', type: 'button', 'aria-pressed': String(S.chipId === c.chipId), onclick: () => { S.chipId = c.chipId; render(); } }, `“${c.text}”`)));
+    const photoGrid = cfg.visitor
+      ? h('div', { class: 'photos' }, META.photos.map(photoTile))
+      : h('div', null,
+        minePhotos.length ? h('div', { class: 'photos' }, minePhotos.map(photoTile)) : null,
+        h('details', { class: 'sample-fold', open: minePhotos.length === 0 ? true : null },
+          h('summary', null, minePhotos.length ? `Or test with ${samplePhotos.length} sample outfits` : 'Sample outfits'),
+          h('div', { class: 'photos', style: 'margin-top:10px' }, samplePhotos.map(photoTile))));
     return h('div', { class: 'grid cols-2' },
-      h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '1'), cfg.visitor ? 'Pick a sample outfit' : 'Outfit photo'),
-        cfg.visitor ? null : h('div', { class: 'row', style: 'margin-bottom:10px' }, fileInput,
-          h('button', { class: 'btn ghost small', type: 'button', id: 'upload', disabled: S.busy || !S.wsId ? true : null, onclick: () => fileInput.click() }, 'Upload or take a photo'),
-          (META.photos.find((p) => p.photoId === S.photoId) || {}).mine ? h('button', { class: 'btn ghost small', type: 'button', id: 'photo-delete', disabled: S.busy ? true : null, onclick: () => busy(async () => {
-            const photoId = S.photoId;
-            const r = await postJson(`/api/ws/${S.wsId}/photodelete`, { photoId });
-            if (!r.ok) { flash({ chip: 'Could not delete this photo', cls: 'bad' }); return; }
-            META.photos.splice(META.photos.findIndex((p) => p.photoId === photoId), 1);
-            S.photoId = META.photos.length ? META.photos[0].photoId : null;
-            flash({ chip: 'Photo deleted from your server: JPEG, pixel copy and metadata.', cls: 'ok' });
-          }) }, 'Delete this photo') : null,
-          h('span', { class: 'muted' }, 'Reading your own photo needs real mode (a Meta key on the server). Mock mode reads the sample photos only.')),
-        photos),
-      h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '2'), 'Pick a sentence'),
-        h('p', { class: 'muted' }, cfg.visitor ? 'Fixed sentences only. Free text and visitor photos are off on this page.' : 'Pick one, or write your own (your wardrobe only).'),
-        sentences,
-        cfg.visitor ? null : h('textarea', { id: 'own-sentence', rows: '2', class: 'draft', maxlength: '200', placeholder: 'Or write your own: Keep this jacket. The rest feels too dressed-up.', oninput: (e) => { S.sentence = e.target.value; } }, S.sentence),
-        h('div', { class: 'spacer' }),
-        h('div', { class: 'row' },
-          h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: () => run(false) }, S.busy ? 'Working…' : 'Find the pieces'),
-          cfg.visitor ? null : h('button', { class: 'btn ghost', type: 'button', id: 'scan-closet', disabled: S.busy, onclick: () => run(true) }, 'Scan whole closet (up to 16)'),
-          cfg.visitor ? h('span', { class: 'muted' }, 'Each run uses a fresh copy of the sample wardrobe.') : null)));
+      h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '1'), cfg.visitor ? 'Pick a sample outfit' : 'Your photo'),
+        dropzone,
+        photoGrid),
+      h('section', { class: 'panel' }, h('h2', null, h('span', { class: 'step' }, '2'), cfg.visitor ? 'Pick a sentence' : isMineSelected ? 'Scan closet or fix outfit' : 'Pick a sentence'),
+        !cfg.visitor && isMineSelected
+          ? h('div', { class: 'scan-hero' },
+            h('p', { class: 'muted', style: 'margin:0 0 10px' }, 'Detect up to 16 hanging & folded pieces at once, edit type/colour/price, and hang them on your 3D boutique rail.'),
+            h('div', { class: 'row', style: 'margin-bottom:12px' },
+              h('button', { class: 'btn', type: 'button', id: 'scan-closet', disabled: S.busy, onclick: () => run(true) }, S.busy ? 'Scanning…' : 'Scan whole closet (up to 16)'),
+              h('button', { class: 'btn ghost', type: 'button', id: 'run', disabled: S.busy, onclick: () => run(false) }, 'Single outfit')),
+            h('details', { class: 'sample-fold' },
+              h('summary', null, 'Optional: outfit sentence'),
+              sentences,
+              h('textarea', { id: 'own-sentence', rows: '2', class: 'draft', maxlength: '200', placeholder: 'Or write your own: Keep this jacket. The rest feels too dressed-up.', oninput: (e) => { S.sentence = e.target.value; } }, S.sentence)))
+          : [
+            h('p', { class: 'muted' }, cfg.visitor ? 'Fixed sentences only. Free text and visitor photos are off on this page.' : 'Pick one, or write your own (your wardrobe only).'),
+            sentences,
+            cfg.visitor ? null : h('textarea', { id: 'own-sentence', rows: '2', class: 'draft', maxlength: '200', placeholder: 'Or write your own: Keep this jacket. The rest feels too dressed-up.', oninput: (e) => { S.sentence = e.target.value; } }, S.sentence),
+            h('div', { class: 'spacer' }),
+            h('div', { class: 'row' },
+              h('button', { class: 'btn', type: 'button', id: 'run', disabled: S.busy, onclick: () => run(false) }, S.busy ? 'Working…' : 'Find the pieces'),
+              cfg.visitor ? null : h('button', { class: 'btn ghost', type: 'button', id: 'scan-closet', disabled: S.busy, onclick: () => run(true) }, 'Scan whole closet (up to 16)'),
+              cfg.visitor ? h('span', { class: 'muted' }, 'Each run uses a fresh copy of the sample wardrobe.') : null),
+          ]));
   }
 
   function itemsById() {
@@ -357,42 +403,49 @@ function decisionUI(root, cfg) {
   }
 
   function stage(op) {
+    const confirmed = Object.keys(op.cardItemIds || {}).length > 0;
     const canvas = h('canvas', { id: 'stage', 'data-painted': '0' });
     const photo = META.photos.find((p) => p.photoId === op.photoId);
     (async () => {
+      if (!photo) return;
       const img = await loadImage(photo.url);
       canvas.width = photo.w;
       canvas.height = photo.h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      ctx.font = 'bold 44px system-ui, sans-serif';
+      ctx.font = 'bold 26px system-ui, sans-serif';
       for (const c of op.cards) {
+        const skipped = S.unchecked.has(c.cardId);
         const b = c.box;
-        ctx.lineWidth = 7;
-        ctx.setLineDash(c.offender ? [26, 16] : []);
-        ctx.strokeStyle = c.offender ? '#c0392b' : c.pinned ? '#2d4a7a' : 'rgba(0,0,0,0.45)';
-        ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+        const bw = b.x2 - b.x1;
+        ctx.lineWidth = skipped ? 4 : 5;
+        ctx.setLineDash(c.offender || skipped ? [20, 14] : []);
+        ctx.strokeStyle = skipped ? 'rgba(120,120,120,0.45)' : c.offender ? '#c0392b' : c.pinned ? '#2d4a7a' : '#f37021';
+        ctx.strokeRect(b.x1, b.y1, bw, b.y2 - b.y1);
         ctx.setLineDash([]);
-        const tag = `${c.cardId}${c.pinned ? ' · keep' : ''}${c.offender ? ' · feels off' : ''}`;
-        const w = ctx.measureText(tag).width + 24;
-        ctx.fillStyle = c.offender ? '#c0392b' : c.pinned ? '#2d4a7a' : 'rgba(0,0,0,0.6)';
-        ctx.fillRect(b.x1, Math.max(0, b.y1 - 58), w, 56);
+        const chosenType = S.typeEdits[c.cardId] || c.type;
+        const tag = bw < 145
+          ? `#${c.cardId}`
+          : `#${c.cardId} ${chosenType.replace('_', ' ')}${c.pinned ? ' · keep' : ''}${c.offender ? ' · off' : ''}`;
+        const w = Math.min(bw - 4, ctx.measureText(tag).width + 16);
+        ctx.fillStyle = skipped ? 'rgba(90,90,90,0.5)' : c.offender ? '#c0392b' : c.pinned ? '#2d4a7a' : 'rgba(21,20,19,0.84)';
+        ctx.fillRect(b.x1 + 2, b.y1 + 2, Math.max(38, w), 34);
         ctx.fillStyle = '#fff';
-        ctx.fillText(tag, b.x1 + 12, Math.max(44, b.y1 - 14));
+        ctx.fillText(tag, b.x1 + 9, b.y1 + 27);
       }
-      const order = op.cards.filter((c) => c.mask).sort((a, b) => a.arrival - b.arrival);
+      const order = op.cards.filter((c) => c.mask && !S.unchecked.has(c.cardId)).sort((a, b) => a.arrival - b.arrival);
       const animate = !S.painted.has(op.operationId);
       S.painted.add(op.operationId);
       for (const c of order) {
-        if (animate) await sleep(380);
+        if (animate && op.cards.length <= 5) await sleep(220);
         const path = maskPath(c.mask);
-        ctx.fillStyle = 'rgba(255, 200, 60, 0.22)';
+        ctx.fillStyle = 'rgba(243, 112, 33, 0.14)';
         ctx.fill(path);
         ctx.save();
         ctx.clip(path);
-        ctx.strokeStyle = 'rgba(255, 170, 0, 0.9)';
-        ctx.lineWidth = 3;
-        for (let k = -c.mask.h; k < c.mask.w; k += 28) {
+        ctx.strokeStyle = 'rgba(243, 112, 33, 0.65)';
+        ctx.lineWidth = 2.5;
+        for (let k = -c.mask.h; k < c.mask.w; k += 32) {
           ctx.beginPath();
           ctx.moveTo(c.mask.x + k, c.mask.y + c.mask.h);
           ctx.lineTo(c.mask.x + k + c.mask.h, c.mask.y);
@@ -402,35 +455,148 @@ function decisionUI(root, cfg) {
       }
       canvas.dataset.painted = '1';
     })();
-    return h('div', { class: 'stage' }, canvas);
+
+    // Drag on photo to add a custom piece box before confirming (owner mode).
+    if (!cfg.visitor && !cfg.readOnly && !confirmed && op.state === 'DRAFT' && photo) {
+      let dragStart = null;
+      const toPhotoPt = (ev) => {
+        const r = canvas.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.min(1000, Math.round(((ev.clientX - r.left) / Math.max(1, r.width)) * 1000))),
+          y: Math.max(0, Math.min(1000, Math.round(((ev.clientY - r.top) / Math.max(1, r.height)) * 1000))),
+        };
+      };
+      canvas.style.cursor = 'crosshair';
+      canvas.title = 'Drag on photo to add another piece';
+      canvas.onpointerdown = (ev) => { dragStart = toPhotoPt(ev); };
+      canvas.onpointerup = async (ev) => {
+        if (!dragStart) return;
+        const end = toPhotoPt(ev);
+        const x1 = Math.min(dragStart.x, end.x), y1 = Math.min(dragStart.y, end.y);
+        const x2 = Math.max(dragStart.x, end.x), y2 = Math.max(dragStart.y, end.y);
+        dragStart = null;
+        if (x2 - x1 < 45 || y2 - y1 < 45) return;
+        await busy(async () => {
+          const r = await postJson(`/api/ws/${S.wsId}/pixelbox`, { operationId: op.operationId, normBox: [x1, y1, x2, y2] });
+          if (r.ok === false) flash({ chip: errWords(r.code, r.detail), cls: 'bad' });
+          else flash({ chip: `Added piece #${r.cards.length} from drawn box`, cls: 'ok' });
+        });
+      };
+    }
+    return h('div', { class: 'stage' },
+      canvas,
+      !cfg.visitor && !confirmed && op.state === 'DRAFT'
+        ? h('p', { class: 'muted stage-tip' }, 'Tip: drag a box on the photo to add any missed piece.')
+        : null);
   }
 
   function cardsView(op) {
     const confirmed = Object.keys(op.cardItemIds || {}).length > 0;
-    return h('div', { class: 'cards' }, op.cards.map((c) => {
+    const photo = META.photos.find((p) => p.photoId === op.photoId);
+    const editable = !cfg.visitor && !cfg.readOnly && !confirmed;
+    return h('div', { class: 'cards scan-cards' }, op.cards.map((c) => {
       const q = !confirmed && c.question;
-      const chosen = S.answers[c.cardId];
-      return h('div', { class: `card${c.offender ? ' offender' : ''}${c.pinned ? ' pinned' : ''}` },
-        h('div', { class: 'hd' }, h('span', null, `Card ${c.cardId}${confirmed ? ` → ${op.cardItemIds[String(c.cardId)]}` : ''}`), h('span', { class: 'chip' }, c.slot)),
-        h('div', { class: 'attrs' },
-          h('span', null, c.type.replace('_', ' ')),
-          h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.sparkColor)}` }), `Model says: ${c.sparkColor}`),
-          c.maskColor ? h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.maskColor)}` }), `Mask pixels say: ${c.maskColor}`) : h('span', { class: 'muted' }, 'no mask'),
-          h('span', null, FORMALITY_LABEL[c.formality] || c.formality),
-          h('span', null, c.pinned ? h('span', { class: 'chip accent' }, 'keep') : null, c.offender ? h('span', { class: 'chip bad' }, 'feels off') : null)),
+      const chosenColor = S.answers[c.cardId] || c.sparkColor;
+      const chosenType = S.typeEdits[c.cardId] || c.type;
+      const skipped = S.unchecked.has(c.cardId);
+      const pe = S.priceEdits[c.cardId] || { amount: '', platform: 'KARROT' };
+      const cutThumb = c.mask && photo
+        ? h('div', { class: 'scan-cut' }, cutCanvas({ url: photo.url, mask: c.mask }))
+        : h('div', { class: 'scan-cut' }, placeholder(chosenColor, chosenType));
+      return h('div', { class: `card scan-card${c.offender ? ' offender' : ''}${c.pinned ? ' pinned' : ''}${skipped ? ' is-skipped' : ''}` },
+        h('div', { class: 'scan-card-row' },
+          cutThumb,
+          h('div', { class: 'scan-card-body' },
+            h('div', { class: 'hd' },
+              h('label', { class: 'scan-check' },
+                editable ? h('input', {
+                  type: 'checkbox',
+                  checked: skipped ? null : true,
+                  onchange: (e) => {
+                    if (e.target.checked) S.unchecked.delete(c.cardId);
+                    else S.unchecked.add(c.cardId);
+                    render();
+                  },
+                }) : null,
+                h('span', null, `Piece #${c.cardId}${confirmed && op.cardItemIds[String(c.cardId)] ? ` → ${op.cardItemIds[String(c.cardId)]}` : ''}`)),
+              h('span', { class: 'chip' }, c.slot)),
+            editable ? h('div', { class: 'scan-edits' },
+              h('select', {
+                class: 'scan-sel',
+                'aria-label': `Piece ${c.cardId} type`,
+                onchange: (e) => { S.typeEdits[c.cardId] = e.target.value; render(); },
+              }, EDITABLE_TYPES.map((t) => h('option', { value: t, selected: t === chosenType ? true : null }, TYPE_NAME[t] || t.replace('_', ' ')))),
+              h('select', {
+                class: 'scan-sel',
+                'aria-label': `Piece ${c.cardId} colour`,
+                onchange: (e) => { S.answers[c.cardId] = e.target.value; render(); },
+              }, EDITABLE_COLORS.map((col) => h('option', { value: col, selected: col === chosenColor ? true : null }, col))),
+              h('input', {
+                type: 'number',
+                min: '1',
+                step: '1000',
+                class: 'scan-price',
+                placeholder: '₩ / $ price (opt)',
+                value: pe.amount,
+                oninput: (e) => { S.priceEdits[c.cardId] = { ...(S.priceEdits[c.cardId] || pe), amount: e.target.value }; },
+              }),
+              h('select', {
+                class: 'scan-sel scan-plat',
+                'aria-label': `Piece ${c.cardId} platform`,
+                onchange: (e) => { S.priceEdits[c.cardId] = { ...(S.priceEdits[c.cardId] || pe), platform: e.target.value }; },
+              }, PLATFORM_OPTIONS.slice(0, 8).map(([val, lbl]) => h('option', { value: val, selected: val === pe.platform ? true : null }, lbl.split(' (')[0]))))
+              : h('div', { class: 'attrs' },
+                h('span', null, chosenType.replace('_', ' ')),
+                h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(chosenColor)}` }), `Colour: ${chosenColor}`),
+                c.maskColor ? h('span', null, h('span', { class: 'swatch', style: `background:${rgbOf(c.maskColor)}` }), `Mask: ${c.maskColor}`) : null,
+                h('span', null, FORMALITY_LABEL[c.formality] || c.formality),
+                h('span', null, c.pinned ? h('span', { class: 'chip accent' }, 'keep') : null, c.offender ? h('span', { class: 'chip bad' }, 'feels off') : null)))),
         q ? h('div', { class: 'question' }, `? ${q.text}`, h('div', { class: 'row', style: 'margin-top:6px' }, q.choices.map((ch) =>
-          h('button', { class: 'btn small ghost', type: 'button', 'aria-pressed': String(chosen === ch), onclick: () => { S.answers[c.cardId] = ch; render(); } }, ch)))) : null);
+          h('button', { class: 'btn small ghost', type: 'button', 'aria-pressed': String(S.answers[c.cardId] === ch), onclick: () => { S.answers[c.cardId] = ch; render(); } }, ch)))) : null);
     }));
   }
 
   async function confirm(op) {
     await busy(async () => {
-      const eventIds = op.cards.map(() => uuid());
+      const selectedCards = op.cards.filter((c) => !S.unchecked.has(c.cardId));
+      if (!selectedCards.length) { flash({ chip: 'Select at least one piece to save.', cls: 'warn' }); return; }
+      const eventIds = selectedCards.map(() => uuid());
+      const cardIds = selectedCards.length === op.cards.length ? undefined : selectedCards.map((c) => c.cardId);
       const answers = {};
-      for (const [k, v] of Object.entries(S.answers)) answers[k] = { color: v };
-      const r = await saveFlow(S.wsId, 'confirm', { operationId: op.operationId, eventIds, expectedRevision: S.view.revision, answers },
-        (v) => op.cards.every((c) => v.items.some((it) => it.cutoutRef === `${op.operationId}#${c.cardId}` && it.ownership === 'CONFIRMED')),
-        `${op.cards.length} pieces saved · checked against the server`);
+      for (const c of selectedCards) {
+        const col = S.answers[c.cardId];
+        const typ = S.typeEdits[c.cardId];
+        if (col || typ) answers[c.cardId] = { ...(col ? { color: col } : {}), ...(typ ? { type: typ } : {}) };
+      }
+      const r = await saveFlow(S.wsId, 'confirm', { operationId: op.operationId, eventIds, ...(cardIds ? { cardIds } : {}), expectedRevision: S.view.revision, answers },
+        (v) => selectedCards.every((c) => v.items.some((it) => it.cutoutRef === `${op.operationId}#${c.cardId}` && it.ownership === 'CONFIRMED')),
+        `${selectedCards.length} pieces saved to your closet`);
+      if (r.ok && !cfg.visitor) {
+        setPreferOwner(true);
+        const confirmedOp = (r.view && r.view.operations || []).find((o) => o.operationId === op.operationId);
+        const mapIds = (confirmedOp && confirmedOp.cardItemIds) || {};
+        let pricedCount = 0;
+        const todayIso = new Date().toISOString().slice(0, 10);
+        for (const c of selectedCards) {
+          const pe = S.priceEdits[c.cardId];
+          const itemId = mapIds[String(c.cardId)];
+          const amt = pe && Number(pe.amount);
+          if (itemId && amt > 0) {
+            const plat = pe.platform || 'KARROT';
+            const pr = await postJson(`/api/ws/${S.wsId}/evidence`, {
+              itemId,
+              platform: plat,
+              currency: PLATFORM_CURRENCY[plat] || 'KRW',
+              priceType: 'ASK',
+              amount: amt,
+              retrievedAt: todayIso,
+              matchLevel: 'SAME_ITEM',
+            });
+            if (pr && pr.ok !== false) pricedCount++;
+          }
+        }
+        if (pricedCount > 0) r.chip = `${selectedCards.length} pieces & ${pricedCount} price tag${pricedCount === 1 ? '' : 's'} saved to your 3D closet`;
+      }
       flash(r);
     });
   }
@@ -510,16 +676,17 @@ function decisionUI(root, cfg) {
       : op.kind !== 'photo' ? h('ul', { class: 'calls' }, h('li', null, 'model calls: 0')) : null;
 
     if (op.kind === 'photo' && op.cards.length) {
+      const activeCards = op.cards.filter((c) => !S.unchecked.has(c.cardId));
       parts.push(h('div', { class: 'grid cols-2' }, stage(op), h('div', null, cardsView(op),
         !op.context ? h('div', { class: 'row', style: 'margin-top:12px' },
-          h('button', { class: 'btn', id: 'confirm', type: 'button', disabled: S.busy || op.cards.some((c) => c.question && !S.answers[c.cardId]), onclick: () => confirm(op) }, `Confirm ${op.cards.length} cards`),
+          h('button', { class: 'btn', id: 'confirm', type: 'button', disabled: S.busy || !activeCards.length || activeCards.some((c) => c.question && !S.answers[c.cardId]), onclick: () => confirm(op) }, `Confirm ${activeCards.length} cards`),
           h('span', { class: 'muted' }, 'Nothing is saved until you confirm.')) : null,
-        op.context && op.state === 'DRAFT' ? h('div', { class: 'row', style: 'margin-top:12px' },
+        op.context && op.state === 'DRAFT' ? h('div', { class: 'row post-confirm-bar', style: 'margin-top:12px' },
           op.scan ? null : h('button', { class: 'btn', id: 'propose', type: 'button', disabled: S.busy, onclick: () => propose(op) }, 'Suggest changes'),
-          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/closet/3d?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-rail' }, 'Open 3D boutique rail') : null,
-          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/closet?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-closet' }, 'Review & prices') : null,
-          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/today?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-today' }, 'Today') : null,
-          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/discover?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-discover' }, 'Discover') : null) : null)));
+          !cfg.visitor ? h('a', { class: op.scan ? 'btn' : 'btn ghost small', href: `/closet/3d?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-rail' }, 'Open 3D boutique rail →') : null,
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/closet?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-closet' }, 'Ledger & prices') : null,
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/today?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-today' }, 'Wear today') : null,
+          !cfg.visitor ? h('a', { class: 'btn ghost small', href: `/discover?ws=${encodeURIComponent(S.wsId)}`, id: 'open-owner-discover' }, 'Match looks') : null) : null)));
     }
     if (callsBlock) parts.push(callsBlock);
     if (op.questions.length && op.state !== 'DRAFT') {
@@ -638,7 +805,10 @@ async function landingRail(slot, ws) {
   try {
     const { id, view: v } = await ws;
     const [L, mod] = await Promise.all([getJson(`/api/ws/${id}/ledger`), import('/static/rail3d.js')]);
-    const pieces = (v.items || []).map((it) => ({ itemId: it.itemId, slot: it.slot, type: it.type, rgb: (META.palette && META.palette[it.color]) || null, availability: it.availability || 'AVAILABLE', photo: null }));
+    const pieces = (v.items || []).map((it) => {
+      const rgb = (META.palette && META.palette[it.color]) || null;
+      return { itemId: it.itemId, slot: it.slot, type: it.type, rgb, availability: it.availability || 'AVAILABLE', photo: samplePhoto(it.type, rgb) };
+    });
     const rail = mod.mountRail3d(slot, pieces, { tags: L ? L.tags : null, money, onPick: (itemId) => { location.href = `/closet?decide=${encodeURIComponent(itemId)}`; }, label: `This closet on a rail: ${pieces.length} pieces. Tap one for its keep-or-let-go question.` });
     if (!rail) slot.remove();
   } catch {
@@ -649,10 +819,10 @@ async function landingRail(slot, ws) {
 async function tryScreen(view) {
   chrome([h('span', { class: 'chip sample' }, 'Sample photos · drawn by code · demo')]);
   view.append(h('h1', null, 'Try it on three sample outfits'),
-    h('p', { class: 'lede' }, 'Pick one outfit photo and one fixed sentence. Closer keeps the piece you want, changes only what feels off, and saves nothing until you confirm.'),
+    h('p', { class: 'lede' }, 'Pick one outfit photo and one fixed sentence, or upload your own closet photo.'),
     h('div', { class: 'row', style: 'margin: 0 0 14px' },
-      h('a', { class: 'btn small ghost', href: '/app', id: 'open-app-upload' }, 'Upload or take your own photo'),
-      h('span', { class: 'muted' }, 'Owner wardrobe saves your real camera photo on this server; below is a safe sandbox with three sample outfits.')));
+      h('a', { class: 'btn small', href: '/app', id: 'open-app-upload' }, '+ Upload your own closet photo'),
+      h('span', { class: 'muted' }, 'Below is a sandbox with three sample outfits.')));
   const root = h('div');
   view.append(root);
   const ui = decisionUI(root, { wsId: null, visitor: true });
@@ -663,12 +833,23 @@ async function tryScreen(view) {
 }
 
 async function appScreen(view) {
-  chrome([h('span', { class: 'chip sample' }, 'Sample photos · drawn by code')]);
-  view.append(h('h1', null, 'My wardrobe'), ownerBar(), h('p', { class: 'lede' }, 'Owner view of the same loop. In real mode, sign in with the owner token first. Photos are stored only on your server. A reading sends the photo to the Meta Model API (to muse-spark-1.3, to sam-3.1, and mask cut-outs of it to the edit step), each request with store:false; Closer keeps no copy elsewhere. Delete any photo at any time.'));
+  chrome([]);
+  const topRow = h('div', { class: 'app-hero-bar' },
+    h('div', null,
+      h('h1', { style: 'margin:0 0 4px' }, 'Your closet studio'),
+      h('p', { class: 'muted', style: 'margin:0' }, 'Upload one closet photo → edit pieces & prices → view on your 3D boutique rail.')),
+    h('div', { class: 'row' },
+      h('a', { class: 'btn small ghost', href: '/closet/3d?ws=owner' }, '3D Boutique Rail →'),
+      h('details', { class: 'owner-drawer' },
+        h('summary', { class: 'btn small ghost' }, ownerToken() ? 'Owner · signed in' : 'Owner settings'),
+        h('div', { class: 'owner-drawer-body' },
+          ownerBar(),
+          h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:12px' }, 'Photos stay on your server (EXIF stripped). Live mode sends store:false to muse-spark-1.3 & sam-3.1; local mode runs pixel segmentation on-device.')))));
+  view.append(topRow);
   const probe = await fetch('/api/ws/owner/view', { headers: authHeaders() });
-  if (probe.status === 403) { view.append(h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
+  if (probe.status === 403) { view.append(ownerBar(), h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
   const root = h('div');
-  view.append(h('p', null, h('a', { class: 'btn small ghost', href: '/closet/3d?ws=owner' }, 'See my wardrobe in 3D')), root);
+  view.append(root);
   const ui = decisionUI(root, { wsId: 'owner', visitor: false });
   await ui.refresh();
 }
@@ -897,19 +1078,51 @@ function priceChart(series, cur, opts) {
   return wrap;
 }
 
+function closetSwitchChip(activeOwner, ownerCount) {
+  if (!ownerCount && !activeOwner) return null;
+  const go = (wantOwner) => {
+    setPreferOwner(wantOwner);
+    const u = new URL(location.href);
+    if (wantOwner) u.searchParams.set('ws', 'owner');
+    else u.searchParams.delete('ws');
+    location.assign(u.pathname + u.search);
+  };
+  return h('div', { class: 'seg closet-switch', role: 'group', 'aria-label': 'Closet source' },
+    h('button', { type: 'button', 'aria-pressed': activeOwner ? 'true' : 'false', onclick: () => go(true) }, `Your closet${ownerCount ? ` (${ownerCount})` : ''}`),
+    h('button', { type: 'button', 'aria-pressed': !activeOwner ? 'true' : 'false', onclick: () => go(false) }, 'Sample demo'));
+}
+
 async function closetWs() {
-  const wsParam = new URLSearchParams(location.search).get('ws');
-  if (wsParam) {
-    const r = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/view`, { headers: authHeaders() });
-    if (r.ok) {
-      const own = await getJson(`/api/ws/${encodeURIComponent(wsParam)}/photos`).catch(() => ({ photos: [] }));
-      for (const p of own.photos || []) {
-        if (META.photos.some((q) => q.photoId === p.photoId)) continue;
-        const b = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/photo/${p.photoId}`, { headers: authHeaders() });
-        if (b.ok) META.photos.unshift({ photoId: p.photoId, title: 'Your photo', url: URL.createObjectURL(await b.blob()), w: p.w, h: p.h, count: 0, mine: true });
+  const params = new URLSearchParams(location.search);
+  const rawWs = params.get('ws');
+  if (rawWs === 'sample') setPreferOwner(false);
+  const wantOwner = rawWs && rawWs !== 'sample' ? rawWs : (location.pathname !== '/' && preferOwner() ? 'owner' : null);
+  let ownerCount = 0;
+  if (location.pathname !== '/') {
+    try {
+      const or = await fetch('/api/ws/owner/view', { headers: authHeaders() });
+      if (or.ok) {
+        const ov = await or.json();
+        ownerCount = (ov.items || []).filter((i) => !i.sample).length;
+        if (wantOwner === 'owner' && (rawWs === 'owner' || ownerCount > 0)) {
+          const own = await getJson('/api/ws/owner/photos').catch(() => ({ photos: [] }));
+          for (const p of own.photos || []) {
+            if (META.photos.some((q) => q.photoId === p.photoId)) continue;
+            const b = await fetch(`/api/ws/owner/photo/${p.photoId}`, { headers: authHeaders() });
+            if (b.ok) META.photos.unshift({ photoId: p.photoId, title: 'Your photo', url: URL.createObjectURL(await b.blob()), w: p.w, h: p.h, count: 0, mine: true });
+          }
+          chrome([closetSwitchChip(true, ownerCount)].filter(Boolean));
+          return { id: 'owner', view: ov, owner: true };
+        }
       }
-      return { id: wsParam, view: await r.json(), owner: true };
-    }
+    } catch {}
+  }
+  if (wantOwner && wantOwner !== 'owner') {
+    const r = await fetch(`/api/ws/${encodeURIComponent(wantOwner)}/view`, { headers: authHeaders() });
+    if (r.ok) return { id: wantOwner, view: await r.json(), owner: true };
+  }
+  if (location.pathname !== '/' && ownerCount > 0) {
+    chrome([...sampleChips(), closetSwitchChip(false, ownerCount)].filter(Boolean));
   }
   let id = null;
   try { id = localStorage.getItem('closer.closet'); } catch {}
@@ -986,7 +1199,7 @@ function sampleChips() {
 }
 
 function tile(it, opts = {}) {
-  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` }, it ? placeholder(it.color, it.type || it.slot) : h('span', { class: 'muted' }, '—'), h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : opts.label || 'none'), opts.badge ? h('span', { class: 'chip accent' }, opts.badge) : null);
+  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` }, it ? (opts.cuts ? thumb(it, opts.cuts) : placeholder(it.color, it.type || it.slot)) : h('span', { class: 'muted' }, '—'), h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : opts.label || 'none'), opts.badge ? h('span', { class: 'chip accent' }, opts.badge) : null);
 }
 
 async function todayScreen(view) {
@@ -1071,11 +1284,12 @@ async function todayScreen(view) {
 
   function render() {
     const items = byId();
+    const cuts = cutMap(S.view);
     const grid = h('div', { class: 'wardrobe' }, S.view.items.map((it) => {
       const on = S.locks.has(it.itemId);
       const avail = it.availability;
       return h('button', { type: 'button', class: `item pickable${on ? ' locked' : ''}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => { on ? S.locks.delete(it.itemId) : S.locks.add(it.itemId); S.op = null; S.saved = null; render(); } },
-        h('div', { class: 'thumb' }, placeholder(it.color, it.type || it.slot)),
+        h('div', { class: 'thumb' }, thumb(it, cuts)),
         h('div', { class: 'meta' }, h('b', null, `${it.itemId} · ${itemName(it)}`), h('span', null, FORMALITY_LABEL[it.formality] || it.formality),
           avail !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, avail.toLowerCase()) : null,
           on ? h('span', { class: 'chip accent' }, 'Keep this today') : null));
@@ -1121,7 +1335,7 @@ async function todayScreen(view) {
         parts.push(h('section', { class: 'panel' }, h('h2', null, `${op.options.length === 1 ? 'One outfit' : 'Two outfits'} with what you kept`),
           flashAt('top'),
           h('div', { class: 'options' }, op.options.map((o, i) => h('div', { class: `option${S.picked === i ? ' picked' : ''}` }, h('h3', null, o.label),
-            h('div', { class: 'flatlay' }, SLOTS.map((s) => tile(items[o.outfit[s]], { label: s, empty: !o.outfit[s], badge: S.locks.has(o.outfit[s]) ? 'kept' : null }))),
+            h('div', { class: 'flatlay' }, SLOTS.map((s) => tile(items[o.outfit[s]], { label: s, empty: !o.outfit[s], badge: S.locks.has(o.outfit[s]) ? 'kept' : null, cuts }))),
             h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))),
             S.picked === i ? h('span', { class: 'chip ok' }, 'Your pick for today') : h('button', { class: 'btn', type: 'button', onclick: () => pick(i) }, 'Wear this'),
             S.picked === i ? flashAt('option') : null))),
@@ -1151,7 +1365,8 @@ async function todayScreen(view) {
 
 async function closetScreen(view) {
   chrome(sampleChips());
-  const { id, view: v } = await closetWs();
+  const { id, view: v, owner } = await closetWs();
+  const cuts = cutMap(v);
   const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
   const boardSlot = h('div', { id: 'asset-slot' });
@@ -1162,7 +1377,7 @@ async function closetScreen(view) {
   async function paintBoard() {
     let L = null;
     try { L = await getJson(`/api/ws/${id}/ledger`); } catch { L = null; }
-    boardSlot.replaceChildren(...[assetBoard(L), h('p', { class: 'asset-after' }, h('a', { class: 'btn small ghost', href: '/closet/3d', id: 'see-3d' }, 'See it in 3D'))].filter(Boolean));
+    boardSlot.replaceChildren(...[assetBoard(L), h('p', { class: 'asset-after' }, h('a', { class: 'btn small ghost', href: owner ? `/closet/3d?ws=${encodeURIComponent(id)}` : '/closet/3d', id: 'see-3d' }, 'See it in 3D'))].filter(Boolean));
   }
 
   async function load() { [S.review, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/review?window=${S.window}`), getJson(`/api/ws/${id}/coverage`), paintBoard()]); render(); }
@@ -1531,7 +1746,7 @@ async function closetScreen(view) {
       h('section', { class: 'panel' }, h('h2', null, `To look at (${cands.length})`),
         cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this window.') : null,
         h('div', { class: 'grid' }, cands.map((x) => h('div', { class: `item wide${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
-          h('div', { class: 'thumb' }, placeholder(S.items[x.itemId] ? S.items[x.itemId].color : 'unknown', S.items[x.itemId] ? S.items[x.itemId].type : '')),
+          h('div', { class: 'thumb' }, thumb(S.items[x.itemId], cuts)),
           h('div', { class: 'meta' }, h('b', null, `${x.itemId} · ${itemName(S.items[x.itemId])}`), h('span', null, x.line),
             h('span', { class: 'muted' }, `Tracked since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays} days without any record`),
             x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
@@ -1700,7 +1915,20 @@ function viewSwitch(mode) {
    Few words on screen: the count, one number per currency with its denominator, and the piece you tap. */
 // The sample closet hangs studio photos from the design kit, recoloured to each record's colour with the photo's own
 // light and shade kept (folds, seams). Only sample pieces use them; an owner's piece hangs as its own photo or the model.
-const SAMPLE_PHOTO = { coat: 'coat', jacket: 'jacket', training_top: 'hoodie', knit: 'hoodie', track_jacket: 'blouson' };
+const SAMPLE_PHOTO = {
+  coat: 'coat', jacket: 'jacket', track_jacket: 'blouson',
+  training_top: 'hoodie', knit: 'knit', dress_shirt: 'shirt', blouse: 'shirt', tee: 'tee',
+  trousers: 'trousers', skirt: 'trousers', jeans: 'jeans', chinos: 'chinos', joggers: 'chinos', shorts: 'chinos',
+  derby: 'derby', loafers: 'derby', sneakers: 'sneakers', running_shoes: 'sneakers',
+};
+function sampleMediaNode(it) {
+  const rgb = (META && META.palette && META.palette[it.color]) || null;
+  const p = samplePhoto(it.type, rgb);
+  if (!p) return placeholder(it.color, it.type || it.slot);
+  const wrap = h('div', { class: 'pp-studio' }, placeholder(it.color, it.type || it.slot));
+  p.then((cv) => { if (cv) wrap.replaceChildren(cv); });
+  return wrap;
+}
 function samplePhoto(type, rgb) {
   const key = SAMPLE_PHOTO[type];
   if (!key) return null;
@@ -1748,7 +1976,11 @@ function samplePhoto(type, rgb) {
 async function railView(view, ctx) {
   const { wsParam, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher } = ctx;
   const cells = A.layers.flatMap((l) => l.items);
-  const pieces = cells.map((c) => { const rgb = (META.palette && META.palette[c.color]) || null; return { itemId: c.itemId, slot: c.slot, type: c.type, rgb, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : wsParam ? null : samplePhoto(c.type, rgb) }; });
+  const pieces = cells.map((c) => {
+    const rgb = (META.palette && META.palette[c.color]) || null;
+    const isSamplePiece = !wsParam || !!(byId[c.itemId] && byId[c.itemId].sample);
+    return { itemId: c.itemId, slot: c.slot, type: c.type, rgb, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : isSamplePiece ? samplePhoto(c.type, rgb) : null };
+  });
   const rows = overlayRows(L);
   const count = (slots) => cells.filter((c) => slots.includes(c.slot)).length;
   // One line of counts over the rail, the closet's prices as a plaque over its top-left (the same ledger My closet shows).
@@ -1780,8 +2012,8 @@ async function railView(view, ctx) {
   const next = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide right' }, '›');
   const sheet = h('aside', { class: 'piece-panel', id: 'piece', 'aria-live': 'polite', hidden: true });
   const dock = h('div', { class: 'rail-dock' }, strip, h('div', { class: 'dock-row' }, counts, h('div', { class: 'row pg-row' }, prev, next, switcher)));
-  // The flow starts with one photo: the first action over the rail opens the photo loop (the owner's own wardrobe on /app).
-  const addPhoto = h('a', { class: 'rail-add', href: wsParam ? '/app' : '/try', id: 'rail-add' }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), 'Add from a photo');
+  // The flow starts with one photo: the first action over the rail opens the photo studio (/app).
+  const addPhoto = h('a', { class: 'rail-add', href: '/app', id: 'rail-add' }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), 'Add from a photo');
   const body = h('div', { class: 'immersive' }, host, plaque, editorial, addPhoto, dock, sheet);
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List · ${A.counts.total}`),
     h('div', { class: 'chip-row' }, cells.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } }, `${c.itemId} · ${itemName(byId[c.itemId])}`))));
@@ -1824,7 +2056,7 @@ async function railView(view, ctx) {
         h('button', { type: 'button', class: 'pg', 'aria-label': 'Next piece', onclick: () => step(1) }, '›'),
         h('button', { type: 'button', class: 'pp-close', 'aria-label': 'Close', onclick: close }, '×')),
       h('div', { class: 'chip-row' }, h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot), c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'), cuts[itemId] ? h('span', { class: 'chip' }, cuts[itemId].mine ? 'Your photo' : 'Sample photo') : null),
-      h('div', { class: 'pp-media' }, cuts[itemId] ? cutCanvas(cuts[itemId]) : placeholder(it.color, it.type || c.slot)),
+      h('div', { class: 'pp-media' }, cuts[itemId] ? cutCanvas(cuts[itemId]) : (!wsParam || it.sample) ? sampleMediaNode(it) : placeholder(it.color, it.type || c.slot)),
       h('h2', { class: 'pp-title' }, itemName(it)),
       h('p', { class: 'muted pp-code' }, itemId),
       label('Price seen'),
@@ -1843,18 +2075,36 @@ async function railView(view, ctx) {
 }
 
 async function closet3dScreen(view) {
-  // ?ws=owner opens the owner's own wardrobe (owner token required); otherwise this browser's sample closet.
-  const wsParam = new URLSearchParams(location.search).get('ws');
+  // ?ws=owner (or active session preference after scanning a closet) opens the owner's own wardrobe; otherwise sample closet.
+  const rawWs = new URLSearchParams(location.search).get('ws');
+  if (rawWs === 'sample') setPreferOwner(false);
+  let wsParam = rawWs && rawWs !== 'sample' ? rawWs : (preferOwner() ? 'owner' : null);
   let id;
   let v;
-  if (wsParam) {
+  let ownerCount = 0;
+  try {
+    const or = await fetch('/api/ws/owner/view', { headers: authHeaders() });
+    if (or.ok) {
+      const ov = await or.json();
+      ownerCount = (ov.items || []).filter((i) => !i.sample).length;
+      if (wsParam === 'owner' && (rawWs === 'owner' || ownerCount > 0)) {
+        id = 'owner';
+        v = ov;
+      } else if (!rawWs && wsParam === 'owner' && ownerCount === 0) {
+        wsParam = null;
+      }
+    }
+  } catch {}
+  if (wsParam && !v) {
     chrome([]);
     const r = await fetch(`/api/ws/${encodeURIComponent(wsParam)}/view`, { headers: authHeaders() });
     if (!r.ok) { view.append(h('h1', null, 'Closet in 3D'), ownerBar(), h('p', { class: 'question' }, 'This wardrobe is private. Sign in with the owner token above.')); return; }
     id = wsParam;
     v = await r.json();
+  } else if (wsParam && v) {
+    chrome([closetSwitchChip(true, ownerCount)].filter(Boolean));
   } else {
-    chrome(sampleChips());
+    chrome([...sampleChips(), closetSwitchChip(false, ownerCount)].filter(Boolean));
     ({ id, view: v } = await closetWs());
   }
   // Photos this wardrobe was registered from: the public sample photos plus the owner's own uploads (fetched with the owner header).

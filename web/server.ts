@@ -283,6 +283,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       // An uploaded photo can be used only in the wardrobe it was uploaded to.
       if (photoId.startsWith('up_') && !uploads.list(wsId).some((p) => p.photoId === photoId)) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'no such photo in this wardrobe' });
       const scan = ws.kind === 'real' && b.scan === true;
+      if (mode === 'mock' && photoId.startsWith('up_')) {
+        return send(res, 200, svc.pixelScanPhoto(wsId, { photoId, sessionId, maxPieces: scan ? 16 : 6 }));
+      }
       const chip = CHIPS.find((c) => c.chipId === b.chipId);
       // Visitors: fixed sentence chips only, no free text (RT-13). The owner may write their own sentence or scan a whole closet photo.
       const free = ws.kind === 'real' && typeof b.sentence === 'string' && b.sentence.trim() ? b.sentence.trim() : null;
@@ -290,10 +293,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       if (!sentence) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
       return send(res, 200, await svc.startPhoto(wsId, { photoId, sentence, scan, sessionId }));
     }
+    case 'pixelbox': {
+      const nb = Array.isArray(b.normBox) && b.normBox.length === 4 ? (b.normBox as number[]).map(Number) as [number, number, number, number] : null;
+      if (!nb || nb.some((n) => !Number.isFinite(n))) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'invalid box coordinates' });
+      return send(res, 200, svc.addPixelCard(wsId, { operationId: String(b.operationId ?? ''), normBox: nb, type: b.type as never }));
+    }
     case 'photodelete':
       return send(res, 200, { ok: uploads.delete(wsId, String(b.photoId ?? '')) });
     case 'confirm':
-      return send(res, 200, svc.confirmCards(wsId, { operationId: String(b.operationId), eventIds: (b.eventIds as string[]) ?? [], actor: 'human', expectedRevision: who.expectedRevision, answers: b.answers as never }));
+      return send(res, 200, svc.confirmCards(wsId, {
+        operationId: String(b.operationId),
+        eventIds: (b.eventIds as string[]) ?? [],
+        cardIds: Array.isArray(b.cardIds) ? (b.cardIds as number[]).map(Number) : undefined,
+        actor: 'human',
+        expectedRevision: who.expectedRevision,
+        answers: b.answers as never,
+      }));
     case 'propose':
       return send(res, 200, await svc.propose(wsId, { operationId: String(b.operationId) }));
     case 'answer':
@@ -358,6 +373,7 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     if (path.startsWith('/api/')) return await api(req, res, url);
+    if (path === '/favicon.ico') { res.writeHead(204, SECURITY_HEADERS); res.end(); return; }
     if (PAGES.has(path)) return send(res, 200, readFileSync(join(PUBLIC, 'index.html')), TYPES['.html']);
     if (VENDOR[path]) return existsSync(VENDOR[path]) ? send(res, 200, readFileSync(VENDOR[path]), TYPES['.js']) : send(res, 404, 'run npm install', 'text/plain');
     if (path.startsWith('/static/')) {

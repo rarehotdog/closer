@@ -780,3 +780,40 @@ details.panel > summary { font-family: var(--font-serif); font-weight: 400; font
 .rail-add:hover { background: var(--point-hover); }
 .rail-add .plus { font-size: 18px; line-height: 1; }
 @media (max-width: 900px) { .rail-add { top: 82px; right: 10px; padding: 7px 11px; font-size: 13px; } }
+
+/* photo-to-rail studio (11/5): drag-and-drop closet upload, pixel cut-out cards with inline type/colour/price editor,
+   studio photo preview in the rail drawer, and owner/sample closet switcher. */
+.app-hero-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 18px; flex-wrap: wrap; margin: 14px 0 16px; }
+.owner-drawer { position: relative; }
+.owner-drawer > summary { list-style: none; cursor: pointer; }
+.owner-drawer > summary::-webkit-details-marker { display: none; }
+.owner-drawer-body { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: min(360px, 88vw); padding: 12px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 14px 36px rgba(21, 20, 19, 0.14); }
+.upload-drop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px; margin-bottom: 12px; border: 1.5px dashed var(--line-strong); border-radius: 10px; background: var(--surface-2); transition: border-color 140ms ease, background 140ms ease; }
+.upload-drop.drag { border-color: var(--point); background: var(--point-soft); }
+.sample-fold { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sample-fold > summary { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.stage-tip { margin: 6px 0 0; font-size: 12.5px; }
+.cards.scan-cards { grid-template-columns: minmax(0, 1fr); max-height: 540px; overflow-y: auto; padding-right: 4px; gap: 8px; }
+.scan-card { padding: 10px 12px; transition: opacity 120ms ease; }
+.scan-card.is-skipped { opacity: 0.46; background: var(--surface-2); }
+.scan-card-row { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: center; }
+.scan-cut { width: 58px; height: 74px; display: grid; place-items: center; background: #f8f7f4; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.scan-cut canvas, .scan-cut svg { max-width: 52px; max-height: 68px; width: auto; height: auto; object-fit: contain; }
+.scan-card-body { min-width: 0; }
+.scan-card-body .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.scan-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13.5px; cursor: pointer; }
+.scan-check input { width: 16px; height: 16px; accent-color: var(--point); cursor: pointer; }
+.scan-edits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 1024px) { .scan-edits { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.scan-sel, .scan-price { width: 100%; min-width: 0; height: 34px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
+.scan-sel:focus, .scan-price:focus { outline: 2px solid var(--point); outline-offset: 0; border-color: var(--point); }
+.post-confirm-bar { flex-wrap: wrap; gap: 8px; }
+.pp-media { height: 156px; }
+.pp-media svg, .pp-media canvas, .pp-studio canvas { max-height: 138px; max-width: 100%; width: auto; height: auto; object-fit: contain; }
+.pp-studio { display: grid; place-items: center; width: 100%; height: 100%; }
+.closet-switch { margin-right: 4px; }
+@media (max-width: 640px) {
+  .scan-cards { max-height: none; padding-right: 0; }
+  .owner-drawer-body { position: static; width: 100%; margin-top: 8px; }
+}
+

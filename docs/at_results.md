@@ -4,7 +4,7 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 
 - Active AT ids present: 34 of 34 (AT-05 and AT-24 archived, numbers kept).
 - AT test cases (variants counted separately): PASS 33 · FAIL 0 · SKIP 7 · total 40.
-- Other tests (unit, fixture answer): PASS 51 · FAIL 0 · SKIP 0 · total 51.
+- Other tests (unit, fixture answer): PASS 54 · FAIL 0 · SKIP 0 · total 54.
 
 | Test | Result | Note |
 |---|---|---|
@@ -58,6 +58,9 @@ Generated from `docs/at_results.json` by `scripts/at_report.ts` (run by `npm tes
 | canonical JSON: key order and NFC do not change the hash; non-integers rejected | PASS |  |
 | caps: environment can raise the visitor day cap and the app total, within ceilings; bad values keep the defaults | PASS |  |
 | caps: visitor cap is $0 from 2026-11-19 00:00 KST; kill TTL; free mock calls pass a $0 cap | PASS |  |
+| CS-01 outfit mode rejects duplicate slots while scan mode accepts up to 16 pieces across duplicate slots | PASS |  |
+| CS-02 uploaded closet photo scans 8 garments across duplicate slots, confirms them, and powers ledger, Keep-or-let-go, Today, and Discover | PASS |  |
+| CS-03 local pixelScanPhoto + addPixelCard + subset/type-edited confirmCards works offline with zero model calls | PASS |  |
 | every adapters/ file carries the unverified header | PASS |  |
 | fixture colors map to their declared color family (12 named colors) | PASS |  |
 | FX-H pre-registered answer (§4-5) — A = B1→B2, B = B1→B2 + S1→S2, E1 → J1+T1+B3+S1 | PASS |  |

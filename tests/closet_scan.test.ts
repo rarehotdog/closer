@@ -162,3 +162,61 @@ test('CS-02 uploaded closet photo scans 8 garments across duplicate slots, confi
   extras.close();
   h.cleanup();
 });
+
+test('CS-03 local pixelScanPhoto + addPixelCard + subset/type-edited confirmCards works offline with zero model calls', () => {
+  const W = 600, H = 800;
+  const cols: { box: NormBox; rgb: [number, number, number] }[] = [
+    { box: [120, 180, 240, 620], rgb: [24, 24, 28] },
+    { box: [255, 180, 385, 640], rgb: [34, 52, 92] },
+    { box: [400, 180, 535, 760], rgb: [68, 70, 74] },
+    { box: [555, 190, 680, 580], rgb: [212, 192, 154] },
+    { box: [700, 185, 845, 620], rgb: [92, 64, 42] },
+  ];
+  const store = new PhotoStore(dir);
+  const up = store.save('owner-px', fakeJpeg(W, H), stripedClosetPng(W, H, cols), '2026-11-05T02:00:00Z');
+
+  const h = harness({ seeds: [] });
+  const { ports } = createMockPorts(h.lib, { sleep: async () => {}, nowMs: () => 0, nowIso: () => h.clock.now.toISOString() });
+  const svc = new CloserService({
+    ledger: h.ledger,
+    ports,
+    photos: { get: (id: string) => h.lib.get(id) ?? store.get(id) },
+    mode: 'mock',
+    clock: { now: () => h.clock.now, today: () => h.clock.today },
+  });
+  h.ledger.createWorkspace({ workspaceId: 'owner-px', kind: 'real', publicReadOnly: false, seedRef: 'empty', createdOn: h.clock.today }, { items: [], since: h.clock.today });
+
+  const op = svc.pixelScanPhoto('owner-px', { photoId: up.photoId, maxPieces: 16 });
+  assert.ok('operationId' in op && op.state === 'DRAFT', 'pixelScanPhoto creates DRAFT operation');
+  assert.equal(op.modelCalls, 0, 'local pixel scan records zero model calls');
+  assert.equal(op.labels.includes('Local pixel scan · no Meta call'), true);
+  assert.equal(op.cards.length >= 4, true, `expected >= 4 detected pieces, got ${op.cards.length}`);
+
+  const added = svc.addPixelCard('owner-px', { operationId: op.operationId, normBox: [220, 680, 460, 940], type: 'trousers' });
+  assert.ok('operationId' in added && added.cards.length === op.cards.length + 1, 'addPixelCard appends owner-drawn card');
+  const lastCard = added.cards[added.cards.length - 1];
+  assert.equal(lastCard.type, 'trousers');
+  assert.equal(lastCard.slot, 'bottom');
+
+  // Skip card #2 and override card #1 to 'coat' + 'navy'
+  const chosenCards = added.cards.filter((c) => c.cardId !== 2);
+  const conf = svc.confirmCards('owner-px', {
+    operationId: op.operationId,
+    cardIds: chosenCards.map((c) => c.cardId),
+    eventIds: chosenCards.map((_, i) => `ev-px-${i}`),
+    actor: 'human',
+    expectedRevision: h.ledger.getWorkspace('owner-px')!.ledgerRevision,
+    answers: { '1': { type: 'coat', color: 'navy' } },
+  });
+  assert.equal(conf.ok, true);
+
+  const view = svc.view('owner-px');
+  assert.equal(view.items.length, chosenCards.length);
+  assert.equal(view.items.every((it) => it.sample === false && it.origin === 'photo'), true);
+  const firstConfirmed = view.items.find((it) => it.cutoutRef === `${op.operationId}#1`);
+  assert.equal(firstConfirmed?.type, 'coat');
+  assert.equal(firstConfirmed?.color, 'navy');
+  assert.equal(firstConfirmed?.slot, 'outer');
+
+  h.cleanup();
+});

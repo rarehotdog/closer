@@ -49,16 +49,32 @@ function studio() {
 }
 
 /** Wooden hanger with a polished hook for a photo cut-out (the code-made garments bring their own). Hook top at y = 0. */
-function photoHanger(wood, metal) {
+function photoHanger(wood, metal, slot, planeW = 0.43) {
   const g = new THREE.Group();
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   const hook = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.0028, 8, 20, Math.PI * 1.25), metal);
   hook.rotation.z = -Math.PI * 0.12;
   hook.position.set(0, -0.026, 0);
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.05, 8), metal);
-  stem.position.set(0, -0.07, 0);
-  const arm = new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(V(-0.215, -0.15, 0), V(0, -0.075, 0), V(0.215, -0.15, 0)), 24, 0.011, 10, false), wood);
-  g.add(hook, stem, arm);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.055, 8), metal);
+  stem.position.set(0, -0.072, 0);
+  g.add(hook, stem);
+  if (slot === 'bottom') {
+    const bSpan = Math.min(0.34, Math.max(0.15, planeW * 0.88));
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(bSpan, 0.024, 0.018), wood);
+    bar.position.set(0, -0.112, 0.004);
+    g.add(bar);
+    const cx = bSpan * 0.35;
+    for (const sx of [-cx, cx]) {
+      const clip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.036, 0.024), metal);
+      clip.position.set(sx, -0.128, 0.008);
+      g.add(clip);
+    }
+    return g;
+  }
+  const span = Math.min(0.215, Math.max(0.065, planeW * 0.46));
+  const drop = span < 0.12 ? -0.125 : -0.15;
+  const arm = new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(V(-span, drop, 0), V(0, -0.075, 0), V(span, drop, 0)), 24, 0.011, 10, false), wood);
+  g.add(arm);
   return g;
 }
 
@@ -214,25 +230,39 @@ export function mountRail3d(host, pieces, opts) {
       // where the tag's string meets the piece: under the hanger's collar, or above a pair of shoes
       anchor: hanging ? new THREE.Vector3(0, -0.095, 0.035) : new THREE.Vector3(0, 0.2, 0),
     };
-    if (hanging && p.photo && typeof p.photo.then === 'function') {
+    if (p.photo && typeof p.photo.then === 'function') {
       p.photo.then((img) => {
         if (!img || disposed) return;
         const w0 = img.width || 1;
         const h0 = img.height || 1;
-        const hgt = Math.min(0.95, Math.max(0.45, (g && g.size ? g.size.h : 0.8) - 0.12));
         const tex = new THREE.CanvasTexture(img);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = 4;
         made.tex.add(tex);
         const mat = Mt(new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: 0.35, roughness: 0.92, side: THREE.DoubleSide }));
-        const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(hgt * (w0 / h0), hgt)), mat);
-        cut.position.set(0, -0.14 - hgt / 2, 0.01);
-        cut.castShadow = true;
-        cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.35 }));
-        if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
-        const hanger = photoHanger(wood, chrome);
-        hanger.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); o.castShadow = true; } });
-        swing.add(hanger, cut);
+        if (hanging) {
+          const baseH = p.slot === 'bottom' ? 0.88 : (g && g.size ? g.size.h : 0.8) - 0.10;
+          const hgt = Math.min(0.98, Math.max(0.46, baseH));
+          const planeW = hgt * Math.max(0.28, w0 / h0);
+          const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(planeW, hgt)), mat);
+          cut.position.set(0, (p.slot === 'bottom' ? -0.13 : -0.14) - hgt / 2, 0.01);
+          cut.castShadow = true;
+          cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.35 }));
+          if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
+          const hanger = photoHanger(wood, chrome, p.slot, planeW);
+          hanger.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); o.castShadow = true; } });
+          swing.add(hanger, cut);
+        } else {
+          const shoeW = 0.28;
+          const shoeH = shoeW * (h0 / w0);
+          const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(shoeW, shoeH)), mat);
+          cut.position.set(0, shoeH * 0.48, 0.02);
+          cut.rotation.x = -0.12;
+          cut.castShadow = true;
+          cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.35 }));
+          if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
+          swing.add(cut);
+        }
         swing.traverse((o) => { o.userData.itemId = p.itemId; });
         renderer.shadowMap.needsUpdate = true;
         invalidate();
@@ -257,7 +287,7 @@ export function mountRail3d(host, pieces, opts) {
     camera.aspect = w / h;
     const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const th = tv * camera.aspect;
-    const want = w < 640 ? Math.min(layout.railLength, RAIL.spacing * 2.75) : layout.railLength + 0.2;
+    const want = w < 640 ? Math.min(layout.railLength, RAIL.spacing * 2.75) : Math.min(layout.railLength + 0.2, RAIL.spacing * 9.5 + 0.2);
     view.d = Math.max(want / 2 / th, 1.08 / tv);
     view.half = view.d * th;
     view.max = Math.max(0, half - view.half + 0.15);

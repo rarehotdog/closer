@@ -8,7 +8,7 @@ import type { Actor, PlanState, WorkspaceKind } from '../shared/states.ts';
 import type { Decision, EventInput, ItemRow, LedgerState, Mutation, PlanRow, WorkspaceRow, WriteResponse, CallRow } from '../shared/ledger.ts';
 import { kstDateOf, type IsoDate } from '../shared/dates.ts';
 import {
-  DIRECTIONS, GARMENT_TYPES, SLOTS, SLOT_ID_PREFIX,
+  DIRECTIONS, GARMENT_TYPES, SLOTS, SLOT_ID_PREFIX, isColorFamily, isGarmentType,
   type ColorFamily, type DecisionContext, type Direction, type Formality, type GarmentType, type HardRule, type Item, type Outfit, type Slot,
 } from '../shared/wardrobe.ts';
 import { LABELS, callPanel, changedOnly, keepTarget, liveChip, offendersChip, sampleWardrobe, confirmedWearsSince } from '../shared/labels.ts';
@@ -29,6 +29,7 @@ import { gateModelCall } from './caps.ts';
 import { planAnchor } from './anchor.ts';
 import { cutoutPng, MAX_THUMBNAILS } from './thumbs.ts';
 import { checkIntent, INTENT_CHIPS } from './intent.ts';
+import { scanClosetPixels, scanCustomBox } from './pixelScan.ts';
 
 export type Clock = { now(): Date; today(): IsoDate };
 
@@ -334,10 +335,85 @@ export class CloserService {
     return this.save(op);
   }
 
+  /** Local deterministic pixel scan for uploaded photos when no live model API key is configured (modelCalls = 0). */
+  pixelScanPhoto(
+    workspaceId: string,
+    a: { photoId: string; sessionId?: string | null; maxPieces?: number },
+  ): Operation | { ok: false; code: ReasonCode; detail: string } {
+    const ws = this.ws(workspaceId);
+    if (ws.publicReadOnly) return { ok: false, code: 'SCOPE_DENIED', detail: 'read-only workspace' };
+    const op = this.newOp(ws, 'photo', {
+      sessionId: a.sessionId ?? null,
+      photoId: a.photoId,
+      sentence: 'Local pixel scan (review type, colour and price before saving).',
+    });
+    op.scan = (a.maxPieces ?? 16) > 4;
+    op.labels.push(LABELS.ledgerZeroUntilConfirm, 'Local pixel scan · no Meta call');
+    const photo = this.photos.get(a.photoId);
+    if (!photo || Math.max(photo.w, photo.h) > 1600) {
+      return this.hold(op, ws.kind, ['UNSUPPORTED_IMAGE'], null, 'photo missing or long side over 1,600 px');
+    }
+    const pieces = scanClosetPixels(photo.pixels, { maxPieces: a.maxPieces ?? 16 });
+    op.cards = pieces.map((p, i): Card => ({
+      cardId: p.cardId,
+      slot: p.slot,
+      type: p.type,
+      sparkColor: p.color,
+      maskColor: p.color,
+      formality: p.formality,
+      normBox: p.normBox,
+      box: p.box,
+      mask: p.mask,
+      arrival: i,
+      pinned: false,
+      offender: false,
+      question: null,
+    }));
+    op.perception = { pin: [], direction: 'none', offenders: [], samMode: 'mask', w: photo.w, h: photo.h };
+    op.callLines.push('model calls: 0 · local pixel segmentation');
+    return this.save(op);
+  }
+
+  /** Appends an owner-drawn normalized [x1,y1,x2,y2] box onto an unconfirmed photo operation. */
+  addPixelCard(
+    workspaceId: string,
+    a: { operationId: string; normBox: [number, number, number, number]; type?: GarmentType },
+  ): Operation | { ok: false; code: ReasonCode; detail: string } {
+    const op = this.getOperation(a.operationId);
+    if (!op || op.workspaceId !== workspaceId || op.kind !== 'photo') return { ok: false, code: 'INVALID_TRANSITION', detail: 'no such photo operation' };
+    if (op.state !== 'DRAFT' || op.confirmEvents) return { ok: false, code: 'INVALID_TRANSITION', detail: 'operation already confirmed' };
+    if (op.cards.length >= 16) return { ok: false, code: 'META_REQUEST_REJECTED', detail: 'at most 16 pieces per photo' };
+    const photo = op.photoId ? this.photos.get(op.photoId) : null;
+    if (!photo) return { ok: false, code: 'UNSUPPORTED_IMAGE', detail: 'photo missing' };
+    const nextId = op.cards.reduce((m, c) => Math.max(m, c.cardId), 0) + 1;
+    const p = scanCustomBox(photo.pixels, a.normBox, nextId, a.type && isGarmentType(a.type) ? a.type : undefined);
+    op.cards.push({
+      cardId: p.cardId,
+      slot: p.slot,
+      type: p.type,
+      sparkColor: p.color,
+      maskColor: p.color,
+      formality: p.formality,
+      normBox: p.normBox,
+      box: p.box,
+      mask: p.mask,
+      arrival: op.cards.length,
+      pinned: false,
+      offender: false,
+      question: null,
+    });
+    return this.save(op);
+  }
+
   // ---------------- step 2: owner confirms cards ----------------
   confirmCards(
     workspaceId: string,
-    a: Omit<Who, 'eventId'> & { operationId: string; eventIds: string[]; answers?: Record<string, { color?: ColorFamily; formality?: Formality }> },
+    a: Omit<Who, 'eventId'> & {
+      operationId: string;
+      eventIds: string[];
+      cardIds?: number[];
+      answers?: Record<string, { color?: ColorFamily; formality?: Formality; type?: GarmentType }>;
+    },
   ): WriteResponse {
     const op = this.getOperation(a.operationId);
     if (!op || op.workspaceId !== workspaceId || op.kind !== 'photo') return { ok: false, code: 'INVALID_TRANSITION', detail: 'no such photo operation' };
@@ -346,29 +422,38 @@ export class CloserService {
       return this.ledger.write({ workspaceId, expectedRevision: a.expectedRevision, events: op.confirmEvents }, () => ({ ok: false, code: 'STALE_STATE', detail: 'already confirmed' }), this.clock.now().toISOString());
     }
     if (op.state !== 'DRAFT' || op.cards.length === 0) return { ok: false, code: 'INVALID_TRANSITION', detail: `operation is ${op.state}` };
-    if (a.eventIds.length !== op.cards.length) return { ok: false, code: 'INVALID_TRANSITION', detail: 'one eventId per card' };
-    for (const c of op.cards) {
+    const chosenCards = Array.isArray(a.cardIds)
+      ? a.cardIds.map((cid) => op.cards.find((c) => c.cardId === cid)).filter((c): c is Card => Boolean(c))
+      : op.cards;
+    if (chosenCards.length === 0) return { ok: false, code: 'INVALID_TRANSITION', detail: 'select at least one piece to save' };
+    if (a.eventIds.length !== chosenCards.length) return { ok: false, code: 'INVALID_TRANSITION', detail: 'one eventId per card' };
+    for (const c of chosenCards) {
       const ans = a.answers?.[String(c.cardId)];
       if (c.question && !ans?.color) return { ok: false, code: 'ATTR_UNKNOWN', detail: `card ${c.cardId} has an open question` };
     }
     const today = this.clock.today();
     const state = this.ledger.readState(workspaceId, { fresh: false });
     const taken = new Set(state.items.map((i) => i.itemId));
-    const items: ItemRow[] = op.cards.map((c) => {
-      const prefix = SLOT_ID_PREFIX[c.slot];
+    const items: ItemRow[] = chosenCards.map((c) => {
+      const ans = a.answers?.[String(c.cardId)];
+      const chosenType = ans?.type && isGarmentType(ans.type) ? ans.type : c.type;
+      const chosenSlot = GARMENT_TYPES[chosenType];
+      const chosenColor = ans?.color && isColorFamily(ans.color) ? ans.color : c.sparkColor;
+      const prefix = SLOT_ID_PREFIX[chosenSlot];
       let n = 1;
       while (taken.has(`${prefix}${n}`)) n++;
       const itemId = `${prefix}${n}`;
       taken.add(itemId);
-      const ans = a.answers?.[String(c.cardId)];
+      c.type = chosenType;
+      c.slot = chosenSlot;
       return {
-        itemId, slot: c.slot, type: c.type, color: ans?.color ?? c.sparkColor, formality: ans?.formality ?? c.formality,
+        itemId, slot: chosenSlot, type: chosenType, color: chosenColor, formality: ans?.formality ?? c.formality,
         ownership: 'CONFIRMED', cutoutRef: `${op.operationId}#${c.cardId}`, origin: 'photo', waterproof: null, sample: !op.photoId?.startsWith('up_'),
       };
     });
     const events: EventInput[] = items.map((it, i) => ({
       eventId: a.eventIds[i], kind: 'REGISTRATION_CONFIRMED', actor: a.actor, occurredAt: today, correctsEventId: null,
-      payload: { operationId: op.operationId, cardId: op.cards[i].cardId, item: it },
+      payload: { operationId: op.operationId, cardId: chosenCards[i].cardId, item: it },
     }));
     const res = this.ledger.write(
       { workspaceId, expectedRevision: a.expectedRevision, events },
@@ -383,16 +468,16 @@ export class CloserService {
     );
     if (res.ok) {
       op.confirmEvents = events;
-      op.cards.forEach((c, i) => (op.cardItemIds[String(c.cardId)] = items[i].itemId));
+      chosenCards.forEach((c, i) => (op.cardItemIds[String(c.cardId)] = items[i].itemId));
       op.questions = [];
       const id = (idx: number) => op.cardItemIds[String(idx + 1)];
       const baseline: Outfit = {};
-      op.cards.forEach((c, i) => (baseline[c.slot] = items[i].itemId));
+      chosenCards.forEach((c, i) => (baseline[items[i].slot] = items[i].itemId));
       op.context = {
         baseline,
-        pinned: op.perception!.pin.map(id),
+        pinned: op.perception!.pin.map(id).filter(Boolean),
         direction: op.perception!.direction as DecisionContext['direction'],
-        offenders: op.perception!.offenders.map((o) => ({ itemId: id(o.index), why: o.why as DecisionContext['offenders'][number]['why'] })),
+        offenders: op.perception!.offenders.map((o) => ({ itemId: id(o.index), why: o.why as DecisionContext['offenders'][number]['why'] })).filter((o) => Boolean(o.itemId)),
         hardRules: op.hardRules,
         weather: op.weather,
       };
