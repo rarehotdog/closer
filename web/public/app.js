@@ -3071,7 +3071,7 @@ async function railView(view, ctx) {
   }
 
   const catPills = h('div', { class: 'dock-cats', role: 'group', 'aria-label': 'Category filter' },
-    [['all', 'All'], ['outer', 'Outer'], ['top', 'Tops'], ['bottom', 'Bottoms'], ['shoes', 'Shoes']].map(([k, lbl]) =>
+    [['all', 'All'], ['pants-shoes', 'Pants & Glass Shoes'], ['outer', 'Outer'], ['top', 'Tops'], ['bottom', 'Bottoms'], ['shoes', 'Shoes']].map(([k, lbl]) =>
       h('button', {
         type: 'button',
         class: 'cat-pill',
@@ -3081,7 +3081,7 @@ async function railView(view, ctx) {
           for (const btn of catPills.querySelectorAll('button')) btn.setAttribute('aria-pressed', btn.textContent === lbl ? 'true' : 'false');
           let firstMatch = null;
           for (const c of ordered) {
-            const match = k === 'all' || c.slot === k;
+            const match = k === 'all' || (k === 'pants-shoes' ? (c.slot === 'bottom' || c.slot === 'shoes') : c.slot === k);
             chipOf[c.itemId].hidden = !match;
             if (match && !firstMatch) firstMatch = c.itemId;
           }
@@ -3408,6 +3408,7 @@ async function railView(view, ctx) {
           h('h2', { class: 'pp-title' }, itemName(it))),
         h('div', { class: 'chip-row pp-tight-chips' },
           h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot),
+          h('span', { class: 'chip' }, c.slot === 'shoes' ? 'Glass Box' : c.slot === 'bottom' ? 'Clamp Bar' : 'Hanger'),
           h('span', { class: `chip ${heat.tier === 'hot' ? 'ok' : heat.tier === 'cold' ? 'warn' : ''}`.trim() }, heat.shortLabel),
           c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'),
           !wsParam || it.sample ? h('span', { class: 'chip sample' }, 'Sample') : null)));

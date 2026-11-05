@@ -419,22 +419,130 @@ function boutiqueCord(brassMat, dropLen = 0.165) {
   return g;
 }
 
+/** Savile Row dual-jaw walnut & merino-felt mechanical trouser clamp with eccentric brass cam-lock. */
+function buildSavileTrouserClamp(wood, brassMat, spanW = 0.31) {
+  const g = new THREE.Group();
+  const bSpan = Math.min(0.35, Math.max(0.20, spanW));
+  const feltMat = new THREE.MeshStandardMaterial({ color: 0xe6dfd3, roughness: 0.92, metalness: 0.01 });
+  const gripMat = new THREE.MeshStandardMaterial({ color: 0x2c2520, roughness: 0.88, metalness: 0.02 });
+  const neckY = -0.150;
+  for (const jawZ of [-0.013, 0.013]) {
+    const jaw = new THREE.Mesh(new THREE.BoxGeometry(bSpan, 0.028, 0.014), wood);
+    jaw.position.set(0, neckY - 0.014, jawZ);
+    g.add(jaw);
+    const crown = new THREE.Mesh(new THREE.BoxGeometry(bSpan + 0.006, 0.007, 0.016), brassMat);
+    crown.position.set(0, neckY + 0.003, jawZ);
+    g.add(crown);
+  }
+  const liner = new THREE.Mesh(new THREE.BoxGeometry(bSpan - 0.01, 0.024, 0.011), feltMat);
+  liner.position.set(0, neckY - 0.016, 0);
+  g.add(liner);
+  for (const endX of [-bSpan / 2, bSpan / 2]) {
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.032, 0.042), brassMat);
+    cap.position.set(endX, neckY - 0.013, 0);
+    g.add(cap);
+  }
+  const cam = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.036, 0.044), brassMat);
+  cam.position.set(0, neckY - 0.012, 0.004);
+  g.add(cam);
+  const cx = bSpan * 0.34;
+  for (const sx of [-cx, cx]) {
+    const clip = new THREE.Mesh(new THREE.BoxGeometry(0.021, 0.038, 0.034), brassMat);
+    clip.position.set(sx, neckY - 0.030, 0.004);
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(0.019, 0.014, 0.036), gripMat);
+    pad.position.set(sx, neckY - 0.044, 0.004);
+    g.add(clip, pad);
+  }
+  return g;
+}
+
+/** Optical glossy collector shoe vitrine with obsidian plinth, brass plaque, 3000K LED strip, and specular glass door. */
+function makeGlossyVitrineDoorTex() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 192;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 256, 192);
+  g.addColorStop(0, 'rgba(235, 246, 255, 0.30)');
+  g.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+  g.addColorStop(1, 'rgba(220, 238, 255, 0.28)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 192);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(7, 7, 242, 178);
+  ctx.strokeStyle = 'rgba(197, 165, 114, 0.62)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(12, 12, 232, 168);
+  ctx.beginPath();
+  ctx.moveTo(28, 182);
+  ctx.lineTo(96, 10);
+  ctx.lineTo(126, 10);
+  ctx.lineTo(58, 182);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(138, 182);
+  ctx.lineTo(202, 10);
+  ctx.lineTo(216, 10);
+  ctx.lineTo(152, 182);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.26)';
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function buildGlossyShoeVitrine(brassMat, doorTex) {
+  const g = new THREE.Group();
+  const w = 0.44;
+  const h = 0.30;
+  const d = 0.28;
+  const plinthMat = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.28, metalness: 0.35 });
+  const riserMat = new THREE.MeshStandardMaterial({ color: 0xf7f3ec, roughness: 0.75, metalness: 0.04 });
+  const ledStripMat = new THREE.MeshStandardMaterial({ color: 0xfff6dc, emissive: 0xffe2a8, emissiveIntensity: 0.9, roughness: 0.2 });
+  const glassWallMat = new THREE.MeshPhysicalMaterial({
+    color: 0xf5faff,
+    transparent: true,
+    opacity: 0.24,
+    roughness: 0.06,
+    metalness: 0.05,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.05,
+    depthWrite: false,
+  });
+  const doorMat = new THREE.MeshBasicMaterial({ map: doorTex, transparent: true, depthWrite: false });
+
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.02, 0.036, d + 0.02), plinthMat);
+  plinth.position.set(0, 0.018, 0);
+  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.008), brassMat);
+  plaque.position.set(0, 0.019, d / 2 + 0.012);
+  const riser = new THREE.Mesh(new THREE.BoxGeometry(w - 0.05, 0.022, d - 0.05), riserMat);
+  riser.position.set(0, 0.046, -0.005);
+  riser.rotation.x = 0.07;
+
+  const boxShell = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glassWallMat);
+  boxShell.position.set(0, 0.036 + h / 2, 0);
+  const frontDoor = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.01, h - 0.01), doorMat);
+  frontDoor.position.set(0, 0.036 + h / 2, d / 2 + 0.002);
+  const topCrown = new THREE.Mesh(new THREE.BoxGeometry(w + 0.012, 0.014, d + 0.012), brassMat);
+  topCrown.position.set(0, 0.036 + h + 0.006, 0);
+  const ledStrip = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, 0.008, 0.028), ledStripMat);
+  ledStrip.position.set(0, 0.036 + h - 0.008, 0.03);
+
+  g.add(plinth, plaque, riser, boxShell, frontDoor, topCrown, ledStrip);
+  return g;
+}
+
 /** Sculpted walnut hanger suspended on twin champagne-brass cords so the boutique hang-tag clears the garment collar. */
 function photoHanger(wood, brassMat, slot, planeW = 0.43) {
   const g = boutiqueCord(brassMat, 0.156);
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   const neckY = -0.156;
   if (slot === 'bottom') {
-    const bSpan = Math.min(0.34, Math.max(0.16, planeW * 0.86));
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(bSpan, 0.022, 0.018), wood);
-    bar.position.set(0, neckY - 0.014, 0.004);
-    g.add(bar);
-    const cx = bSpan * 0.35;
-    for (const sx of [-cx, cx]) {
-      const clip = new THREE.Mesh(new THREE.BoxGeometry(0.019, 0.034, 0.024), brassMat);
-      clip.position.set(sx, neckY - 0.032, 0.008);
-      g.add(clip);
-    }
+    g.add(buildSavileTrouserClamp(wood, brassMat, planeW * 0.92));
     return g;
   }
   const span = Math.min(0.215, Math.max(0.075, planeW * 0.45));
@@ -539,6 +647,7 @@ export function mountRail3d(host, pieces, opts = {}) {
   const accentRingMat = Mt(new THREE.MeshStandardMaterial({ color: 0xf37021, metalness: 0.35, roughness: 0.32 }));
   const brassCordMat = Mt(new THREE.MeshStandardMaterial({ color: 0xc8a974, metalness: 0.88, roughness: 0.22 }));
   const wood = Mt(new THREE.MeshStandardMaterial({ color: 0xcaa67a, roughness: 0.5 }));
+  const vitrineDoorTex = Tex(makeGlossyVitrineDoorTex());
   const spotlightRingMat = Mt(new THREE.MeshBasicMaterial({ color: 0xf37021, transparent: true, opacity: 0.34, side: THREE.DoubleSide }));
   const railSpan = Math.max(layout.railLength + 0.28, 5.2);
   const railHalf = railSpan / 2;
@@ -764,12 +873,12 @@ export function mountRail3d(host, pieces, opts = {}) {
           const hgt = p.type === 'coat' ? 1.16 : p.type === 'shorts' ? 0.76 : p.slot === 'bottom' ? 1.02 : p.slot === 'outer' ? 1.0 : 0.94;
           const planeW = hgt * (w0 / h0);
           const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(planeW, hgt)), mat);
-          cut.position.set(0, -0.155 - hgt / 2, 0.014);
+          cut.position.set(0, (p.slot === 'bottom' ? -0.188 : -0.155) - hgt / 2, 0.014);
           cut.castShadow = true;
           cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.25 }));
           if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
-          const cord = boutiqueCord(brassCordMat, 0.165);
-          cord.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); o.castShadow = true; } });
+          const cord = p.slot === 'bottom' ? photoHanger(wood, brassCordMat, 'bottom', planeW) : boutiqueCord(brassCordMat, 0.165);
+          cord.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); if (o.material) made.mat.add(o.material); o.castShadow = true; } });
           e.sidePhoto = true;
           e.baseTurn = 0;
           if (e.zTo === 0) { e.turn = 0; e.turnTo = 0; holder.rotation.y = 0; } else { e.turnTo = 0.06; }
@@ -787,7 +896,7 @@ export function mountRail3d(host, pieces, opts = {}) {
           cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.26 }));
           if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
           const hanger = photoHanger(wood, brassCordMat, p.slot, planeW);
-          hanger.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); o.castShadow = true; } });
+          hanger.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); if (o.material) made.mat.add(o.material); o.castShadow = true; } });
           if (isStudioFull) {
             e.sidePhoto = true;
             e.baseTurn = -0.06;
@@ -796,15 +905,18 @@ export function mountRail3d(host, pieces, opts = {}) {
           e.anchor.set(0, -0.092, 0.034);
           swing.add(hanger, cut);
         } else {
-          const shoeW = 0.36;
+          const shoeW = 0.33;
           const shoeH = shoeW * (h0 / w0);
           const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(shoeW, shoeH)), mat);
-          cut.position.set(0, shoeH * 0.48, 0.02);
-          cut.rotation.x = -0.12;
+          cut.position.set(0, 0.058 + shoeH * 0.48, 0.01);
+          cut.rotation.x = -0.10;
           cut.castShadow = true;
           cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.26 }));
+          const vitrine = buildGlossyShoeVitrine(brassCordMat, vitrineDoorTex);
+          vitrine.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); if (o.material) made.mat.add(o.material); } });
           if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
-          swing.add(cut);
+          e.anchor.set(0, 0.36, 0.14);
+          swing.add(vitrine, cut);
         }
         swing.traverse((o) => { o.userData.itemId = p.itemId; });
         renderer.shadowMap.needsUpdate = true;
