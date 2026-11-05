@@ -544,8 +544,11 @@ async function landingScreen(view) {
   const railSlot = h('div', { class: 'stage rail-stage land-rail', id: 'land-rail' });
   view.append(
     h('h1', null, 'Keep the piece you love. Change only what feels off.'),
-    h('p', { class: 'lede' }, 'Today’s outfit from clothes you own. Only confirmed wears count. Closer never posts or pays.'),
-    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/today', id: 'start' }, 'Start with today'), h('a', { class: 'muted', href: '/try', id: 'try-link' }, 'Try three sample photos')),
+    h('p', { class: 'lede' }, 'One photo of today’s outfit. Closer turns it into your closet. Only confirmed wears count; it never posts or pays.'),
+    h('ol', { class: 'flow-steps', 'aria-label': 'How it works' },
+      [['Photo', 'One outfit, one sentence'], ['Cards', 'Spark finds, SAM cuts, you confirm'], ['Rail', 'Your pieces, prices seen'], ['Keep or let go', 'Counted facts, your call']]
+        .map(([t, d], i) => h('li', null, h('span', { class: 'fs-n' }, String(i + 1)), h('b', null, t), h('span', { class: 'fs-d' }, d)))),
+    h('div', { class: 'row', style: 'margin: 0 0 16px' }, h('a', { class: 'btn', href: '/try', id: 'start' }, 'Start with a photo'), h('a', { class: 'btn ghost', href: '/closet/3d', id: 'rail-link' }, 'Open my closet'), h('a', { class: 'muted', href: '/today', id: 'try-link' }, 'Today')),
     railSlot,
     boardSlot,
     h('div', { class: 'grid cols-3' },
@@ -896,7 +899,7 @@ function assetBoard(L, opts = {}) {
 
 /** One tab bar on every page (shown on phones, where the top nav is hidden). */
 function tabbar() {
-  const tabs = [['/today', 'Today'], ['/closet', 'My closet'], ['/discover', 'Discover'], ['/try', 'Photo']];
+  const tabs = [['/try', 'Photo'], ['/closet', 'My closet'], ['/today', 'Today'], ['/discover', 'Discover']]; // the flow: one photo first
   const on = (href) => (href === '/closet' ? location.pathname.startsWith('/closet') : location.pathname === href);
   return h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, tabs.map(([href, label]) => h('a', { href, class: on(href) ? 'on' : null, 'aria-current': on(href) ? 'page' : null }, label)));
 }
@@ -1606,7 +1609,7 @@ function viewSwitch(mode) {
     location.assign(u.pathname + u.search);
   };
   return h('div', { class: 'seg view-seg', role: 'group', 'aria-label': 'View' },
-    [['rail', 'Rail'], ['layers', 'Layers']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
+    [['rail', 'Rail'], ['layers', 'Walk-in']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
 }
 
 /* The rail (11/5): every piece hung on one rail, shoes under it, a tag only where the ledger holds a price.
@@ -1616,38 +1619,74 @@ async function railView(view, ctx) {
   const cells = A.layers.flatMap((l) => l.items);
   const pieces = cells.map((c) => ({ itemId: c.itemId, slot: c.slot, type: c.type, rgb: (META.palette && META.palette[c.color]) || null, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : null }));
   const rows = overlayRows(L);
-  const hud = h('div', { class: 'rail-hud' },
-    h('div', { class: 'rail-count' }, `${A.counts.total} pieces`),
-    rows.length ? h('div', { class: 'rail-sum' }, rows.map((r) => h('div', { class: 'rail-cur' },
-      h('span', { class: 'rail-num' }, money(r.total, r.currency)),
-      h('span', { class: 'rail-of', title: r.seen }, `${r.pieces}/${r.of}`),
-      r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null);
-  const host = h('div', { class: 'stage rail-stage' });
-  const sheet = h('section', { class: 'panel rail-sheet', id: 'piece', 'aria-live': 'polite', hidden: true });
+  const count = (slots) => cells.filter((c) => slots.includes(c.slot)).length;
+  // One line of counts over the rail, the closet's prices as a plaque over its top-left (the same ledger My closet shows).
+  const counts = h('div', { class: 'rail-counts' },
+    h('span', null, 'Tops & outerwear ', h('b', null, String(count(['outer', 'top'])))),
+    h('span', null, 'Bottoms ', h('b', null, String(count(['bottom'])))),
+    h('span', null, 'Shoes ', h('b', null, String(count(['shoes'])))));
+  const plaque = rows.length ? h('div', { class: 'rail-plaque' },
+    h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: '/closet' }, 'Full ledger')),
+    rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null;
+  const host = h('div', { class: 'stage rail-stage' }, plaque);
+  const prev = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide left' }, '‹');
+  const next = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide right' }, '›');
+  const sheet = h('aside', { class: 'piece-panel', id: 'piece', 'aria-live': 'polite', hidden: true });
+  const body = h('div', { class: 'rail-body' }, h('div', { class: 'rail-main' }, h('div', { class: 'rail-bar' }, counts, h('div', { class: 'row pg-row' }, prev, next)), host), sheet);
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List · ${A.counts.total}`),
     h('div', { class: 'chip-row' }, cells.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } }, `${c.itemId} · ${itemName(byId[c.itemId])}`))));
-  view.append(h('div', { class: 'rail-head' }, h('h1', null, 'Closet in 3D'), switcher), hud, host, h('p', { class: 'muted hint' }, 'Drag to slide · tap a piece'), sheet, list);
+  view.append(h('div', { class: 'rail-head' }, h('h1', { class: 'caps-title' }, 'My closet'), switcher), body, h('p', { class: 'muted hint' }, 'Drag or ‹ › to slide · tap a piece · ← → to page'), list);
   const said = rows.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, latest price seen on ${r.pieces} of ${r.of} pieces`).join('; ');
   const mod = await import('/static/rail3d.js').catch(() => null);
   const rail = mod ? mod.mountRail3d(host, pieces, { tags: L ? L.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
   if (!rail) { host.replaceWith(h('p', { class: 'chip warn' }, 'No WebGL here, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
+  prev.onclick = () => rail && rail.slide(-1);
+  next.onclick = () => rail && rail.slide(1);
+  // The rail's own order (outerwear, tops, bottoms, then shoes) is the panel's order for ‹ n / N ›.
+  const RANK = { outer: 0, top: 1, bottom: 2, shoes: 3 };
+  const order = cells.map((c, i) => ({ c, i })).sort((x, y) => RANK[x.c.slot] - RANK[y.c.slot] || x.i - y.i).map((x) => x.c.itemId);
+  const LAYER_NAME = { outer: 'Outerwear', top: 'Tops', bottom: 'Bottoms', shoes: 'Shoes' };
+  let current = null;
+  const step = (d) => { if (!current) return; const k = order.indexOf(current); const id = order[(k + d + order.length) % order.length]; if (rail) rail.select(id); show(id); };
+  document.addEventListener('keydown', (e) => {
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === 'ArrowRight') { if (current) step(1); else if (rail) rail.slide(1); }
+    else if (e.key === 'ArrowLeft') { if (current) step(-1); else if (rail) rail.slide(-1); }
+    else if (e.key === 'Escape' && current) close();
+  });
+  function close() { current = null; sheet.hidden = true; body.classList.remove('open'); if (rail) rail.select(null); }
 
   function show(itemId) {
     const it = byId[itemId];
     const c = cells.find((x) => x.itemId === itemId);
     if (!it || !c) return;
+    current = itemId;
     const t = L && L.tags ? L.tags[itemId] : null;
+    const label = (x) => h('p', { class: 'pp-label' }, x);
     sheet.hidden = false;
+    body.classList.add('open');
     sheet.replaceChildren(
-      h('div', { class: 'rail-sheet-hd' }, h('b', null, `${itemId} · ${itemName(it)}`), c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : null),
-      t ? h('p', { class: 'rail-sheet-price' }, h('span', { class: 'rail-sheet-num' }, money(t.amount, t.currency)), ` ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
-        : h('p', { class: 'muted' }, 'No price yet'),
+      h('div', { class: 'pp-top' },
+        h('button', { type: 'button', class: 'pg', 'aria-label': 'Previous piece', onclick: () => step(-1) }, '‹'),
+        h('span', { class: 'pp-count' }, `${order.indexOf(itemId) + 1} / ${order.length}`),
+        h('button', { type: 'button', class: 'pg', 'aria-label': 'Next piece', onclick: () => step(1) }, '›'),
+        h('button', { type: 'button', class: 'pp-close', 'aria-label': 'Close', onclick: close }, '×')),
+      h('div', { class: 'chip-row' }, h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot), c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'), cuts[itemId] ? h('span', { class: 'chip' }, cuts[itemId].mine ? 'Your photo' : 'Sample photo') : null),
+      h('h2', { class: 'pp-title' }, itemName(it)),
+      h('p', { class: 'muted pp-code' }, itemId),
+      label('Price seen'),
+      t ? h('p', { class: 'pp-price' }, h('span', { class: 'pp-num' }, money(t.amount, t.currency)), ` ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
+        : h('p', { class: 'muted' }, 'No price yet. The price stays blank.'),
+      label('Wears'),
       h('p', { class: 'muted' }, c.wearLabel || 'No confirmed wear yet'),
+      label('Next step'),
+      wsParam ? h('p', { class: 'muted' }, 'Decide on My wardrobe.') : h('div', { class: 'pp-steps' },
+        h('a', { class: 'pp-step', href: `/closet?decide=${itemId}` }, h('b', null, 'Keep it'), h('span', null, 'Wear, store or decide later')),
+        h('a', { class: 'pp-step', href: `/closet?decide=${itemId}` }, h('b', null, 'Let it go'), h('span', null, 'Prepare to sell or donate'))),
       h('div', { class: 'row' },
-        wsParam ? null : h('a', { class: 'btn small', href: `/closet?decide=${itemId}` }, 'Keep or let go?'),
         wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear today'),
-        h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Layers')));
-    sheet.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Walk-in')));
+    if (window.matchMedia('(max-width: 900px)').matches) sheet.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
 
