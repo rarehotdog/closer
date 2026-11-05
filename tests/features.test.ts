@@ -94,6 +94,9 @@ describe('F1 anchor: keep what the owner chose, complete the rest', () => {
     assert.equal(op.state, 'HOLD');
     assert.ok(op.reasonCodes.includes('PIN_CONFLICT'));
     assert.deepEqual(op.questions[0].choices, ['keep', 'switch']);
+    // The owner said yes or no to rain; no percentage is shown (there is no weather service).
+    assert.equal(op.questions[0].text, 'J1 is not waterproof and you said rain is likely today. Keep it anyway, or switch it?');
+    assert.doesNotMatch(op.questions[0].text, /%/);
     assert.equal(op.options.length, 0);
   });
 
@@ -653,6 +656,7 @@ describe('F5 keep or let go: two sides of counted facts, a position saved as a s
     assert.match(v.keep.question, /Will I wear J2 \(beige coat\) in the next 60 days, by 2027-01-01\?/);
     assert.equal(v.keep.wearOutlook.value, null);
     assert.equal(v.keep.wearOutlook.status, 'NOT_COMPUTED');
+    assert.doesNotMatch(v.keep.wearOutlook.line, /0 wears on record|chance/, 'the outlook line never states a count of its own');
     assert.doesNotMatch(JSON.stringify(v.keep), /%/);
     // no field carries a chance, score or estimate; the note may say in words that none is shown
     assert.doesNotMatch(JSON.stringify(v), /"(prob|chance|likelihood|estimate|score|pWear|pSell)[A-Za-z]*":/i);

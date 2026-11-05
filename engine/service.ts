@@ -413,7 +413,7 @@ export class CloserService {
 
     const pc = pinHardConflict(ctx, facts, today, this.rules);
     if (pc) {
-      const rain = ctx.weather ? ` and rain is ${ctx.weather.rainPct}%` : '';
+      const rain = ctx.weather ? ' and you said rain is likely today' : ''; // a yes/no from the owner; no percentage is printed
       return this.hold(op, ws.kind, ['PIN_CONFLICT'], { code: 'PIN_CONFLICT', itemIds: [pc.itemId], cardId: null, attr: null, choices: ['keep', 'switch'], text: `${pc.itemId} breaks your rule${rain}. Keep ${pc.itemId} anyway, or switch it?` });
     }
     const input = buildSolverInput(ctx, facts, today, this.rules);
@@ -816,7 +816,7 @@ export class CloserService {
     const r = planAnchor({ anchors, ctx: context, last: lastPlan?.slots ?? null }, facts, today, this.rules);
     if (r.kind === 'invalid') return this.hold(op, ws.kind, [r.code], null, r.detail);
     if (r.kind === 'pin_conflict') {
-      const why = r.codes.includes('WEATHER_CONFLICT') ? ` is not waterproof and rain is ${rain}%` : ` is ${r.codes.join(', ').toLowerCase()}`;
+      const why = r.codes.includes('WEATHER_CONFLICT') ? ' is not waterproof and you said rain is likely today' : ` is ${r.codes.join(', ').toLowerCase()}`;
       return this.hold(op, ws.kind, ['PIN_CONFLICT'], { code: 'PIN_CONFLICT', itemIds: [r.itemId], cardId: null, attr: null, choices: ['keep', 'switch'], text: `${r.itemId}${why}. Keep it anyway, or switch it?` });
     }
     if (r.kind === 'ask_formality') {

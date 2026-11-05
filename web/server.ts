@@ -204,7 +204,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (path === '/api/demo-clock' && method === 'POST') {
     if (!adminAllowed(req)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'demo clock is local mock or admin only' });
     const body = await readJson(req);
-    demoOffsetDays = Math.max(0, Math.min(7, Number(body.days ?? 0)));
+    const days = body.days ?? 0;
+    if (typeof days !== 'number' || !Number.isInteger(days) || days < 0 || days > 7) return send(res, 400, { ok: false, code: 'INVALID_TRANSITION', detail: 'days must be a whole number from 0 to 7' });
+    demoOffsetDays = days;
     return send(res, 200, { today: clock.today(), offsetDays: demoOffsetDays, label: demoOffsetDays ? LABELS.demoClockPlusOne : null });
   }
   if (path === '/api/admin' && method === 'GET') {

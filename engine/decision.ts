@@ -112,7 +112,7 @@ export function keepSideOf(item: Pick<Item, 'itemId' | 'type' | 'color'>, row: R
     namedUses: [...namedUses],
     wearOutlook: {
       value: null, status: 'NOT_COMPUTED',
-      line: `Not computed. Closer would put a number here only from counted wears of this piece over enough observed days, and there is no counted basis for the next ${horizonDays} days. 0 wears on record is a count, not a chance of zero.`,
+      line: `Not computed. Closer would put a number here only from counted wears of this piece over enough observed days, and there is no counted basis for the next ${horizonDays} days.`,
     },
     missing,
     basis: `Counted from confirmed wear records: ${row.wearsInWindow} wears in the last ${row.windowDays} days, with any record on ${row.recordedDays} of ${row.trackedDays} tracked days.`,

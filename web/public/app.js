@@ -435,7 +435,9 @@ function decisionUI(root, cfg) {
     await busy(async () => {
       await postJson('/api/demo-clock', { days: 1 });
       const r = await postJson(`/api/ws/${S.wsId}/next`, { fromPlanId: plan.planId });
-      S.flash = r.ok === false ? [{ chip: errWords(r.code, r.detail), cls: 'bad' }] : [{ chip: META.labels.demoClockPlusOne, cls: 'warn' }];
+      const moved = r.ok !== false && r.occasionDate > plan.occasionDate;
+      S.flash = r.ok === false ? [{ chip: errWords(r.code, r.detail), cls: 'bad' }]
+        : [{ chip: moved ? `${META.labels.demoClockPlusOne} · plan for ${r.occasionDate}` : `Next plan for ${r.occasionDate} · the demo clock did not move`, cls: 'warn' }];
     }, '#decision');
   }
 
@@ -500,7 +502,7 @@ function decisionUI(root, cfg) {
       h('div', { class: 'row', style: 'margin-top:12px' },
         p.state === 'LOCKED' || p.state === 'WORN' ? h('button', { class: 'btn', id: 'wore', type: 'button', disabled: S.busy, onclick: () => wore(p) }, 'I wore this') : null,
         p.state === 'WORN' && wear ? h('button', { class: 'btn ghost', type: 'button', onclick: () => undo(wear) }, 'Undo') : null,
-        p.state === 'WORN' ? h('button', { class: 'btn ghost', id: 'next', type: 'button', onclick: () => next(p) }, `Next plan · ${META.labels.demoClockPlusOne}`) : null,
+        p.state === 'WORN' ? h('button', { class: 'btn ghost', id: 'next', type: 'button', onclick: () => next(p) }, 'Next plan') : null,
         h('span', { class: 'muted' }, p.state === 'WORN' ? `wear confirmed ${wear ? wear.occurredAt : ''}` : META.labels.wearNotConfirmed)));
   }
 
@@ -670,7 +672,7 @@ async function versionScreen(view) {
   view.append(h('h1', null, 'Version'),
     h('section', { class: 'panel' }, h('dl', { class: 'kv' },
       h('dt', null, 'sha'), h('dd', { class: 'mono', id: 'sha' }, v.sha),
-      h('dt', null, 'built at'), h('dd', null, v.builtAt),
+      h('dt', null, 'server started'), h('dd', null, v.builtAt),
       h('dt', null, 'mode'), h('dd', null, v.mode),
       h('dt', null, 'runtime'), h('dd', null, `Node.js ${v.node}`),
       h('dt', null, 'Live model calls so far'), h('dd', { id: 'live-calls' }, `${v.liveCalls} (live calls answered 2xx, counted on this server)`),
@@ -1030,9 +1032,17 @@ async function todayScreen(view) {
       else if (op.state === 'HOLD') {
         const q = op.questions[0];
         parts.push(h('section', { class: 'panel' }, h('h2', null, 'Closer needs you'), h('p', { class: 'question' }, q ? q.text : op.detail),
-          h('div', { class: 'row' }, (q ? q.choices : []).map((c) => c === 'discover' ? h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover')
-            : items[c] ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => { S.locks = new Set([c]); run(); } }, `${c} · ${itemName(items[c])}`)
-            : h('span', { class: 'chip' }, c))), flashAt('top')));
+          // Every answer the server offers is a button that does what it says.
+          h('div', { class: 'row' }, (q ? q.choices : []).map((c) => {
+            const b = (label, fn) => h('button', { class: 'btn small ghost', type: 'button', onclick: fn }, label);
+            if (c === 'discover') return h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover');
+            if (items[c]) return b(`${c} · ${itemName(items[c])}`, () => { S.locks = new Set([c]); run(); });
+            if (c === 'relax') return b('Drop the direction', () => { S.direction = 'none'; run(); });
+            if (c === 'keep' && S.rain) return b('Keep it anyway', () => { S.rain = false; run(); });
+            if (c === 'switch') return b('Switch it', () => { for (const x of q.itemIds) S.locks.delete(x); S.op = null; S.gridOpen = true; render(); });
+            if (c === 'skip') return b('Not now', () => { S.op = null; S.gridOpen = true; render(); });
+            return c === 'keep' ? null : h('span', { class: 'chip' }, c);
+          }).filter(Boolean)), flashAt('top')));
       } else {
         parts.push(h('section', { class: 'panel' }, h('h2', null, `${op.options.length === 1 ? 'One outfit' : 'Two outfits'} with what you kept`),
           flashAt('top'),
@@ -1751,8 +1761,8 @@ async function closet3dScreen(view) {
     h('p', { class: 'muted' }, nPhoto
       ? `${nPhoto} of ${C.total} pieces show the photo they were registered from, cut out by its mask. The rest are drawn by code.`
       : 'Every card here is drawn by code. A piece registered from a photo shows that photo, cut out by its mask.'),
-    h('p', { class: 'muted' }, A.note),
-    L && L.lines && L.withEvidence ? h('p', { class: 'muted' }, `Prices here come from the closet ledger, the same numbers My closet shows. ${L.lines.evidence} ${L.note}`) : null);
+    h('p', { class: 'muted' }, wsParam ? 'Same pieces and states as My wardrobe (/app); this view computes nothing else.' : A.note),
+    L && L.lines && L.withEvidence ? h('p', { class: 'muted' }, `${wsParam ? 'Prices here come from this wardrobe\'s ledger.' : 'Prices here come from the closet ledger, the same numbers My closet shows.'} ${L.lines.evidence} ${L.note}`) : null);
   // Outfit tray: pick any piece, one per layer; picking another piece on the same layer replaces it.
   const outfit = {};
   const tray = h('section', { class: 'panel', id: 'outfit', 'aria-live': 'polite' });
@@ -1804,7 +1814,7 @@ async function closet3dScreen(view) {
     evidence.replaceChildren(cards.length
       ? h('ul', { class: 'reasons' }, cards.flatMap((c) => c.entries.map((e) => h('li', null, `${c.info.name} · ${fmt(e)} · ${e.priceType === 'ASK' ? 'asking' : 'traded'} · ${e.retrievedAt}`, e.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null))))
       : h('p', { class: 'muted' }, 'No price evidence yet. Prices come only from what you enter, one platform at a time.'),
-      h('p', { class: 'muted' }, 'Per platform, never averaged. What you would receive stays unknown until every fee is checked in My closet.'));
+      h('p', { class: 'muted' }, `Per platform, never averaged. What you would receive stays unknown until every fee is checked${wsParam ? '' : ' in My closet'}.`));
   }
 }
 
