@@ -1,5 +1,27 @@
 # Closer
 
+## Rail Studio — post-submission interface
+
+The full-screen React rail previously previewed on port 3200 is now available in
+[`apps/rail-studio`](apps/rail-studio). It preserves the existing clothes, visible hang tags,
+camera controls and full item inspector, with small wordmark and tag refinements.
+
+```sh
+cd apps/rail-studio
+npm ci
+PORT=3200 npm run dev
+```
+
+Open `http://localhost:3200/?view=rail` (choose another `PORT` if 3200 is already in use).
+The app has its own scan server and browser-local wardrobe storage. It does not yet use
+the root application's accounts or SQLite ledger. Its live Meta photo scan remains
+unverified; a key is not needed to explore the sample closet. See the
+[app README](apps/rail-studio/README.md) for modes, checks and provenance.
+
+The sections below describe the original submitted application at `dba9ff3`.
+The Rail Studio import and polish were added after submission; its dependencies and
+verification are documented separately.
+
 Closer keeps the piece you want to wear, changes only what feels off or what changed, using clothes you already own, and counts only the wears you confirm.
 
 Track: Indie Developer · Theme: Build for Your World — built for one closet first, in Seoul: Korean and English sentences, Korean resale platforms first and then the international ones, each in its own currency.

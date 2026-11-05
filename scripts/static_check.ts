@@ -15,6 +15,12 @@ const BANNED = [
   ['about to ', 'buy'], ['knows ', 'what'], ['the ', 'only'], ['first ', 'app'], ['nobody ', 'else'], ['유', '일'], ['최', '초'],
 ].map((p) => p.join(''));
 
+// These exact dependency identifiers are technical vocabulary, not product copy.
+// Keep this normalization local to AT-17; AT-18 always inspects the original bytes.
+const TECHNICAL_TOKENS = [['ag', 'ent-base'], ['https-proxy-', 'ag', 'ent']].map(parts => parts.join(''));
+const technicalTokenPattern = new RegExp(`\\b(?:${TECHNICAL_TOKENS.join('|')})\\b`, 'gi');
+const labelText = (text: string) => text.replace(technicalTokenPattern, '');
+
 // Person-name deny list. The names are never stored in the repository, not even hashed (short
 // hashed tokens reverse by dictionary). Each machine keeps them in an untracked file:
 // .closer/deny-names.json = ["name", "another name", ...]. Without that file the name check is
@@ -87,7 +93,7 @@ export function runAt17(root: string): Finding[] {
   for (const file of listFiles(root)) {
     if (BINARY.has(extname(file).toLowerCase())) continue;
     let text = readFileSync(join(root, file), 'utf8');
-    const lower = text.toLowerCase();
+    const lower = labelText(text).toLowerCase();
     for (const w of BANNED) if (lower.includes(w.toLowerCase())) f.push({ check: 'banned word', where: file, detail: `"${w.slice(0, 2)}…" (${w.length} chars)` });
     const onSurface = file === 'README.md' || file.startsWith('web/public/') || file === 'shared/labels.ts';
     if (onSurface && !RESULT_FILES.has(file)) {
@@ -98,7 +104,7 @@ export function runAt17(root: string): Finding[] {
   }
   const hist = git(root, ['log', '--all', '-p', '--no-color', '--format=%B']);
   if (hist) {
-    const lower = hist.toLowerCase();
+    const lower = labelText(hist).toLowerCase();
     for (const w of BANNED) {
       // history diffs include this file's own fragments only in split form, so a literal hit is real
       if (lower.includes(w.toLowerCase())) f.push({ check: 'banned word in git history', where: 'git log -p', detail: `"${w.slice(0, 2)}…"` });

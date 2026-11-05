@@ -1,5 +1,12 @@
 # Third-party notices
 
+This section covers the original submitted application. The post-submission React
+interface in `apps/rail-studio` is imported from
+[`rarehotdog/closerdesign`](https://github.com/rarehotdog/closerdesign), commit
+`7dec1d08409befd162651800b8815222a9ac4b01`, with small visual refinements.
+Its dependency versions are recorded in its own lock file and its notices are in
+[`apps/rail-studio/THIRD_PARTY_NOTICES.md`](apps/rail-studio/THIRD_PARTY_NOTICES.md).
+
 Runtime dependencies: two. Everything else uses only the Node.js standard library
 (`node:http`, `node:sqlite`, `node:crypto`, `node:zlib`, `node:test`).
 
@@ -17,4 +24,4 @@ Development tools, not vendored and not shipped (the two devDependencies are ski
 | @types/node 22.20.5 (devDependency) | Node.js type definitions for `tsc` | MIT |
 | Playwright (Chromium) | screenshots in `docs/screens/` (`npm run screens`) | Apache-2.0 |
 
-No code was copied from other repositories.
+The original submitted application did not copy code from other repositories.

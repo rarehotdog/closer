@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-canvas: #FFFFFF;
+    --bg-alabaster: #FAF8F5;
+    --bg-stone: #F3EFEA;
+    --ink-primary: #141413;
+    --ink-secondary: #57534E;
+    --ink-muted: #8C857B;
+    --hermes-orange: #F37021;
+    --hermes-orange-hover: #D95D12;
+    --hermes-orange-soft: #FFF3EB;
+    --champagne-brass: #C5A572;
+    --border-hairline: #E7E2DA;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-canvas);
+    color: var(--ink-primary);
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+}
+
+.font-display {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+}
+
+.font-sans-ui {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small editorial refinements; the rail, tags and inspector keep their existing flow. */
+.closer-wordmark { font-size: 26px; font-weight: 500; letter-spacing: -0.8px; }
+.closer-hang-tag { min-height: 44px; border-radius: 7px; box-shadow: 0 2px 5px #37281812; }
+.closer-hang-tag[aria-pressed='true'] { background: #fff3eb; color: #7c2d12; border-color: #c65e28; box-shadow: 0 3px 12px #6f3b1e26; }
+.closer-hang-tag:focus-visible { outline: 2px solid #9a3412; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .closer-hang-tag { transition: none; } }
+
+/* Inspector panel: a right drawer from the lg breakpoint up, a bottom sheet below it.
+   The sheet is dragged by its handle; its height snaps between about 70% and full. */
+.inspector-sheet {
+  transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.inspector-sheet[data-dragging='true'] {
+  transition: none;
+}
+
+/* The handle owns its touches, so dragging it never scrolls the page or the sheet body. */
+.inspector-sheet-handle {
+  touch-action: none;
+}
+
+/* The body scrolls on its own and never hands a scroll on to what is behind the sheet. */
+.inspector-body {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The pinned action bar keeps clear of a phone's home indicator. */
+.inspector-actions {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* The scrim behind an open phone sheet swallows touches and wheel scrolls. */
+.inspector-backdrop {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+/* While a phone sheet is up, nothing behind it scrolls. */
+html.inspector-sheet-open,
+html.inspector-sheet-open body {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector-sheet {
+    transition: none;
+  }
+}
+
+/* Custom subtle scrollbars for drawers and horizontal rail strips */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(20, 20, 19, 0.14);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(243, 112, 33, 0.5);
+}

@@ -1,0 +1,6 @@
+{
+  "name": "CLOSER — 3D Boutique Rail & Wardrobe Asset Ledger",
+  "description": "3D boutique rail and wardrobe ledger on a sample closet: recorded resale prices by platform and currency, Keep or Let Go decisions saved in this browser, and a one-photo scan through Meta's models when the server holds a key. Nothing is listed, posted or paid.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
