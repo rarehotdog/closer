@@ -186,7 +186,7 @@ export const KalshiPriceChart: React.FC<KalshiPriceChartProps> = ({
       data-testid="kalshi-price-chart"
     >
       {/* Top metric row + Chart Mode Switcher */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-medium text-[#8C857B] tracking-wide">
             PER-PLATFORM PRICES &amp; TRAJECTORY · ON RECORD ({currency})

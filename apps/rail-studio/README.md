@@ -1,62 +1,162 @@
 # Closer · Rail Studio
 
-This is the port-3200 interface imported from `rarehotdog/closerdesign`, branch
-`meta-live-v2`, commit `7dec1d08409befd162651800b8815222a9ac4b01`.
-The import preserves that app's behavior and adds small wordmark and hang-tag
-refinements: a gentler tag angle, a 44px minimum target, selected-state styling
-and a visible keyboard focus ring. This directory is a post-submission addition.
+Rail Studio is the English boutique interface inside the submitted
+[rarehotdog/closer](https://github.com/rarehotdog/closer) repository. Its starting
+point is the port-3200 `closerdesign` `meta-live-v2` interface
+(`7dec1d08409befd162651800b8815222a9ac4b01`). The current scene ports the port-3201
+spatial design from `closerdesign` main
+(`96989fe1f6fbc73c049a2553d32d048d2d8627a8`): walnut and brass hangers, an oak-floor
+Walk-In Vault, side bays and camera navigation. This directory is a
+post-submission addition and runs as a separate app from the root interface.
 
-It runs independently from the original Closer app at the repository root.
-Confirmed photo-scan pieces and their decisions stay in this browser's localStorage;
-changes to the sample closet reset on reload. Root-app
-accounts, SQLite records, and the other development branches are not integrated
-here. A live Meta scan from this interface has not been verified.
-
-One photo of your outfit (or your closet) becomes garments you can count and act on. The face is a 3D boutique rail of real photo cut-outs; the work happens in one inspector; the numbers come from records you can see. Built for the Meta Global AI Developer Hackathon; the submitted engine lives in [rarehotdog/closer](https://github.com/rarehotdog/closer), and this app reuses its photo pipeline.
+One outfit or closet photo becomes pieces you can inspect and act on. The face
+is a 3D boutique rail; the records, their sources and the next decision remain
+visible in the inspector. Account storage now reuses the root project's account
+implementation while keeping this app's data separate from the root ledger.
 
 ## What it does
 
-- **Photo → cards → rail.** `Upload Photo & Hang` (or `?scan=1`) sends one JPEG to this app's own server, which calls **muse-spark-1.3** (one box per garment, the piece to keep, the direction, the pieces that feel off) and **sam-3.1** (one mask per box) through the Meta Model API, checks both answers in code, measures each colour from the mask pixels and returns cut-out cards. You confirm; the pieces hang on the rail and stay in this browser. Closet mode reads up to 16 garments from one photo of a rail or closet and can scan the rest in two overlapping parts.
-- **The face.** The full-bleed 3D rail with real cut-outs and the Walk-In Vault, one known-range line on the plaque ("₩X · N of M pieces"), hang tags whose shape says what is known (solid with a price seen · dashed "No price seen" · hollow dot for "No wear log" · "0 wears · 60d").
-- **The inspector.** Pick a piece anywhere and the same panel opens: photo, status chips, purchase info, wear record, prices seen, net if sold (only with every cost line ticked), and the decision pinned at the bottom (Keep · Prepare to sell · Decide later). Phone: a bottom sheet.
-- **Review (wide).** Candidates (Sell and Undecided) side by side with the price-over-time chart and a per-currency sum of net-if-sold for the rows whose fees are checked.
-- **Grid.** Every piece as a flat card with the same facts; it takes the stage when WebGL is unavailable, and it is one tap away otherwise.
+- **Photo → cards → rail.** `Upload Photo & Hang` (or `?scan=1`) sends a JPEG to
+  this app's server. The pipeline calls `muse-spark-1.3` for garment boxes and
+  `sam-3.1` for masks, validates the answers, measures colour from mask pixels
+  and returns cut-out cards for confirmation. Closet mode reads up to 16
+  garments and can scan the remainder in overlapping parts. A confirmed real
+  piece stays in the guest browser or saves to the signed-in account.
+- **Spatial browsing.** Front Rail, 3D Walk-Around, Left Wing, Right Wing and
+  Overhead are real camera positions. Drag can sweep the rail or orbit the room;
+  wheel zoom and WASD navigation are available in the room. Auto orbit moves
+  back and forth within the room, rather than claiming a full 360-degree spin.
+  Selecting a piece pauses orbit and opens its inspector. Camera controls sit
+  above the measured bottom dock and follow its collapsed state.
+- **Visible prices.** Hang tags show recorded prices or an explicit unknown
+  state. The desktop Market Pulse card shows the latest entered or sample
+  observation, its platform, asking/traded status and date. Its change amount
+  compares records of the same currency, platform, kind and sample status.
+  It is not an automatic market-price feed.
+- **Organized inspection.** Clicking a piece or Market Pulse opens the same
+  inspector: Overview, market price history, purchase information, counted wear
+  and price records, fees and the Keep / Prepare to sell / Decide later action.
+  The layout includes section navigation and a mobile bottom sheet.
+- **Accounts and saving.** Account registration, sign-in, sign-out and account
+  wardrobes are available from this surface. Save state distinguishes loading,
+  saving, verified saved, errors and another-tab conflicts. Local personal
+  pieces can be imported explicitly after sign-in.
+- **Review and fallback.** Review compares Sell and Undecided pieces and sums
+  eligible net proceeds separately by currency. Grid provides the same records
+  when WebGL cannot run or reduced motion requests a static first view. The
+  loading skeleton and retry path avoid leaving a blank 3D stage.
 
-## What it never does
+## Record boundaries
 
-No probability, estimate or recommendation: counted numbers with their denominators, or "not computed". Currencies are never mixed or converted; Sample is never added to owner totals; a net appears only when every cost line is ticked; a model's name appears only where a call happens (the local test fake is labelled "Test fake · no Meta call"). Nothing is posted, paid or sent. The Meta key stays on the server.
+Sample prices and pieces remain labelled and excluded from owner totals.
+Unknown prices and wear history remain unknown; no invented probability or
+engagement score is added. Currencies are not combined or converted. Net proceeds
+require the relevant costs to be confirmed. The Meta key remains server-side;
+the test transport is labelled `Test fake · no Meta call`.
+
+Guests use browser-local storage (`closer.scannedPieces.v1`). Creating or signing
+into an account does not silently claim that guest collection. The explicit
+import accepts personal scan/custom pieces and excludes built-in demo IDs,
+sample pieces, fake scans and sample observations. Signed-in private wardrobes
+are not copied into guest localStorage. Sample-view edits do not save into the
+account, and switching identities clears the displayed account scene.
+
+`server/accountRouter.ts` reuses the root `store/extras.ts` account/session store
+and `web/guard.ts` password, session-cookie and request-guard helpers. The
+Rail Studio wardrobe document lives in a separate `rail_studio_wardrobes` table,
+keyed by the authenticated account workspace. Saves require that workspace ID
+and the expected revision, perform a transaction and read back the stored
+result; stale revisions produce a conflict rather than overwriting another tab.
+This integrates the existing account code, not an automatic migration or shared
+login to the root app's existing database or event ledger.
 
 ## Run
 
+Use Node.js **22.18 or newer**, including its `node:sqlite` support. Install both
+sets of dependencies because this app imports root account modules.
+
+```sh
+# From the repository root:
+npm ci
+cd apps/rail-studio
+npm ci
+PORT=3203 CLOSER_KILL=1 npm run dev
 ```
-npm ci                 # from this directory; Node.js 22.18 or newer
-PORT=3200 npm run dev   # Express + Vite; choose an unused port
-npm run build && npm start   # production (dist/ + server.js)
-npm test               # scan pipeline, routes, tiles, ledger logic
-npm run lint           # tsc --noEmit
+
+Choose an unused port; existing 3200/3201 development servers need not be
+restarted. Run these commands from `apps/rail-studio`:
+
+```sh
+npm run lint           # TypeScript checks
+npm test               # scan, routes, records, accounts and wardrobe controller
+npm run build          # dist/ and bundled server.js
+PORT=3203 npm start    # production; defaults to port 3000 without PORT
 ```
 
-The production server defaults to port 3000; `PORT=3202 npm start` overrides it.
-Keep `src/assets/` alongside `dist/` and `server.js`, since the server also serves
-the eight bundled garment photographs. For local review with model calls disabled,
-use `CLOSER_KILL=1`. Never expose a key-enabled development server publicly.
+Keep `src/assets/` alongside `dist/` and `server.js`: the server serves the
+bundled garment photographs. `CLOSER_KILL=1` disables model calls without
+disabling local account or wardrobe work.
 
-The optional browser smoke script needs a separately installed Playwright and
-Chromium: `BASE=http://localhost:3200 node scripts/browser_check.cjs`.
-It writes screenshots under `.data/shots`; these are not committed.
+### Account configuration
 
-Server modes (`GET /api/scan/status`): `live` with a key (`MODEL_API_KEY` or `META_API_KEY` in the server environment; in AI Studio, Settings → Secrets), `fake` only with `CLOSER_SCAN_FAKE=1` and no key (a local stand-in for development, labelled on screen), `no_key`, `off` with `CLOSER_KILL=1`. Spend cap per process `CLOSER_SCAN_BUDGET_USD` (default 2). One real scan to check a key: `MODEL_API_KEY=… npm run live:scan` (prints statuses, timings and counts only; never the key or model text). Details: [server/README.md](server/README.md).
+| Variable | Behavior |
+| --- | --- |
+| `CLOSER_ACCOUNT_DB` | SQLite path. Default `../../.data/rail-studio.sqlite`, resolved from the process working directory: when launched here, repository-root `.data/rail-studio.sqlite`. Use an absolute path for an isolated test or deployment database. |
+| `CLOSER_ACCOUNT_COOKIE` | Defaults to `closer_rail_acct`, separate from the root app's cookie. Give concurrent Rail Studio instances distinct names if they must have separate sessions on the same host. |
+| `CLOSER_APP_ORIGIN` | Optional comma-separated exact allowed origins, including scheme and port. Without it, the request's own origin is used. Account mutations require a matching Origin and JSON; sibling-port and cross-site writes are rejected. |
+| `CLOSER_ACCOUNT_COOKIE_SECURE` | Set to `1` for HTTPS deployment, particularly behind TLS termination. Cookies also use Secure when Express recognizes an HTTPS request; they are HttpOnly and SameSite=Strict. Do not enable Secure for plain-HTTP localhost testing. |
 
-## Status (2026-11-05)
+The default database is separate from the original root app's ledger. Do not
+point a test server at an existing personal database. Database files and their
+SQLite sidecars are denied by the application's private-file guards; keep the
+database out of public asset directories and deployment artifacts.
 
-Verified in this repository: the scan pipeline and routes with the test fake (tests, type check, build), the screens at 1440×900 and 390×844 with 0 console errors and 0 horizontal overflow. **Not yet verified here: a live Meta call from this app** (no key in the build environment); the engine repository's own live run on Nov 5 is recorded in its `docs/live/live_check.json`. The design (commit `ea9f3b8`) is by the project's designer; the sample closet and its prices are sample data, labelled Sample.
+### Model configuration
 
-## Layout of the code
+`GET /api/scan/status` reports `live` with `MODEL_API_KEY` or `META_API_KEY`,
+`fake` only with `CLOSER_SCAN_FAKE=1` and no key, `no_key` without either, or `off`
+with `CLOSER_KILL=1`. The process spend cap is `CLOSER_SCAN_BUDGET_USD` (default
+2). Configure keys in the server environment, not browser code. With a key
+already configured, `npm run live:scan` performs a real scan check and prints
+statuses, timings and counts. See [server/README.md](server/README.md).
 
-- `server.ts` — Express app: static files, `POST /api/scan`, `GET /api/scan/status`, guards.
-- `server/scan.ts`, `server/closetSpark.ts` — photo → cards (outfit and closet modes); `server/closer/` is the trimmed copy of the engine's adapters and checks; `server/fakeMeta.ts` the test fake.
-- `src/App.tsx` — the face (rail / vault / grid), the inspector, the modals, the scan flow.
-- `src/components/` — `BoutiqueRail3D` (three.js), `ClosetGrid`, `GarmentInspectDrawer`, `ScanPhotoModal`, `ReviewMode`, `KalshiPriceChart`, `ModalsAndViews`.
-- `src/utils/` — `ledgerLogic` (counts, net, sums), `tiles` (closet photo in parts), `review`.
+## Verification scope
 
-Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (`@meta-sam/parser` under the SAM License).
+Tests, type checks and a production build are separate from browser and provider
+verification. The account tests use isolated databases; the scan tests can use
+a labelled fake without calling Meta. Neither proves a successful live model
+request. Live Meta scanning from this integrated surface still requires a
+configured key and a real end-to-end run.
+
+For browser review, check desktop and phone widths, Walk-Around → Front Rail,
+selection during orbit, camera-bar spacing with the dock open and closed,
+inspector navigation, Market Pulse sources, grid fallback, and account
+save/reload/sign-out/switch/conflict behavior. Account inputs must not trigger
+WASD navigation. The optional smoke script requires separately installed
+Playwright and Chromium:
+
+```sh
+BASE=http://localhost:3203 node scripts/browser_check.cjs
+```
+
+It writes screenshots under `.data/shots`; they are not committed. A verification
+report should state the actual route, viewport and result from that run rather
+than treating an old screenshot or build as current UI evidence.
+
+## Code map
+
+- `server.ts` — Express, scan routes, account routes and private-file guards.
+- `server/scan.ts`, `server/closetSpark.ts`, `server/closer/` — photo pipeline,
+  adapters and validation; `server/fakeMeta.ts` is the test transport.
+- `server/accountRouter.ts`, `accountStore.ts`, `wardrobeSchema.ts` — account
+  boundary, revisioned wardrobe persistence and incoming-record validation.
+- `src/utils/accountWardrobe.ts`, `src/hooks/useAccountWardrobe.ts` — guest and
+  account state, explicit imports, save queue and conflict handling.
+- `src/App.tsx` — rail/grid, dock, account surface, scan flow and selection.
+- `src/components/BoutiqueRail3D.tsx`, `MarketPulse.tsx`,
+  `GarmentInspectDrawer.tsx` — spatial scene, recorded-price card and inspection.
+- `src/utils/ledgerLogic.ts`, `tagForms.ts`, `review.ts` — counts, currency-safe
+  totals, truthful tags and review calculations.
+
+Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+(`@meta-sam/parser` under the SAM License).

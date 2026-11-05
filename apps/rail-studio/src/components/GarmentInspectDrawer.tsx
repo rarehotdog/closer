@@ -98,6 +98,8 @@ type MoreTarget = 'chart' | 'ask' | 'quote';
 
 interface GarmentInspectDrawerProps {
   garment: GarmentPiece | null;
+  /** Supplied by the account save controller, only after server read-back. */
+  persistenceNotice?: string;
   looks?: TargetLook[];
   onClose: () => void;
   onSaveDecision: (
@@ -126,6 +128,7 @@ interface GarmentInspectDrawerProps {
 
 export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
   garment,
+  persistenceNotice,
   looks = TARGET_LOOKS,
   onClose,
   onSaveDecision,
@@ -258,7 +261,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
 
   // "See all prices" / "Adjust ask" / "Add a price" open "More" and bring that block into view.
   useEffect(() => {
-    if (!scrollTarget || !moreOpen) return;
+    if (!scrollTarget || (scrollTarget !== 'chart' && !moreOpen)) return;
     const el =
       scrollTarget === 'chart'
         ? chartRef.current
@@ -276,7 +279,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
   const setMoreOpen = (open: boolean) =>
     setMoreOpenByPiece((prev) => ({ ...prev, [garment.id]: open }));
   const openMoreAt = (target: MoreTarget) => {
-    setMoreOpen(true);
+    if (target !== 'chart') setMoreOpen(true);
     setScrollTarget(target);
   };
 
@@ -471,8 +474,8 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
       : garment.purchasePrice
         ? '② Purchase price only'
         : '② No price on record';
-  const keptAfterReload = isKeptAfterReload(garment);
-  const storageNote = decisionStorageNote(garment);
+  const keptAfterReload = isKeptAfterReload(garment) || garment.id.startsWith('piece-custom-');
+  const storageNote = persistenceNotice ?? decisionStorageNote(garment);
   const wearDaysText =
     keepScenario.daysSinceLastWorn !== null
       ? `${keepScenario.daysSinceLastWorn} days ago`
@@ -655,6 +658,12 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
             </div>
           </div>
 
+          <nav aria-label="Item sections" className="shrink-0 flex gap-1 px-5 py-2 border-b border-[#E7E2DA] bg-[#FAF8F5]">
+            <button type="button" onClick={() => bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} className="px-3 py-1.5 text-xs rounded-md hover:bg-white">Overview</button>
+            <button type="button" onClick={() => openMoreAt('chart')} className="px-3 py-1.5 text-xs font-semibold text-[#B8460F] rounded-md hover:bg-white">Market</button>
+            <button type="button" onClick={() => openMoreAt('ask')} className="px-3 py-1.5 text-xs rounded-md hover:bg-white">Selling tools</button>
+          </nav>
+
           {/* Scrollable body: photo → name & chips → purchase → wear → price seen → net if sold → More */}
           <div
             ref={bodyRef}
@@ -782,6 +791,26 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* Market stays visible: price, platform, date and comparable records. */}
+                  <section ref={chartRef} aria-label="Market prices" data-testid="inspector-market" className="scroll-mt-2">
+                    <h3 className="text-xs font-semibold tracking-wide uppercase text-[#57534E] mb-2">Market · Prices on record</h3>
+                    <KalshiPriceChart
+                      garment={garment}
+                      observations={garment.observations}
+                      currency={garment.currency}
+                      window={chartWindow}
+                      onWindowChange={setChartWindow}
+                      purchasePrice={garment.purchasePrice}
+                      simulatedAskPrice={askPrice}
+                      tradedBandMin={sellScenario.tradedBandMin}
+                      tradedBandMax={sellScenario.tradedBandMax}
+                      tradedCount={sellScenario.traded.count}
+                      excludedObsIds={excludedObsIds}
+                      onToggleExcludeObs={handleToggleExcludeObs}
+                    />
+                  </section>
+
 
             {/* 3. Purchase info: only what the owner entered; blank lines stay "not entered" */}
             <section
@@ -1281,7 +1310,7 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                 <span className="flex items-baseline gap-2 min-w-0">
                   <span className="text-xs font-semibold text-[#141413]">More</span>
                   <span className="text-[10px] text-[#8C857B] truncate">
-                    Price over time · Ask slider · Add a price · Listing draft · Evidence &amp; limits
+                    Ask tools · Add a price · Listing draft · Evidence &amp; limits
                   </span>
                 </span>
                 {moreOpen ? (
@@ -1394,24 +1423,6 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
                       )}
                     </form>
                   )}
-
-                  {/* Per-Platform Price Distribution Dot Strip & Trajectory Chart */}
-                  <div ref={chartRef} className="scroll-mt-2">
-                    <KalshiPriceChart
-                      garment={garment}
-                      observations={garment.observations}
-                      currency={garment.currency}
-                      window={chartWindow}
-                      onWindowChange={setChartWindow}
-                      purchasePrice={garment.purchasePrice}
-                      simulatedAskPrice={askPrice}
-                      tradedBandMin={sellScenario.tradedBandMin}
-                      tradedBandMax={sellScenario.tradedBandMax}
-                      tradedCount={sellScenario.traded.count}
-                      excludedObsIds={excludedObsIds}
-                      onToggleExcludeObs={handleToggleExcludeObs}
-                    />
-                  </div>
 
                   {/* Ask-price slider + D3 draggable handle -> recomputes the payout IF sold at that price (no chance of sale is computed) */}
                   {hasPriceBasis && askPrice !== null && (
@@ -1861,11 +1872,11 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
               >
                 <span
                   data-testid="inspector-saved-where"
-                  title={
+                  title={persistenceNotice ?? (
                     keptAfterReload
                       ? 'Pieces from a photo scan and their decisions are kept in this browser (localStorage). Nothing is sent to a server.'
                       : 'This decision lives in this browser tab only; a reload resets the sample closet. Nothing is sent to a server.'
-                  }
+                  )}
                 >
                   {storageNote} ·{' '}
                   {garment.lastDecision.choice === 'keep'
@@ -1887,11 +1898,11 @@ export const GarmentInspectDrawer: React.FC<GarmentInspectDrawerProps> = ({
               <div
                 className="text-[10px] lg:text-[11px] text-[#57534E] font-mono-num pb-3"
                 data-testid="inspector-saved-where"
-                title={
+                title={persistenceNotice ?? (
                   keptAfterReload
                     ? 'Pieces from a photo scan and their decisions are kept in this browser (localStorage). Nothing is sent to a server.'
                     : 'A decision lives in this browser tab only; a reload resets the sample closet. Nothing is sent to a server.'
-                }
+                )}
               >
                 {storageNote}
               </div>

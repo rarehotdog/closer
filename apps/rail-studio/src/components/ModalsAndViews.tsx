@@ -209,6 +209,7 @@ const LedgerD3Sparkline: React.FC<LedgerD3SparklineProps> = ({ piece }) => {
 
 interface LedgerModalProps {
   isOpen: boolean;
+  scope?: 'account' | 'sample' | 'browser';
   onClose: () => void;
   garments: GarmentPiece[];
   summary: LedgerSummary;
@@ -217,6 +218,7 @@ interface LedgerModalProps {
 
 export const LedgerModal: React.FC<LedgerModalProps> = ({
   isOpen,
+  scope = 'browser',
   onClose,
   garments,
   summary,
@@ -224,7 +226,10 @@ export const LedgerModal: React.FC<LedgerModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const rotationTrend = compute30DayRotationTrend(garments, REFERENCE_DATE);
+  const isAccount = scope === 'account';
+  const now = new Date();
+  const accountDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const rotationTrend = compute30DayRotationTrend(garments, isAccount ? accountDate : REFERENCE_DATE);
 
   const totalSeenOwned =
     summary.krw.ownedSeenCount + summary.usd.ownedSeenCount;
@@ -245,18 +250,20 @@ export const LedgerModal: React.FC<LedgerModalProps> = ({
       className="fixed inset-0 z-40 bg-black/25 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Sample Closet at a Glance Asset Ledger"
+      aria-label={isAccount ? 'Your Closet at a Glance Asset Ledger' : 'Sample Closet at a Glance Asset Ledger'}
     >
       <div className="bg-white border border-[#E7E2DA] rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E7E2DA]">
           <div>
             <h2 className="text-xl font-display font-semibold text-[#141413]">
-              Sample Closet at a Glance · Asset Ledger
+              {isAccount ? 'Your Closet at a Glance' : 'Sample Closet at a Glance'} · Asset Ledger
             </h2>
             <p className="text-xs text-[#8C857B]">
-              Sample data plus pieces you added · Separated by currency · Sample
-              pieces kept apart, never added to yours · Price on record for{' '}
+              {isAccount
+                ? 'Your pieces on record · Separated by currency · '
+                : `${scope === 'browser' ? 'Sample data plus pieces you added' : 'Sample data'} · Separated by currency · Sample pieces kept apart, never added to yours · `}
+              Price on record for{' '}
               {totalSeenOwned} of {summary.totalOwnedPieces} pieces
             </p>
           </div>
@@ -332,7 +339,7 @@ export const LedgerModal: React.FC<LedgerModalProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-4 mb-3">
                 <div>
                   <div className="text-xs font-semibold text-[#141413]">
-                    30-Day Wardrobe Decisions · Keep vs Sell (Sample Data)
+                    30-Day Wardrobe Decisions · Keep vs Sell{isAccount ? '' : ' (Sample Data)'}
                   </div>
                   <div className="text-[11px] text-[#8C857B] mt-0.5">
                     Decisions saved in the last 30 days:{' '}

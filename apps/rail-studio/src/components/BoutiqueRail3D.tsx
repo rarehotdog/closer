@@ -12,12 +12,15 @@ import {
 import { TagKind, tagForm } from '../utils/tagForms';
 
 export type SceneViewMode = 'rail' | 'vault';
+type CameraAnglePreset = 'front' | 'orbit3d' | 'leftWing' | 'rightWing' | 'overhead';
+type DragInteractionMode = 'sweep' | 'orbit';
 
 interface BoutiqueRail3DProps {
   garments: GarmentPiece[];
   selectedId: string | null;
   onSelectGarment: (id: string | null) => void;
   viewMode: SceneViewMode;
+  onViewModeChange?: (mode: SceneViewMode) => void;
   railOffset: number;
   onRailOffsetChange: (offset: number) => void;
   showHangTags: boolean;
@@ -162,6 +165,48 @@ function createCalacattaMarbleTexture(
  * A cut-out that already carries its own transparency (a SAM mask or a box crop from a photo scan):
  * fitted into the garment plane top-centre, never keyed, cropped or re-dyed.
  */
+function createHerringboneOakTexture(
+  renderer: THREE.WebGLRenderer,
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#D6C0A3';
+  ctx.fillRect(0, 0, 512, 512);
+
+  const tones = ['#DCC8AC', '#D1B898', '#C6AB89', '#DFCBB2'];
+  const plankW = 64;
+  const plankH = 16;
+
+  for (let y = 0; y < 512; y += plankH) {
+    for (let x = 0; x < 512; x += plankW) {
+      const idx = ((x / plankW) * 3 + y / plankH) % tones.length;
+      ctx.fillStyle = tones[Math.floor(idx)];
+      ctx.fillRect(x, y, plankW - 1, plankH - 1);
+
+      // Subtle oak grain lines
+      ctx.fillStyle = 'rgba(110, 78, 46, 0.08)';
+      ctx.fillRect(x + 6, y + 4, plankW - 14, 1.5);
+      ctx.fillRect(x + 12, y + 10, plankW - 22, 1);
+
+      // Bevel seam
+      ctx.strokeStyle = 'rgba(92, 64, 38, 0.22)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, plankW - 1, plankH - 1);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(6, 5);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+
 function createDirectCutoutTexture(img: HTMLImageElement, renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
   const w = 512;
   const h = 680;
@@ -334,6 +379,33 @@ function buildBoutiqueGarmentGroup(
   neckCollar.userData = { garmentId: garment.id };
   root.add(neckCollar);
 
+  // 1b. Sculpted 3D Sartorial Walnut & Brass Shoulder Hanger Wings (visible in 3D orbit & front views)
+  const hangerWoodMat = new THREE.MeshStandardMaterial({
+    color: garment.hangerType === 'matte-black' ? 0x222326 : 0x5a3821,
+    roughness: 0.36,
+    metalness: 0.08,
+  });
+  const shoulderWingGeo = new THREE.CylinderGeometry(0.018, 0.028, 0.46, 12);
+  const leftWingArm = new THREE.Mesh(shoulderWingGeo, hangerWoodMat);
+  leftWingArm.position.set(-0.2, 1.23, 0);
+  leftWingArm.rotation.z = -1.24;
+  leftWingArm.userData = { garmentId: garment.id };
+  root.add(leftWingArm);
+
+  const rightWingArm = new THREE.Mesh(shoulderWingGeo, hangerWoodMat);
+  rightWingArm.position.set(0.2, 1.23, 0);
+  rightWingArm.rotation.z = 1.24;
+  rightWingArm.userData = { garmentId: garment.id };
+  root.add(rightWingArm);
+
+  const hangerGusset = new THREE.Mesh(
+    new THREE.BoxGeometry(0.11, 0.055, 0.036),
+    brassMat,
+  );
+  hangerGusset.position.set(0, 1.29, 0);
+  hangerGusset.userData = { garmentId: garment.id };
+  root.add(hangerGusset);
+
   // 2. Volumetric 3D Curved Relief Garment Shell
   const shellW = 1.44;
   const shellH = garment.silhouette === 'overcoat' ? 2.62 : 2.38;
@@ -379,6 +451,15 @@ function buildBoutiqueGarmentGroup(
   frontShell.visible = false;
   root.add(frontShell);
 
+  // A second relief layer gives the photographed piece depth from the room's side angles.
+  const backShellMat = shellMat.clone();
+  backShellMat.color.multiplyScalar(0.84);
+  const backShell = new THREE.Mesh(frontGeo.clone(), backShellMat);
+  backShell.position.set(0, shellCenterY, -0.05);
+  backShell.userData = { garmentId: garment.id };
+  backShell.visible = false;
+  root.add(backShell);
+
   // Invisible hit-box proxy for fast raycasting
   const hitProxy = new THREE.Mesh(
     new THREE.BoxGeometry(0.85, 2.4, 0.5),
@@ -394,10 +475,15 @@ function buildBoutiqueGarmentGroup(
     shellMat.color.setHex(0xffffff);
     shellMat.needsUpdate = true;
     frontShell.visible = true;
+    backShellMat.map = tex;
+    backShellMat.color.setHex(0xe2ddd5);
+    backShellMat.needsUpdate = true;
+    backShell.visible = true;
   };
 
   const showPlainShell = () => {
     frontShell.visible = true;
+    backShell.visible = true;
   };
 
   return { root, applyCutoutTexture, showPlainShell };
@@ -408,16 +494,56 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
   selectedId,
   onSelectGarment,
   viewMode,
+  onViewModeChange,
   railOffset,
   onRailOffsetChange,
   showHangTags,
   showRotationHeatmap = true,
   onRenderFallback,
 }) => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
+  const [cameraControlsBottom, setCameraControlsBottom] = useState<number | undefined>();
   const [projectedTags, setProjectedTags] = useState<ProjectedTag[]>([]);
+  const [cameraPreset, setCameraPreset] = useState<CameraAnglePreset>(viewMode === 'vault' ? 'orbit3d' : 'front');
+  const [dragMode, setDragMode] = useState<DragInteractionMode>(viewMode === 'vault' ? 'orbit' : 'sweep');
+  const [autoOrbit, setAutoOrbit] = useState(false);
+  const cameraPresetRef = useRef(cameraPreset);
+  const dragModeRef = useRef(dragMode);
+  const autoOrbitRef = useRef(autoOrbit);
+  const onViewModeChangeRef = useRef(onViewModeChange);
+  onViewModeChangeRef.current = onViewModeChange;
+  const setCameraPresetOrbitRef = useRef<(preset: CameraAnglePreset) => void>(() => {});
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [railStage, setRailStage] = useState<RailStage>('loading');
+
+  // Keep camera actions above the entire dock, including its collapse tab. Measuring the
+  // real bounds also handles mobile wrapping and the collapsed dock without empty space.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const dock = document.querySelector<HTMLElement>('[data-testid="rail-control-dock"]');
+    if (!viewport || !dock) return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const bottom = Math.max(16, Math.ceil(viewport.getBoundingClientRect().bottom - dock.getBoundingClientRect().top + 12));
+        setCameraControlsBottom((previous) => previous === bottom ? previous : bottom);
+      });
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(dock);
+    window.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('resize', measure);
+    measure();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('resize', measure);
+    };
+  }, [railStage]);
   // Pieces whose cut-out (or plain shell) is on the rail, over the pieces on it.
   const [cutoutsReady, setCutoutsReady] = useState<{ ready: number; total: number }>({
     ready: 0,
@@ -698,14 +824,16 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
     scene.add(railAssembly);
 
-    // Beverly Hills Walk-In Vault Architectural Group (visible in 'vault' mode)
+    // Beverly Hills Walk-In Vault Architectural Group (visible in 'vault' / 3D Walk-Around mode)
     const vaultGroup = new THREE.Group();
+    const oakFloorTex = createHerringboneOakTexture(renderer);
 
     const floorMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(28, 20),
+      new THREE.PlaneGeometry(28, 22),
       new THREE.MeshStandardMaterial({
-        color: 0xf7f4ef,
-        roughness: 0.45,
+        color: 0xffffff,
+        map: oakFloorTex,
+        roughness: 0.38,
         metalness: 0.04,
       }),
     );
@@ -714,65 +842,173 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
     floorMesh.receiveShadow = !isSoftwareGl;
     vaultGroup.add(floorMesh);
 
+    // Woven Bouclé Gallery Area Rug with Champagne Brass Border Frame (offset +0.02m on Y to prevent Z-fighting)
+    const rugBrassFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(8.6, 0.018, 4.4),
+      brassMat,
+    );
+    rugBrassFrame.position.set(0, -1.735, 0.65);
+    vaultGroup.add(rugBrassFrame);
+
+    const rugBoucle = new THREE.Mesh(
+      new THREE.BoxGeometry(8.42, 0.024, 4.22),
+      new THREE.MeshStandardMaterial({
+        color: 0xf3eee6,
+        roughness: 0.88,
+        metalness: 0.02,
+        bumpMap: fabricBump,
+        bumpScale: 0.012,
+      }),
+    );
+    rugBoucle.position.set(0, -1.728, 0.65);
+    rugBoucle.receiveShadow = !isSoftwareGl;
+    vaultGroup.add(rugBoucle);
+
+    const stoneWallMat = new THREE.MeshStandardMaterial({
+      color: 0xebe4da,
+      roughness: 0.55,
+      metalness: 0.03,
+    });
+
     const backWall = new THREE.Mesh(
       new THREE.BoxGeometry(16, 5.6, 0.35),
-      whiteLacquerMat,
+      stoneWallMat,
     );
-    backWall.position.set(0, 0.85, -1.55);
+    backWall.position.set(0, 0.85, -1.62);
     backWall.receiveShadow = !isSoftwareGl;
     vaultGroup.add(backWall);
 
+    // 3 Recessed Smoked American Walnut Cabinetry Bays along the Back Wall
+    [-3.2, 0, 3.2].forEach((bayX) => {
+      const walnutBackPanel = new THREE.Mesh(
+        new THREE.BoxGeometry(2.88, 4.95, 0.14),
+        walnutMat,
+      );
+      walnutBackPanel.position.set(bayX, 0.72, -1.38);
+      vaultGroup.add(walnutBackPanel);
+
+      // Warm LED Cove Strip at top of each Walnut Bay
+      const bayLed = new THREE.Mesh(
+        new THREE.BoxGeometry(2.76, 0.035, 0.08),
+        new THREE.MeshBasicMaterial({ color: 0xffe0a6 }),
+      );
+      bayLed.position.set(bayX, 3.12, -1.24);
+      vaultGroup.add(bayLed);
+    });
+
     [-4.8, -1.6, 1.6, 4.8].forEach((px) => {
       const pilaster = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, 5.4, 0.85),
+        new THREE.BoxGeometry(0.22, 5.4, 0.88),
         whiteLacquerMat,
       );
       pilaster.position.set(px, 0.85, -1.15);
       vaultGroup.add(pilaster);
 
       const brassTrim = new THREE.Mesh(
-        new THREE.BoxGeometry(0.025, 5.4, 0.04),
+        new THREE.BoxGeometry(0.04, 5.4, 0.06),
         brassMat,
       );
-      brassTrim.position.set(px, 0.85, -0.72);
+      brassTrim.position.set(px, 0.85, -0.7);
       vaultGroup.add(brassTrim);
     });
 
     const upperShelf = new THREE.Mesh(
-      new THREE.BoxGeometry(10.2, 0.08, 0.82),
-      whiteLacquerMat,
+      new THREE.BoxGeometry(10.2, 0.09, 0.86),
+      walnutMat,
     );
-    upperShelf.position.set(0, 2.25, -1.12);
+    upperShelf.position.set(0, 2.25, -1.1);
     vaultGroup.add(upperShelf);
 
-    const ledStrip = new THREE.Mesh(
-      new THREE.BoxGeometry(10.0, 0.02, 0.06),
-      new THREE.MeshBasicMaterial({ color: 0xffedd5 }),
+    const upperShelfBrassLip = new THREE.Mesh(
+      new THREE.BoxGeometry(10.22, 0.03, 0.04),
+      brassMat,
     );
-    ledStrip.position.set(0, 2.2, -0.78);
+    upperShelfBrassLip.position.set(0, 2.25, -0.66);
+    vaultGroup.add(upperShelfBrassLip);
+
+    const ledStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(10.0, 0.025, 0.06),
+      new THREE.MeshBasicMaterial({ color: 0xffe2ad }),
+    );
+    ledStrip.position.set(0, 2.19, -0.76);
     vaultGroup.add(ledStrip);
 
-    // Signature Hermès Orange Archive Boxes on the upper shelf
+    // Lower Shoe & Leather Archive Shelf along the Back Wall
+    const lowerCredenza = new THREE.Mesh(
+      new THREE.BoxGeometry(10.2, 0.42, 0.88),
+      walnutMat,
+    );
+    lowerCredenza.position.set(0, -1.48, -1.1);
+    vaultGroup.add(lowerCredenza);
+
+    const lowerCredenzaTop = new THREE.Mesh(
+      new THREE.BoxGeometry(10.24, 0.05, 0.9),
+      marbleMat,
+    );
+    lowerCredenzaTop.position.set(0, -1.25, -1.09);
+    vaultGroup.add(lowerCredenzaTop);
+
+    // Sculpted 3D Leather Chelsea Boots & Loafers on the Lower Credenza
+    const leatherDarkMat = new THREE.MeshStandardMaterial({
+      color: 0x2b1d16,
+      roughness: 0.28,
+      metalness: 0.08,
+    });
+    const leatherCognacMat = new THREE.MeshStandardMaterial({
+      color: 0x8c4a27,
+      roughness: 0.32,
+      metalness: 0.08,
+    });
+    [-3.6, -2.7, 2.7, 3.6].forEach((shoeX, sIdx) => {
+      const pairGroup = new THREE.Group();
+      pairGroup.position.set(shoeX, -1.22, -0.98);
+      const shoeMat = sIdx % 2 === 0 ? leatherDarkMat : leatherCognacMat;
+      [-0.11, 0.11].forEach((offsetX) => {
+        const bootShaft = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.055, 0.065, 0.22, 12),
+          shoeMat,
+        );
+        bootShaft.position.set(offsetX, 0.11, -0.04);
+        pairGroup.add(bootShaft);
+
+        const bootVamp = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.08, 0.28),
+          shoeMat,
+        );
+        bootVamp.position.set(offsetX, 0.04, 0.04);
+        pairGroup.add(bootVamp);
+
+        const brassHeelAccent = new THREE.Mesh(
+          new THREE.BoxGeometry(0.122, 0.02, 0.09),
+          brassMat,
+        );
+        brassHeelAccent.position.set(offsetX, 0.01, -0.05);
+        pairGroup.add(brassHeelAccent);
+      });
+      vaultGroup.add(pairGroup);
+    });
+
+    // Signature Hermès Orange Archive Boxes & Folded Cashmere Stacks on the upper shelf
     [-3.2, 0.0, 3.2].forEach((boxX, idx) => {
       const boxGroup = new THREE.Group();
-      boxGroup.position.set(boxX, 2.41, -1.08);
+      boxGroup.position.set(boxX, 2.42, -1.06);
       boxGroup.rotation.y = idx % 2 === 0 ? 0.08 : -0.12;
 
       const boxBody = new THREE.Mesh(
-        new THREE.BoxGeometry(0.68, 0.24, 0.48),
+        new THREE.BoxGeometry(0.72, 0.26, 0.5),
         hermesMat,
       );
       boxGroup.add(boxBody);
 
       const boxLid = new THREE.Mesh(
-        new THREE.BoxGeometry(0.71, 0.05, 0.51),
+        new THREE.BoxGeometry(0.75, 0.055, 0.53),
         hermesMat,
       );
-      boxLid.position.y = 0.11;
+      boxLid.position.y = 0.12;
       boxGroup.add(boxLid);
 
       const ribbon = new THREE.Mesh(
-        new THREE.BoxGeometry(0.04, 0.26, 0.52),
+        new THREE.BoxGeometry(0.045, 0.28, 0.54),
         walnutMat,
       );
       boxGroup.add(ribbon);
@@ -780,12 +1016,35 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
       vaultGroup.add(boxGroup);
     });
 
-    // Calacatta Gold Marble Center Plinth Island
+    // Multi-Layer Folded Cashmere Knit Stacks between the archive boxes
+    [-1.6, 1.6].forEach((stackX) => {
+      const stackColors = [0xc8ae8d, 0xdfd2bc, 0x2c3038];
+      stackColors.forEach((colHex, layerIdx) => {
+        const knitLayer = new THREE.Mesh(
+          new THREE.BoxGeometry(0.56, 0.075, 0.42),
+          new THREE.MeshStandardMaterial({
+            color: colHex,
+            roughness: 0.82,
+            bumpMap: fabricBump,
+            bumpScale: 0.008,
+          }),
+        );
+        knitLayer.position.set(
+          stackX,
+          2.33 + layerIdx * 0.08,
+          -1.06,
+        );
+        knitLayer.rotation.y = (layerIdx - 1) * 0.05;
+        vaultGroup.add(knitLayer);
+      });
+    });
+
+    // Calacatta Gold Marble Center Plinth Island + Sculpted 3D Luxury Props
     const islandGroup = new THREE.Group();
-    islandGroup.position.set(0, -1.38, 1.45);
+    islandGroup.position.set(0, -1.36, 1.55);
 
     const marblePlinth = new THREE.Mesh(
-      new THREE.BoxGeometry(3.8, 0.72, 1.25),
+      new THREE.BoxGeometry(3.9, 0.74, 1.32),
       marbleMat,
     );
     marblePlinth.castShadow = !isSoftwareGl;
@@ -793,20 +1052,189 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
     islandGroup.add(marblePlinth);
 
     const brassBasePlinth = new THREE.Mesh(
-      new THREE.BoxGeometry(3.68, 0.08, 1.15),
+      new THREE.BoxGeometry(3.76, 0.09, 1.2),
       brassMat,
     );
     brassBasePlinth.position.y = -0.39;
     islandGroup.add(brassBasePlinth);
 
+    const brassTopInlay = new THREE.Mesh(
+      new THREE.BoxGeometry(3.92, 0.025, 1.34),
+      brassMat,
+    );
+    brassTopInlay.position.y = 0.22;
+    islandGroup.add(brassTopInlay);
+
+    // Composite 5-Part Sculpted Hermès Saddlery Leather Weekender Duffle on the Marble Island
+    const bagGroup = new THREE.Group();
+    bagGroup.position.set(-0.85, 0.54, 0.04);
+    bagGroup.rotation.y = 0.24;
+    const bagBody = new THREE.Mesh(
+      new THREE.BoxGeometry(0.68, 0.34, 0.34),
+      leatherCognacMat,
+    );
+    bagGroup.add(bagBody);
+    const bagFlap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.08, 0.36),
+      leatherDarkMat,
+    );
+    bagFlap.position.y = 0.15;
+    bagGroup.add(bagFlap);
+    const bagClasp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.09, 0.38),
+      brassMat,
+    );
+    bagClasp.position.y = 0.08;
+    bagGroup.add(bagClasp);
+    [-0.14, 0.14].forEach((hx) => {
+      const handleArch = new THREE.Mesh(
+        new THREE.TorusGeometry(0.09, 0.016, 10, 20, Math.PI),
+        leatherDarkMat,
+      );
+      handleArch.position.set(hx, 0.19, 0);
+      bagGroup.add(handleArch);
+    });
+    islandGroup.add(bagGroup);
+
+    // Valet Tray + Brass Chronograph Display Case on Island Right
     const valetTray = new THREE.Mesh(
-      new THREE.BoxGeometry(0.52, 0.04, 0.36),
+      new THREE.BoxGeometry(0.62, 0.045, 0.42),
       hermesMat,
     );
-    valetTray.position.set(0.95, 0.38, 0.1);
+    valetTray.position.set(0.95, 0.39, 0.08);
     islandGroup.add(valetTray);
 
+    const watchPillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.09, 0.11, 16),
+      brassMat,
+    );
+    watchPillar.position.set(0.85, 0.45, 0.08);
+    islandGroup.add(watchPillar);
+
     vaultGroup.add(islandGroup);
+
+    // Left & Right 3D Architectural Wing Bays (Surrounding Walk-In Closet Walls, Secondary Hanging Rails & Alcoves)
+    const sideWings: THREE.Group[] = [];
+    [-5.25, 5.25].forEach((wingX) => {
+      const isLeft = wingX < 0;
+      const wingGroup = new THREE.Group();
+      wingGroup.position.set(wingX, 0.65, 0.65);
+      wingGroup.rotation.y = isLeft ? Math.PI / 2.35 : -Math.PI / 2.35;
+
+      const wingPanel = new THREE.Mesh(
+        new THREE.BoxGeometry(4.6, 5.2, 0.28),
+        stoneWallMat,
+      );
+      wingGroup.add(wingPanel);
+
+      const walnutAlcove = new THREE.Mesh(
+        new THREE.BoxGeometry(3.5, 3.8, 0.36),
+        walnutMat,
+      );
+      walnutAlcove.position.set(0, 0.05, 0.08);
+      wingGroup.add(walnutAlcove);
+
+      const brassFrame = new THREE.Mesh(
+        new THREE.BoxGeometry(3.64, 0.05, 0.42),
+        brassMat,
+      );
+      brassFrame.position.set(0, 1.95, 0.12);
+      wingGroup.add(brassFrame);
+
+      const wingLed = new THREE.Mesh(
+        new THREE.BoxGeometry(3.4, 0.03, 0.08),
+        new THREE.MeshBasicMaterial({ color: 0xffe2ad }),
+      );
+      wingLed.position.set(0, 1.88, 0.28);
+      wingGroup.add(wingLed);
+
+      // Secondary 3D Brushed-Brass Wing Hanging Rail + Hanging 3D Archive Garments
+      const wingRail = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.032, 0.032, 3.2, 16),
+        brassMat,
+      );
+      wingRail.rotation.z = Math.PI / 2;
+      wingRail.position.set(0, 1.25, 0.38);
+      wingGroup.add(wingRail);
+
+      // Upper Wing Shelf + Hermès Boxes
+      const wingUpperShelf = new THREE.Mesh(
+        new THREE.BoxGeometry(3.45, 0.06, 0.44),
+        whiteLacquerMat,
+      );
+      wingUpperShelf.position.set(0, 1.48, 0.24);
+      wingGroup.add(wingUpperShelf);
+
+      [-0.85, 0.85].forEach((sx) => {
+        const stackBox = new THREE.Mesh(
+          new THREE.BoxGeometry(0.68, 0.24, 0.42),
+          isLeft ? hermesMat : leatherCognacMat,
+        );
+        stackBox.position.set(sx, 1.63, 0.28);
+        wingGroup.add(stackBox);
+      });
+
+      sideWings.push(wingGroup);
+      vaultGroup.add(wingGroup);
+    });
+
+    // Full-Length Beveled Brass Floor Mirror on Left Forefront
+    const mirrorGroup = new THREE.Group();
+    mirrorGroup.position.set(-4.15, 0.05, 1.72);
+    mirrorGroup.rotation.y = 0.52;
+    const mirrorFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.32, 3.3, 0.09),
+      brassMat,
+    );
+    mirrorGroup.add(mirrorFrame);
+    const mirrorGlass = new THREE.Mesh(
+      new THREE.BoxGeometry(1.18, 3.16, 0.1),
+      chromeMat,
+    );
+    mirrorGroup.add(mirrorGlass);
+    vaultGroup.add(mirrorGroup);
+
+    // Luxury Walnut & Alabaster Valet Bench on Right Forefront
+    const benchGroup = new THREE.Group();
+    benchGroup.position.set(3.95, -1.28, 1.72);
+    benchGroup.rotation.y = -0.46;
+    const benchCushion = new THREE.Mesh(
+      new THREE.BoxGeometry(1.72, 0.2, 0.66),
+      whiteLacquerMat,
+    );
+    benchCushion.position.y = 0.24;
+    benchGroup.add(benchCushion);
+    const benchBase = new THREE.Mesh(
+      new THREE.BoxGeometry(1.62, 0.14, 0.58),
+      walnutMat,
+    );
+    benchBase.position.y = 0.08;
+    benchGroup.add(benchBase);
+    [-0.68, 0.68].forEach((legX) => {
+      const leg = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.36, 0.52),
+        brassMat,
+      );
+      leg.position.set(legX, -0.14, 0);
+      benchGroup.add(leg);
+    });
+    vaultGroup.add(benchGroup);
+
+    // Overhead Recessed Ceiling Coffer & Brass Skylight Frame
+    const ceilingCoffer = new THREE.Mesh(
+      new THREE.BoxGeometry(12.4, 0.16, 5.8),
+      walnutMat,
+    );
+    ceilingCoffer.position.set(0, 3.32, 0.2);
+    vaultGroup.add(ceilingCoffer);
+
+    const ceilingBrassFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(12.46, 0.05, 5.86),
+      brassMat,
+    );
+    ceilingBrassFrame.position.set(0, 3.23, 0.2);
+    vaultGroup.add(ceilingBrassFrame);
+
     vaultGroup.visible = viewModeRef.current === 'vault';
     scene.add(vaultGroup);
 
@@ -854,7 +1282,8 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
       }
 
       const processImg = (img: HTMLImageElement) => {
-        if (g.cutoutSource) {
+        if (halted) return;
+        if (g.cutoutSource || srcUrl.startsWith('data:image/')) {
           const tex = createDirectCutoutTexture(img, renderer);
           cutoutTextureCache.set(cacheKey, tex);
           applyCb(tex);
@@ -882,10 +1311,11 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
+        if (halted) return;
         imageCache.set(srcUrl, img);
         processImg(img);
       };
-      img.onerror = () => onLoadFailed();
+      img.onerror = () => { if (!halted) onLoadFailed(); };
       img.src = srcUrl;
     };
 
@@ -924,7 +1354,17 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
     const rebuildGarmentMeshes = () => {
       while (garmentsContainer.children.length > 0) {
-        garmentsContainer.remove(garmentsContainer.children[0]);
+        const prior = garmentsContainer.children[0];
+        const materials = new Set<THREE.Material>();
+        prior.traverse((node) => {
+          if (!(node instanceof THREE.Mesh)) return;
+          node.geometry.dispose();
+          for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+            if (material !== brassMat && material !== chromeMat) materials.add(material);
+          }
+        });
+        materials.forEach((material) => material.dispose());
+        garmentsContainer.remove(prior);
       }
       simItems = [];
 
@@ -1048,7 +1488,40 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
     let glideFromLookAt = new THREE.Vector3(0, 0.36, 0);
     let lastTrackedSelectedId: string | null = selectedIdRef.current;
 
+    let orbitAzimuth = viewModeRef.current === 'vault' ? -0.52 : 0;
+    let orbitPolar = viewModeRef.current === 'vault' ? 0.24 : 0.04;
+    let orbitDirection = 1;
+    let orbitDistance = viewModeRef.current === 'vault' ? 8.95 : 7.85;
+    const applyPreset = (preset: CameraAnglePreset, notify = true) => {
+      const positions: Record<CameraAnglePreset, [number, number, number]> = {
+        front: [0, 0.04, 7.85], orbit3d: [-0.52, 0.24, 8.95],
+        leftWing: [-0.82, 0.18, 8.65], rightWing: [0.82, 0.18, 8.65], overhead: [0, 0.58, 9.6],
+      };
+      [orbitAzimuth, orbitPolar, orbitDistance] = positions[preset];
+      cameraPresetRef.current = preset;
+      dragModeRef.current = preset === 'front' ? 'sweep' : 'orbit';
+      autoOrbitRef.current = false;
+      setCameraPreset(preset);
+      setDragMode(dragModeRef.current);
+      setAutoOrbit(false);
+      const mode = preset === 'front' ? 'rail' : 'vault';
+      viewModeRef.current = mode;
+      if (notify) onViewModeChangeRef.current?.(mode);
+      glideFromOffset = railOffsetRef.current;
+      glideToOffset = railOffsetRef.current;
+      glideFromCamPos.copy(camera.position);
+      glideFromLookAt.copy(_currentLookAt);
+      glideStartTime = performance.now();
+      glideActive = true;
+      requestRender();
+    };
+    setCameraPresetOrbitRef.current = applyPreset;
+
     const triggerSelectionGlide = (newSelectedId: string | null) => {
+      if (newSelectedId) {
+        autoOrbitRef.current = false;
+        setAutoOrbit(false);
+      }
       const list = garmentsRef.current;
       const idx = newSelectedId
         ? list.findIndex((g) => g.id === newSelectedId)
@@ -1179,25 +1652,42 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
       }
 
       let stillMoving = false;
-      const isVault = viewModeRef.current === 'vault';
+      const hasSelection = Boolean(selectedIdRef.current);
+      const isVault = viewModeRef.current === 'vault' || cameraPresetRef.current !== 'front';
       vaultGroup.visible = isVault;
       contactShadowPlane.visible = !isVault;
-
-      const targetBg = isVault ? 0xfaf8f5 : 0xffffff;
-      (scene.background as THREE.Color).setHex(targetBg);
-
-      const hasSelection = Boolean(selectedIdRef.current);
-      // Shift camera slightly right when inspection drawer is open on desktop so the rail stays centered in the left canvas
-      const drawerOffsetX = hasSelection ? 1.18 : 0;
-
-      if (isVault) {
-        _camTargetPos.set(drawerOffsetX, hasSelection ? 0.52 : 0.62, hasSelection ? 8.0 : 9.2);
-        _camLookAt.set(drawerOffsetX, hasSelection ? 0.28 : 0.25, 0);
+      (scene.background as THREE.Color).setHex(isVault ? 0xfaf8f5 : 0xffffff);
+      const drawerOffsetX = hasSelection && container.clientWidth >= 768 ? 1.18 : 0;
+      if (autoOrbitRef.current && document.querySelector('[role="dialog"]')) {
+        autoOrbitRef.current = false;
+        setAutoOrbit(false);
+      }
+      if (autoOrbitRef.current && !hasSelection) {
+        orbitAzimuth += dt * 0.22 * orbitDirection;
+        if (Math.abs(orbitAzimuth) >= 1.1) {
+          orbitAzimuth = THREE.MathUtils.clamp(orbitAzimuth, -1.1, 1.1);
+          orbitDirection *= -1;
+        }
+        stillMoving = true;
+      }
+      // A selected piece always faces the viewer; closing it restores the chosen room angle.
+      if (isVault && !hasSelection) {
+        const cosPitch = Math.cos(orbitPolar);
+        _camTargetPos.set(Math.sin(orbitAzimuth) * cosPitch * orbitDistance,
+          0.25 + Math.sin(orbitPolar) * orbitDistance,
+          Math.cos(orbitAzimuth) * cosPitch * orbitDistance);
+        _camLookAt.set(0, 0.25, 0);
       } else {
-        // Dolly camera gracefully closer when a garment is selected
         _camTargetPos.set(drawerOffsetX, hasSelection ? 0.38 : 0.45, hasSelection ? 6.95 : 7.85);
         _camLookAt.set(drawerOffsetX, hasSelection ? 0.32 : 0.34, 0);
       }
+
+      // Open the near wall and ceiling for architectural cut-away views instead of hiding the clothes.
+      ceilingCoffer.visible = _camTargetPos.y < 3.0;
+      ceilingBrassFrame.visible = ceilingCoffer.visible;
+      sideWings.forEach((wing) => {
+        wing.visible = !(Math.sign(wing.position.x) === Math.sign(_camTargetPos.x) && Math.abs(_camTargetPos.x) > 4.5);
+      });
 
       if (glideActive) {
         const rawT = Math.min(1, (now - glideStartTime) / glideDurationMs);
@@ -1408,6 +1898,10 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
     let isDragging = false;
     let dragStartX = 0;
+    let dragStartY = 0;
+    let dragOrbit = false;
+    let startAzimuth = 0;
+    let startPolar = 0;
     let lastPointerX = 0;
     let lastPointerTime = performance.now();
     let dragStartOffset = 0;
@@ -1474,6 +1968,20 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
     const onPointerDown = (e: PointerEvent) => {
       isDragging = true;
+      dragOrbit = !selectedIdRef.current && (dragModeRef.current === 'orbit' || e.shiftKey || e.button === 2);
+      dragStartY = e.clientY;
+      startAzimuth = orbitAzimuth;
+      startPolar = orbitPolar;
+      if (dragOrbit) {
+        autoOrbitRef.current = false;
+        setAutoOrbit(false);
+        if (cameraPresetRef.current === 'front') {
+          cameraPresetRef.current = 'orbit3d';
+          setCameraPreset('orbit3d');
+          viewModeRef.current = 'vault';
+          onViewModeChangeRef.current?.('vault');
+        }
+      }
       glideActive = false;
       railMomentumVel = 0;
       dragStartX = e.clientX;
@@ -1493,6 +2001,14 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
         lastPointerTime = now;
 
         const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        if (dragOrbit) {
+          pointerMovedDist = Math.max(pointerMovedDist, Math.hypot(dx, dy));
+          orbitAzimuth = THREE.MathUtils.clamp(startAzimuth - dx * 0.005, -1.25, 1.25);
+          orbitPolar = THREE.MathUtils.clamp(startPolar + dy * 0.004, -0.08, 0.7);
+          requestRender();
+          return;
+        }
         pointerMovedDist = Math.max(pointerMovedDist, Math.abs(dx));
         const nextOffset = THREE.MathUtils.clamp(
           dragStartOffset - dx * 0.0075,
@@ -1559,6 +2075,11 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
     const onWheel = (e: WheelEvent) => {
       glideActive = false;
+      if (!selectedIdRef.current && (dragModeRef.current === 'orbit' || e.shiftKey)) {
+        orbitDistance = THREE.MathUtils.clamp(orbitDistance + e.deltaY * 0.008, 5.2, 11.2);
+        requestRender();
+        return;
+      }
       const delta =
         Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
       const nextOffset = THREE.MathUtils.clamp(
@@ -1596,10 +2117,20 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (
-        document.activeElement?.tagName === 'INPUT' ||
-        document.activeElement?.tagName === 'SELECT'
+        e.defaultPrevented || document.querySelector('[role="dialog"]') ||
+        (document.activeElement instanceof HTMLElement && (document.activeElement.isContentEditable ||
+          ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)))
       ) {
         return;
+      }
+      if (!selectedIdRef.current && cameraPresetRef.current !== 'front' && ['w','a','s','d'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        autoOrbitRef.current = false; setAutoOrbit(false); glideActive = false;
+        if (e.key.toLowerCase() === 'a') orbitAzimuth = Math.max(-1.25, orbitAzimuth - 0.12);
+        if (e.key.toLowerCase() === 'd') orbitAzimuth = Math.min(1.25, orbitAzimuth + 0.12);
+        if (e.key.toLowerCase() === 'w') orbitDistance = Math.max(5.2, orbitDistance - 0.3);
+        if (e.key.toLowerCase() === 's') orbitDistance = Math.min(11.2, orbitDistance + 0.3);
+        requestRender(); return;
       }
       if (e.key === 'Escape' && selectedIdRef.current !== null) {
         onSelectRef.current(null);
@@ -1632,6 +2163,24 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
       domElem.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('keydown', onKeyDown);
+      const materials = new Set<THREE.Material>();
+      const textures = new Set<THREE.Texture>(cutoutTextureCache.values());
+      scene.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return;
+        node.geometry.dispose();
+        for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+          materials.add(material);
+          for (const value of Object.values(material)) if (value instanceof THREE.Texture) textures.add(value);
+        }
+      });
+      if (scene.environment) textures.add(scene.environment);
+      textures.forEach((texture) => texture.dispose());
+      materials.forEach((material) => material.dispose());
+      imageCache.clear();
+      cutoutTextureCache.clear();
+      requestRenderRef.current = () => {};
+      rebuildGarmentsRef.current = () => {};
+      setCameraPresetOrbitRef.current = () => {};
       renderer.dispose();
     };
   }, [armed]);
@@ -1643,6 +2192,11 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
   useEffect(() => {
     requestRenderRef.current();
   }, [selectedId, viewMode, railOffset]);
+
+  useEffect(() => {
+    const target = viewMode === 'rail' ? 'front' : (cameraPresetRef.current === 'front' ? 'orbit3d' : cameraPresetRef.current);
+    if (target !== cameraPresetRef.current) setCameraPresetOrbitRef.current(target);
+  }, [viewMode, armed]);
 
   const hoveredGarment = hoveredId
     ? garments.find((g) => g.id === hoveredId) ?? null
@@ -1656,9 +2210,12 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
 
   return (
     <div
+      ref={viewportRef}
       className="relative w-full h-full select-none overflow-hidden bg-white"
       data-testid="boutique-rail-viewport"
       data-view-mode={viewMode}
+      data-camera-preset={cameraPreset}
+      data-auto-orbit={autoOrbit ? 'on' : 'off'}
       data-rotation-heatmap={showRotationHeatmap ? 'on' : 'off'}
       data-rail-stage={railStage}
       data-cutouts-ready={`${cutoutsReady.ready}/${cutoutsReady.total}`}
@@ -1677,12 +2234,24 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
         </div>
       )}
 
+      {!selectedId && railStage === 'ready' && (
+        <div style={{ bottom: cameraControlsBottom }} className="absolute bottom-[260px] md:bottom-[220px] left-3 right-3 z-20 flex justify-center pointer-events-none">
+          <div role="group" aria-label="3D camera controls" data-testid="rail-camera-controls" className="pointer-events-auto flex max-w-full overflow-x-auto items-center gap-1 rounded-xl border border-[#E7E2DA] bg-white/95 p-1.5 shadow-sm">
+            {([['front','Front Rail'],['orbit3d','3D Walk-Around'],['leftWing','Left Wing'],['rightWing','Right Wing'],['overhead','Overhead']] as const).map(([preset,label]) => (
+              <button key={preset} type="button" aria-pressed={cameraPreset === preset} onClick={() => setCameraPresetOrbitRef.current(preset)} className={`shrink-0 min-h-11 px-3 rounded-lg text-xs font-medium ${cameraPreset === preset ? 'bg-[#141413] text-white' : 'text-[#57534E] hover:bg-[#F5F2ED]'} focus-visible:outline-2 focus-visible:outline-[#C65E28]`}>{label}</button>
+            ))}
+            <button type="button" aria-pressed={dragMode === 'orbit'} onClick={() => { const next = dragModeRef.current === 'sweep' ? 'orbit' : 'sweep'; dragModeRef.current = next; setDragMode(next); }} className="shrink-0 min-h-11 px-3 rounded-lg text-xs border border-[#E7E2DA]">Drag: {dragMode === 'orbit' ? 'Orbit' : 'Sweep'}</button>
+            <button type="button" aria-pressed={autoOrbit} onClick={() => { const next = !autoOrbitRef.current; if (next && cameraPresetRef.current === 'front') setCameraPresetOrbitRef.current('orbit3d'); autoOrbitRef.current = next; setAutoOrbit(next); requestRenderRef.current(); }} className={`shrink-0 min-h-11 px-3 rounded-lg text-xs ${autoOrbit ? 'bg-[#FFF3EB] text-[#9A3412]' : 'border border-[#E7E2DA]'}`}>Auto orbit</button>
+          </div>
+        </div>
+      )}
+
       {/* Rotation Heatmap Legend Plaque (Subtle Cool Blue -> Hot Orange Scale) */}
-      {showRotationHeatmap && showHangTags && (
+      {showRotationHeatmap && showHangTags && !selectedId && (
         <div
           data-testid="rotation-heatmap-legend"
           style={{
-            right: selectedId ? '500px' : '24px',
+            right: '24px',
           }}
           className="pointer-events-none hidden md:flex fixed top-[74px] z-20 bg-white/95 border border-[#E7E2DA] rounded-xl px-3.5 py-2 shadow-sm items-center gap-3 transition-all duration-200"
         >
@@ -1766,8 +2335,8 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
                 }}
                 className={`closer-hang-tag pointer-events-auto absolute top-0 left-0 transition-transform duration-150 px-2.5 py-1 rounded-md shadow-sm border text-left whitespace-nowrap overflow-hidden ${
                   tag.isSelected
-                    ? `bg-[#F37021] text-white scale-110 z-20 shadow-md ${
-                        noPrice ? 'border-dashed border-white/80' : 'border-[#F37021]'
+                    ? `bg-[#FFF3EB] text-[#7C2D12] scale-110 z-20 shadow-md ${
+                        noPrice ? 'border-dashed border-[#C65E28]' : 'border-[#C65E28]'
                       }`
                     : tag.isSample
                       ? 'bg-[#FAF8F5] text-[#57534E] border-dashed border-[#C5A572] hover:border-[#F37021]'
@@ -1818,7 +2387,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
                 </div>
                 <div
                   className={`text-[9px] leading-tight flex items-center gap-1 ${
-                    tag.isSelected ? 'text-white/90' : 'text-[#8C857B]'
+                    tag.isSelected ? 'text-[#7C2D12]' : 'text-[#8C857B]'
                   }`}
                   style={
                     useHeatStyle
@@ -1880,7 +2449,7 @@ export const BoutiqueRail3D: React.FC<BoutiqueRail3DProps> = ({
             top: hoveredTag ? `${Math.max(82, hoveredTag.y - 98)}px` : '120px',
             transform: 'translate(-50%, -50%)',
           }}
-          className="pointer-events-none fixed z-30 w-64 bg-white/98 border border-[#F37021]/60 rounded-xl shadow-xl p-2.5 flex items-center gap-2.5 transition-opacity duration-150"
+          className="pointer-events-none hidden md:flex fixed z-30 w-64 bg-white/98 border border-[#F37021]/60 rounded-xl shadow-xl p-2.5 items-center gap-2.5 transition-opacity duration-150"
         >
           <div className="w-14 h-16 rounded-lg bg-[#FAF8F5] border border-[#E7E2DA] overflow-hidden shrink-0 flex items-center justify-center">
             {hoveredGarment.frontImageUrl || hoveredGarment.imageUrl ? (

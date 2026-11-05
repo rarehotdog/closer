@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test server/scan.test.ts server/routes.test.ts src/utils/ledgerLogic.test.ts src/utils/tiles.test.ts src/components/InspectorLogic.test.ts src/utils/tagForms.test.ts src/utils/review.test.ts",
+    "test": "tsx --test server/scan.test.ts server/routes.test.ts src/utils/ledgerLogic.test.ts src/utils/tiles.test.ts src/components/InspectorLogic.test.ts src/utils/tagForms.test.ts src/utils/review.test.ts server/accounts.test.ts src/utils/accountWardrobe.test.ts server/staticPrivacy.test.ts",
     "live:scan": "tsx scripts/live_scan_check.ts"
   },
   "dependencies": {

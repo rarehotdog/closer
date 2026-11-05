@@ -16,6 +16,8 @@ jobs:
           cache: npm
           cache-dependency-path: apps/rail-studio/package-lock.json
       - run: npm ci
+        working-directory: .
+      - run: npm ci
       - run: npm run lint
       - run: npm test
       - run: npm run build

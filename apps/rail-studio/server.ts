@@ -10,6 +10,8 @@ import { createRealTransport, type Transport } from './server/closer/adapters/tr
 import { EST_MICRO_USD } from './server/closer/adapters/responses.ts';
 import { createFakeMetaTransport } from './server/fakeMeta.ts';
 import { scanPhoto } from './server/scan.ts';
+import { createAccountRouter, type AccountRouterOptions } from './server/accountRouter.ts';
+import { accountDatabasePath, isPrivateFileRequest } from './server/privateFiles.ts';
 
 export type ScanMode = 'live' | 'fake' | 'no_key' | 'off';
 
@@ -51,9 +53,32 @@ function transportFor(mode: ScanMode): Transport | null {
   return null;
 }
 
-export function createApp() {
+export function createApp(accountOptions?: AccountRouterOptions) {
   const app = express();
   app.disable('x-powered-by');
+  const databasePath = accountOptions?.dbPath ?? accountDatabasePath();
+  app.use((req, res, next) => {
+    if (isPrivateFileRequest(req.originalUrl, databasePath)) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(404).end();
+      return;
+    }
+    next();
+  });
+
+  // Open the account database only when this surface is used. Scan-only tests
+  // do not create or borrow another app's database.
+  let accountRoutes: ReturnType<typeof createAccountRouter> | undefined;
+  app.use('/api/account', (req, res, next) => {
+    accountRoutes ??= createAccountRouter(accountOptions ?? {
+      dbPath: databasePath,
+      cookieName: env.CLOSER_ACCOUNT_COOKIE ?? 'closer_rail_acct',
+      secureCookies: env.CLOSER_ACCOUNT_COOKIE_SECURE === '1',
+      allowedOrigins: env.CLOSER_APP_ORIGIN ? env.CLOSER_APP_ORIGIN.split(',').map(value => value.trim()).filter(Boolean) : undefined,
+    });
+    accountRoutes.router(req, res, next);
+  });
+  app.locals.closeAccounts = () => { accountRoutes?.close(); accountRoutes = undefined; };
 
   app.get('/api/scan/status', (_req, res) => {
     res.json({ mode: scanMode(), models: { spark: 'muse-spark-1.3', sam: 'sam-3.1' }, scans, spentMicroUsd, capMicroUsd });
@@ -93,6 +118,7 @@ async function main() {
   const app = createApp();
   const port = Number(env.PORT ?? 3000);
   const http = createHttpServer(app);
+  http.on('close', () => app.locals.closeAccounts());
   if (env.NODE_ENV === 'production') {
     const dist = join(process.cwd(), 'dist');
     if (!existsSync(dist)) throw new Error('dist/ is missing: run npm run build first');

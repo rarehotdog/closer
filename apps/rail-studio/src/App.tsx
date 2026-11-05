@@ -8,8 +8,9 @@ import {
   RotateCcw,
   Share2,
   SlidersHorizontal,
+  UserRound,
 } from 'lucide-react';
-import { INITIAL_GARMENTS, TARGET_LOOKS } from './data/seedCloset';
+import { TARGET_LOOKS } from './data/seedCloset';
 import { GarmentPiece, ResalePlatform } from './types/closet';
 import {
   computeLedgerSummary,
@@ -34,55 +35,37 @@ import {
 import { ScanPhotoModal } from './components/ScanPhotoModal';
 import { ReviewMode } from './components/ReviewMode';
 import { reviewCandidates } from './utils/review';
+import { useAccountWardrobe } from './hooks/useAccountWardrobe';
+import { AccountPanel } from './components/AccountPanel';
+import { MarketPulse } from './components/MarketPulse';
+import { isPersonalPiece } from './utils/accountWardrobe';
+import { preparePiecePhotos, preparePhotoUrl } from './utils/photoUpload';
 
 type FilterTab = 'all' | 'KRW' | 'USD' | 'sell' | 'today';
 
-// Pieces added from a photo scan (ids starting with "scan-") are kept in this browser
-// (localStorage) so a reload keeps them, with any decision saved on them. The sample closet
-// itself is never stored: it starts from the seed on every load, and decisions on it reset.
-const SCANNED_KEY = 'closer.scannedPieces.v1';
-function loadScannedPieces(): GarmentPiece[] {
-  try {
-    const raw = window.localStorage.getItem(SCANNED_KEY);
-    const list = raw ? (JSON.parse(raw) as unknown) : [];
-    if (!Array.isArray(list)) return [];
-    return list.filter(
-      (g): g is GarmentPiece =>
-        !!g && typeof g === 'object' && typeof (g as GarmentPiece).id === 'string' && (g as GarmentPiece).id.startsWith('scan-') &&
-        typeof (g as GarmentPiece).code === 'string' && Array.isArray((g as GarmentPiece).observations) &&
-        !!(g as GarmentPiece).feeConfig,
-    );
-  } catch {
-    return [];
-  }
-}
-function saveScannedPieces(all: GarmentPiece[]) {
-  try {
-    window.localStorage.setItem(SCANNED_KEY, JSON.stringify(all.filter(isKeptAfterReload)));
-  } catch {
-    // Storage full or blocked: the pieces stay for this visit only.
-  }
+function todayDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 export default function App() {
-  const [garments, setGarments] = useState<GarmentPiece[]>(() =>
-    typeof window === 'undefined' ? INITIAL_GARMENTS : [...INITIAL_GARMENTS, ...loadScannedPieces()],
-  );
-  useEffect(() => {
-    saveScannedPieces(garments);
-  }, [garments]);
-  const [selectedId, setSelectedId] = useState<string | null>(() => {
+  const wardrobe = useAccountWardrobe();
+  const { pieces: garments, controller } = wardrobe;
+  const renderEpoch = wardrobe.epoch;
+  const setGarments = (update: GarmentPiece[] | ((previous: GarmentPiece[]) => GarmentPiece[])) => {
+    if (controller.getSnapshot().epoch === renderEpoch) controller.update(update);
+  };
+  const [accountOpen, setAccountOpen] = useState(false);
+  const privateView = Boolean(wardrobe.account && !wardrobe.sampleView);
+  const activeLooks = privateView ? [] : TARGET_LOOKS;
+  const [initialPieceRequest] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
-    const pieceParam = params.get('piece') || params.get('decide');
-    if (!pieceParam) return null;
-    const found = [...INITIAL_GARMENTS, ...loadScannedPieces()].find(
-      (g) =>
-        g.id.toLowerCase() === pieceParam.toLowerCase() ||
-        g.code.toLowerCase() === pieceParam.toLowerCase(),
-    );
-    return found ? found.id : null;
+    return params.get('piece') || params.get('decide');
   });
+  const [initialPieceResolved, setInitialPieceResolved] = useState(!initialPieceRequest);
+  const initialPieceScope = useRef<string | null | undefined>(undefined);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<SceneViewMode>(() => {
     if (typeof window === 'undefined') return 'rail';
     const params = new URLSearchParams(window.location.search);
@@ -120,6 +103,33 @@ export default function App() {
     return new URLSearchParams(window.location.search).get('scan') === '1';
   });
   const [githubShareOpen, setGithubShareOpen] = useState<boolean>(false);
+  const lastIdentityEpoch = useRef(wardrobe.epoch);
+  useEffect(() => {
+    if (lastIdentityEpoch.current === wardrobe.epoch) return;
+    lastIdentityEpoch.current = wardrobe.epoch;
+    setSelectedId(null); setFilterTab('all'); setRailOffset(0);
+    setLedgerOpen(false); setLooksOpen(false); setAddModalOpen(false);
+    setScanOpen(false); setGithubShareOpen(false); setReviewOpen(false);
+  }, [wardrobe.epoch]);
+
+
+  // Resolve a reload link once the initial session and its wardrobe have finished loading.
+  // The hook starts session lookup before this effect; reading its current snapshot also covers
+  // the first render, whose captured React state still says local/not busy.
+  useEffect(() => {
+    if (initialPieceResolved || !initialPieceRequest) return;
+    const current = controller.getSnapshot();
+    if (current.account && initialPieceScope.current === undefined) initialPieceScope.current = current.account.workspaceId;
+    if (initialPieceScope.current !== undefined && initialPieceScope.current !== (current.account?.workspaceId ?? null)) {
+      setInitialPieceResolved(true);
+      return;
+    }
+    if (current.busy || current.status === 'loading' || current.error) return;
+    const query = initialPieceRequest.toLowerCase();
+    const piece = current.pieces.find(g => g.id.toLowerCase() === query || g.code.toLowerCase() === query);
+    setSelectedId(piece?.id ?? null);
+    setInitialPieceResolved(true);
+  }, [controller, initialPieceRequest, initialPieceResolved, wardrobe.busy, wardrobe.status, wardrobe.error, wardrobe.epoch, garments]);
 
   // Filtered garments displayed on the 3D rail
   const visibleGarments = useMemo(() => {
@@ -147,7 +157,7 @@ export default function App() {
 
   // Sync URL query params for instant live sharing
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !initialPieceResolved) return;
     const url = new URL(window.location.href);
     url.searchParams.set('view', viewMode);
     if (selectedGarment) {
@@ -157,7 +167,7 @@ export default function App() {
       url.searchParams.delete('decide');
     }
     window.history.replaceState({}, '', url.toString());
-  }, [selectedGarment, viewMode]);
+  }, [selectedGarment, viewMode, initialPieceResolved]);
 
   const railTweenRef = useRef<gsap.core.Tween | null>(null);
   const railProxyRef = useRef<{ offset: number }>({ offset: railOffset });
@@ -201,16 +211,18 @@ export default function App() {
   // Select a garment and smoothly ease railOffset via GSAP quint.out so the piece glides dead-center in Front Shot mode
   // Esc steps back one layer at a time: close the inspector, then leave the grid (the review mode
   // and the modals handle their own Esc). Typing in a field is never interrupted.
+  const accountOpenRef = useRef(accountOpen); accountOpenRef.current = accountOpen;
   const scanOpenRef = useRef(scanOpen); scanOpenRef.current = scanOpen;
   const addModalOpenRef = useRef(addModalOpen); addModalOpenRef.current = addModalOpen;
   const githubShareOpenRef = useRef(githubShareOpen); githubShareOpenRef.current = githubShareOpen;
   const looksOpenRef = useRef(looksOpen); looksOpenRef.current = looksOpen;
   const ledgerOpenRef = useRef(ledgerOpen); ledgerOpenRef.current = ledgerOpen;
   const escRef = useRef({ selectedId, gridView, renderFallback, reviewOpen, modalOpen: false });
-  escRef.current = { selectedId, gridView, renderFallback, reviewOpen, modalOpen: ledgerOpen || looksOpen || addModalOpen || githubShareOpen || scanOpen };
+  escRef.current = { selectedId, gridView, renderFallback, reviewOpen, modalOpen: accountOpen || ledgerOpen || looksOpen || addModalOpen || githubShareOpen || scanOpen };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (accountOpenRef.current) { e.preventDefault(); e.stopImmediatePropagation(); setAccountOpen(false); return; }
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       const cur = escRef.current;
@@ -239,6 +251,7 @@ export default function App() {
   }, []);
 
   const handleSelectGarment = (id: string | null) => {
+    setInitialPieceResolved(true);
     if (!id) {
       setSelectedId(null);
       animateRailOffsetTo(0);
@@ -256,8 +269,8 @@ export default function App() {
   const handleSelectGarmentRef = useRef(handleSelectGarment);
   handleSelectGarmentRef.current = handleSelectGarment;
 
-  // Save Keep or Let Go decision in this browser only (React state; scanned pieces also go to
-  // localStorage with the piece). Nothing is sent anywhere. With no ask price passed (a piece with
+  // Save through the current collection: sample/local state or the signed-in account queue.
+  // With no ask price passed (a piece with
   // no price on record), the decision is saved with the latest price seen, else the purchase
   // price, else none (0 = no price at decision).
   const handleSaveDecision = (
@@ -290,7 +303,7 @@ export default function App() {
           lastDecision: {
             id: `d_${shortHash}`,
             choice,
-            savedAt: '2026-11-05',
+            savedAt: todayDate(),
             snapshotPrice,
             snapshotCurrency: g.currency,
             snapshotPlatform,
@@ -316,7 +329,7 @@ export default function App() {
             ...g.observations,
             {
               id: `obs-${Date.now()}`,
-              date: '2026-11-05',
+              date: todayDate(),
               platform,
               price,
               currency: g.currency,
@@ -375,41 +388,33 @@ export default function App() {
 
   // Take a piece that came from a photo scan off the rail (sample pieces stay)
   const handleRemovePiece = (garmentId: string) => {
-    setGarments((prev) => prev.filter((g) => !(g.id === garmentId && isKeptAfterReload(g))));
+    setGarments((prev) => prev.filter((g) => !(g.id === garmentId && (isKeptAfterReload(g) || isPersonalPiece(g)))));
     setSelectedId(null);
   };
 
-  // Hang the pieces confirmed from a photo scan
-  const handleHangScanned = (pieces: GarmentPiece[]) => {
+  // Image preparation can finish after a view or account switch; keep that result in its original scope.
+  const handleHangScanned = async (pieces: GarmentPiece[]) => {
     if (pieces.length === 0) return;
-    setGarments((prev) => [...prev, ...pieces]);
-    setFilterTab('all');
-    setSelectedId(pieces[0].id);
+    try {
+      const prepared = await Promise.all(pieces.map(preparePiecePhotos));
+      if (controller.getSnapshot().epoch !== renderEpoch) return;
+      setGarments(prev => [...prev, ...prepared]);
+      setFilterTab('all'); setSelectedId(prepared[0].id);
+    } catch (error) {
+      if (controller.getSnapshot().epoch === renderEpoch) controller.reportError(error instanceof Error ? error.message : 'Could not prepare the photo.');
+    }
   };
-
-  // Hang a newly added garment onto the 3D rail
-  const handleAddGarment = (newPiece: GarmentPiece) => {
-    setGarments((prev) => [...prev, newPiece]);
-    setFilterTab('all');
-    setSelectedId(newPiece.id);
-  };
-
-  // Replace or upload a photo for an existing garment on the 3D rail. The new photo is the
-  // owner's plain photo (no model call), so any scan cut-out label is dropped with the old image.
-  const handleUpdateGarmentPhoto = (garmentId: string, dataUrl: string) => {
-    setGarments((prev) =>
-      prev.map((g) =>
-        g.id === garmentId
-          ? {
-              ...g,
-              imageUrl: dataUrl,
-              frontImageUrl: dataUrl,
-              cutoutSource: undefined,
-              scanMode: undefined,
-            }
-          : g,
-      ),
-    );
+  const handleAddGarment = (piece: GarmentPiece) => { void handleHangScanned([piece]); };
+  const handleUpdateGarmentPhoto = async (garmentId: string, dataUrl: string) => {
+    try {
+      const prepared = await preparePhotoUrl(dataUrl);
+      if (controller.getSnapshot().epoch !== renderEpoch) return;
+      setGarments(prev => prev.map(g => g.id === garmentId ? {
+        ...g, imageUrl: prepared, frontImageUrl: prepared, cutoutSource: undefined, scanMode: undefined,
+      } : g));
+    } catch (error) {
+      if (controller.getSnapshot().epoch === renderEpoch) controller.reportError(error instanceof Error ? error.message : 'Could not prepare the photo.');
+    }
   };
 
   // Next free "A" code for a piece hung from the upload form (never reuses a code on the rail).
@@ -423,7 +428,7 @@ export default function App() {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-white text-[#141413] flex flex-col">
       {/* Strict 3-Zone Top Bar Contract */}
-      <header className="flex items-center justify-between gap-8 px-6 py-3.5 border-b border-[#E7E2DA] bg-white z-30 shrink-0">
+      <header className="flex items-center justify-between gap-2 lg:gap-8 px-3 sm:px-6 py-3.5 border-b border-[#E7E2DA] bg-white z-30 shrink-0">
         {/* Zone 1: Single text element wordmark */}
         <a
           href="#rail"
@@ -442,7 +447,7 @@ export default function App() {
         {/* Zone 2: 5 concise single-line text navigation links */}
         <nav
           aria-label="Primary"
-          className="hidden md:flex items-center gap-7 text-sm font-medium text-[#57534E]"
+          className="hidden xl:flex items-center gap-7 text-sm font-medium text-[#57534E]"
         >
           <a
             href="#rail"
@@ -507,7 +512,7 @@ export default function App() {
         </nav>
 
         {/* Zone 3: 1 primary action in Hermès Orange */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             data-testid="top-upload-photo-btn"
@@ -515,13 +520,21 @@ export default function App() {
             className="px-4 py-2 text-xs font-semibold text-white bg-[#F37021] rounded-lg hover:bg-[#D95D12] transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Upload Photo &amp; Hang</span>
+            <span className="hidden sm:inline">Upload Photo &amp; Hang</span><span className="sm:hidden">Add photo</span>
+          </button>
+          <button type="button" aria-label={wardrobe.account ? `Account: ${wardrobe.account.handle}` : 'Account · sign in'} onClick={() => { setInitialPieceResolved(true); setAccountOpen(true); }} className="min-h-11 min-w-11 inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#E7E2DA] px-2 text-xs font-medium" title={wardrobe.persistenceNotice}>
+            <UserRound size={17} /><span className="hidden sm:inline">{wardrobe.account ? 'Account' : 'Sign in'}</span>
           </button>
         </div>
       </header>
 
       {/* Main Unobstructed 3D Boutique Viewport */}
       <main className="relative flex-1 w-full overflow-hidden">
+        {wardrobe.error && <div role="alert" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-[60] max-w-[calc(100vw-2rem)] rounded-lg border border-orange-200 bg-white px-3 py-2 text-xs shadow-lg">
+          <span>{wardrobe.error}</span> <button type="button" onClick={() => setAccountOpen(true)} className="font-semibold text-[#9A3412] underline min-h-9 px-2">Account &amp; save</button>
+        </div>}
+        {!selectedId && !gridView && !reviewOpen && <MarketPulse garments={garments} onSelect={handleSelectGarment} demo={wardrobe.sampleView} />}
+
         {/* Top-Left Minimal Boutique Asset Ledger Plaque (Non-occluding) */}
         <div
           className="absolute top-5 left-6 z-20 bg-white/95 border border-[#E7E2DA] rounded-xl px-4 py-3 shadow-sm max-w-[calc(100vw-3rem)] sm:max-w-[25rem]"
@@ -529,7 +542,7 @@ export default function App() {
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] font-medium text-[#8C857B] tracking-wide shrink-0">
-              SAMPLE CLOSET AT A GLANCE
+              {privateView ? 'YOUR CLOSET AT A GLANCE' : 'SAMPLE CLOSET AT A GLANCE'}
             </span>
             <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
               <button
@@ -564,7 +577,7 @@ export default function App() {
             className="text-[10px] text-[#57534E] mt-0.5"
             data-testid="sample-data-notice"
           >
-            Sample data · latest price seen · nothing is listed, posted or paid
+            {privateView ? wardrobe.persistenceNotice : 'Sample data · latest price seen · nothing is listed, posted or paid'}
           </div>
 
           <div className="flex items-baseline gap-3 mt-1">
@@ -670,16 +683,18 @@ export default function App() {
           </div>
         )}
         {visibleGarments.length === 0 ? (
-          <EmptyStage filtered={garments.length > 0} onClearFilter={() => setFilterTab('all')} onStart={() => setScanOpen(true)} />
+          <EmptyStage filtered={garments.length > 0} onClearFilter={() => setFilterTab('all')} onStart={() => setAddModalOpen(true)} />
         ) : gridView ? (
           <ClosetGrid garments={visibleGarments} selectedId={selectedId} onSelect={(id) => handleSelectGarment(id)} />
         ) : (
           <React.Suspense fallback={<div className="absolute inset-0 flex items-center justify-center text-xs text-[#8C857B]">Hanging the rail…</div>}>
             <BoutiqueRail3D
+                key={`scene-${wardrobe.epoch}`}
               garments={visibleGarments}
               selectedId={selectedId}
               onSelectGarment={handleSelectGarment}
               viewMode={viewMode}
+                onViewModeChange={setViewMode}
               railOffset={railOffset}
               onRailOffsetChange={setRailOffset}
               showHangTags={showHangTags}
@@ -694,6 +709,7 @@ export default function App() {
 
         {/* Unified Collapsible Bottom Control Dock (Zero Viewport Occlusion) */}
         <div
+          data-testid="rail-control-dock"
           style={{
             bottom: '20px',
             left: selectedGarment ? 'calc(50% - 230px)' : '50%',
@@ -907,8 +923,10 @@ export default function App() {
 
         {/* Slide-Over Garment Inspection & Keep-or-Sell counted-records board */}
         <GarmentInspectDrawer
+          key={`inspector-${wardrobe.epoch}`}
+          persistenceNotice={privateView ? wardrobe.persistenceNotice : wardrobe.sampleView || !selectedGarment || !isPersonalPiece(selectedGarment) ? 'Sample closet · changes reset on reload' : wardrobe.error ? 'Check the save message before leaving this page' : 'Saved in this browser · sign in for account storage'}
           garment={selectedGarment}
-          looks={TARGET_LOOKS}
+          looks={activeLooks}
           onClose={() => handleSelectGarment(null)}
           onSaveDecision={handleSaveDecision}
           onAddObservation={handleAddObservation}
@@ -936,11 +954,12 @@ export default function App() {
         )}
       </main>
 
-      <ScanPhotoModal isOpen={scanOpen} onClose={() => setScanOpen(false)} garments={garments} onHang={handleHangScanned} />
+      <ScanPhotoModal key={`scan-${wardrobe.epoch}`} isOpen={scanOpen} onClose={() => setScanOpen(false)} garments={garments} onHang={handleHangScanned} />
 
       {/* Modals for Full Asset Ledger, Target Looks, Hang New Piece, and Share link / GitHub command (copy only) */}
       <LedgerModal
         isOpen={ledgerOpen}
+        scope={privateView ? 'account' : wardrobe.sampleView ? 'sample' : 'browser'}
         onClose={() => setLedgerOpen(false)}
         garments={garments}
         summary={ledgerSummary}
@@ -950,17 +969,20 @@ export default function App() {
       <LooksModal
         isOpen={looksOpen}
         onClose={() => setLooksOpen(false)}
-        looks={TARGET_LOOKS}
+        looks={activeLooks}
         garments={garments}
         onLockLookForToday={handleLockLookForToday}
       />
 
       <AddGarmentModal
+        key={`add-${wardrobe.epoch}`}
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onAddGarment={handleAddGarment}
         nextIndex={nextHangIndex}
       />
+
+      <AccountPanel isOpen={accountOpen} onClose={() => setAccountOpen(false)} state={wardrobe} controller={controller} persistenceNotice={wardrobe.persistenceNotice} />
 
       <GitHubShareModal
         isOpen={githubShareOpen}
