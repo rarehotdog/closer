@@ -3,10 +3,10 @@
 // closet ledger already holds; a piece without one gets no tag, and a sample row stays marked.
 
 export const RAIL = {
-  spacing: 0.6, // metres between hooks
-  shoeSpacing: 0.46, // between pairs on the floor
+  spacing: 0.56, // metres between hooks
+  shoeSpacing: 0.5, // between pairs on the floor
   railY: 1.74, // rail height above the floor
-  margin: 0.55, // rail beyond the first and last hook
+  margin: 0.52, // rail beyond the first and last hook
 };
 
 const ORDER = { outer: 0, top: 1, bottom: 2 };

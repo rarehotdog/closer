@@ -9,7 +9,8 @@ import { join } from 'node:path';
 // @ts-expect-error plain browser module without type declarations; the same file the rail screen imports
 import * as railJs from '../web/public/rail.js';
 import { closetLedger } from '../engine/ledger.ts';
-import { closetItems, sampleEvidence } from '../fixtures/closet.ts';
+import { validateEvidence } from '../engine/market.ts';
+import { closetItems, sampleEvidence, showcaseSampleEvidence } from '../fixtures/closet.ts';
 import { ROOT } from './helpers.ts';
 
 type Tag = { amount: number; currency: string; sample: boolean; traded: boolean; platform: string };
@@ -154,5 +155,18 @@ describe('R rail: placement and tags', () => {
     assert.equal(byReview.hanging[2].spotlight, true);
     assert.equal(byReview.hanging[3].itemId, 'B1', 'second review candidate flanks centre');
     assert.equal(byReview.hanging[3].spotlight, true);
+  });
+
+  it('R-08 showcaseSampleEvidence covers all 12 sample pieces with valid multi-date sample rows and zero owner totals', () => {
+    const items = closetItems();
+    const rows = showcaseSampleEvidence('2026-11-05');
+    for (const r of rows) {
+      assert.equal(validateEvidence(r), null, `${r.evidenceId} passes validateEvidence`);
+      assert.equal(r.source, 'sample', `${r.evidenceId} is marked sample`);
+    }
+    const L = closetLedger({ items, evidence: rows, decisions: [], reviewRows: [] });
+    assert.equal(L.withEvidence, items.length, 'every sample piece has a showcase price tag');
+    assert.equal(L.withOwnerEvidence, 0, 'zero owner-entered rows in sample closet');
+    assert.equal(L.sampleOnly, items.length, 'every priced piece is sample-only');
   });
 });

@@ -9,6 +9,8 @@ import type { DecisionSnapshot } from '../engine/decision.ts';
 type Row = Record<string, unknown>;
 
 export type ReviewChoice = { choiceId: string; itemId: string; action: ReviewAction; note: string | null; at: string };
+export type AccountSummary = { accountId: string; handle: string; workspaceId: string; createdAt: string };
+export type AccountRecord = AccountSummary & { salt: string; passwordHash: string };
 
 export class ExtrasStore {
   private readonly db: DatabaseSync;
@@ -23,6 +25,8 @@ export class ExtrasStore {
       CREATE TABLE IF NOT EXISTS handoffs (draft_id TEXT PRIMARY KEY, workspace_id TEXT, body TEXT);
       CREATE TABLE IF NOT EXISTS look_targets (workspace_id TEXT, look_id TEXT, at TEXT, PRIMARY KEY (workspace_id, look_id));
       CREATE TABLE IF NOT EXISTS decisions (decision_id TEXT PRIMARY KEY, workspace_id TEXT, item_id TEXT, at TEXT, body TEXT, client_key TEXT);
+      CREATE TABLE IF NOT EXISTS accounts (account_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL, workspace_id TEXT UNIQUE NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS account_sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
     `);
     // Database files written before client_key existed get the column here; on a file that already has it the statement fails and is ignored.
     try {
@@ -146,6 +150,54 @@ export class ExtrasStore {
 
   handoffs(ws: string): Handoff[] {
     return (this.db.prepare('SELECT body FROM handoffs WHERE workspace_id = ? ORDER BY draft_id').all(ws) as Row[]).map((r) => JSON.parse(String(r.body)) as Handoff);
+  }
+
+  // ---- accounts & persistent sessions ----
+  createAccount(a: AccountRecord): AccountSummary {
+    this.db
+      .prepare('INSERT INTO accounts (account_id, handle, salt, password_hash, workspace_id, created_at) VALUES (?,?,?,?,?,?)')
+      .run(a.accountId, a.handle, a.salt, a.passwordHash, a.workspaceId, a.createdAt);
+    const back = this.accountByHandle(a.handle);
+    if (!back || back.accountId !== a.accountId || back.workspaceId !== a.workspaceId) throw new Error('READBACK_MISMATCH: account');
+    return { accountId: back.accountId, handle: back.handle, workspaceId: back.workspaceId, createdAt: back.createdAt };
+  }
+
+  accountByHandle(handle: string): AccountRecord | null {
+    const r = this.db.prepare('SELECT * FROM accounts WHERE handle = ?').get(handle.trim().toLowerCase()) as Row | undefined;
+    if (!r) return null;
+    return {
+      accountId: String(r.account_id),
+      handle: String(r.handle),
+      salt: String(r.salt),
+      passwordHash: String(r.password_hash),
+      workspaceId: String(r.workspace_id),
+      createdAt: String(r.created_at),
+    };
+  }
+
+  accountForWorkspace(wsId: string): AccountSummary | null {
+    const r = this.db.prepare('SELECT account_id, handle, workspace_id, created_at FROM accounts WHERE workspace_id = ?').get(wsId) as Row | undefined;
+    if (!r) return null;
+    return { accountId: String(r.account_id), handle: String(r.handle), workspaceId: String(r.workspace_id), createdAt: String(r.created_at) };
+  }
+
+  createAccountSession(tokenHash: string, accountId: string, expiresAt: number, nowMs = Date.now()): void {
+    this.db.prepare('DELETE FROM account_sessions WHERE expires_at <= ?').run(nowMs);
+    this.db.prepare('INSERT OR REPLACE INTO account_sessions (token_hash, account_id, expires_at) VALUES (?,?,?)').run(tokenHash, accountId, expiresAt);
+  }
+
+  sessionAccount(tokenHash: string, nowMs = Date.now()): AccountSummary | null {
+    const r = this.db
+      .prepare(
+        'SELECT a.account_id, a.handle, a.workspace_id, a.created_at FROM account_sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ? AND s.expires_at > ?',
+      )
+      .get(tokenHash, nowMs) as Row | undefined;
+    if (!r) return null;
+    return { accountId: String(r.account_id), handle: String(r.handle), workspaceId: String(r.workspace_id), createdAt: String(r.created_at) };
+  }
+
+  deleteAccountSession(tokenHash: string): void {
+    this.db.prepare('DELETE FROM account_sessions WHERE token_hash = ?').run(tokenHash);
   }
 }
 

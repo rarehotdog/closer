@@ -95,6 +95,16 @@ export class SqliteLedger {
     return (this.db.prepare('SELECT * FROM workspaces ORDER BY workspace_id').all() as Row[]).map(toWorkspace);
   }
 
+  /** Promotes a disposable visitor or rehearsal copy to a permanent private wardrobe when claimed by an account. */
+  promoteToRealWorkspace(id: string): boolean {
+    if (id === 'demo-rc1' || id === 'owner') return false;
+    const ws = this.getWorkspace(id);
+    if (!ws || ws.publicReadOnly) return false;
+    this.db.prepare("UPDATE workspaces SET kind = 'real', public_read_only = 0 WHERE workspace_id = ?").run(id);
+    const back = this.getWorkspace(id);
+    return Boolean(back && back.kind === 'real' && !back.publicReadOnly);
+  }
+
   /**
    * Visitor workspaces (Try forks) created before `cutoffIso` with no call row since then, oldest
    * first. The call condition keeps the visitor day cap exact: a call made since the cutoff is

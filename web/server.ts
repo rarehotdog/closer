@@ -4,7 +4,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { join, dirname, extname } from 'node:path';
 import { SqliteLedger } from '../store/ledger.ts';
 import { CloserService, isPublicCopy } from '../engine/service.ts';
@@ -23,16 +23,20 @@ import type { WorkspaceRow } from '../shared/ledger.ts';
 import { ExtrasStore } from '../store/extras.ts';
 import { PhotoStore } from '../store/photos.ts';
 import { FeatureService } from '../engine/features.ts';
-import { closetHistory, closetItems, sampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
+import { closetHistory, closetItems, showcaseSampleEvidence, HISTORY_DAYS } from '../fixtures/closet.ts';
 import { CATEGORY_LABEL, LOOK_CATEGORIES } from '../engine/looks.ts';
 import { INTENT_CHIPS } from '../engine/intent.ts';
 import { maskToleranceFromEnv } from '../engine/validate.ts';
-import { BadRequest, RateLimiter, SECURITY_HEADERS, clientIp, readJson, tokenMatches } from './guard.ts';
+import {
+  BadRequest, RateLimiter, SECURITY_HEADERS, SESSION_TTL_MS,
+  clientIp, formatAccountCookie, hashPassword, hashSessionToken,
+  normalizeHandle, readCookie, readJson, tokenMatches, validPassword, verifyPassword,
+} from './guard.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PUBLIC = join(ROOT, 'web', 'public');
 const env = process.env;
-const PORT = Number(env.CLOSER_PORT || 8787);
+const PORT = env.CLOSER_PORT !== undefined ? Number(env.CLOSER_PORT) : 8787;
 const HOST = env.CLOSER_HOST || '127.0.0.1'; // loopback only (local, and behind Caddy on the VM); the container image sets 0.0.0.0
 const DB_PATH = env.CLOSER_DB_PATH || join(ROOT, '.data', 'closer.db');
 const STARTED_AT = new Date().toISOString();
@@ -89,6 +93,8 @@ try {
   throw e;
 }
 
+const PERSONAL_SEED_ROLES = FXH_ROLES.filter((r) => r.role !== 'J1').map((r) => r.role);
+
 function ensureWorkspace(id: string, kind: WorkspaceRow['kind'], publicReadOnly: boolean, roles: readonly string[]) {
   if (ledger.getWorkspace(id)) return;
   ledger.createWorkspace({ workspaceId: id, kind, publicReadOnly, seedRef: 'fx-h', createdOn: clock.today() }, { items: seedItems(roles), since: clock.today() });
@@ -123,11 +129,28 @@ function adminAllowed(req: IncomingMessage): boolean {
   if (token) return tokenMatches(req.headers['x-admin-token'], token);
   return mode === 'mock'; // local mock only; real mode needs CLOSER_ADMIN_TOKEN
 }
+function readAccountSession(req: IncomingMessage) {
+  const tok = readCookie(req.headers.cookie);
+  if (!tok) return null;
+  return extras.sessionAccount(hashSessionToken(tok), clock.now().getTime());
+}
+function setAccountSessionCookie(req: IncomingMessage, res: ServerResponse, token: string | null) {
+  const secure = TRUST_PROXY && req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', formatAccountCookie(token, secure));
+}
+function canUploadTo(ws: WorkspaceRow): boolean {
+  return ws.kind === 'real' || ws.workspaceId.startsWith('my-');
+}
 /**
- * The owner's real wardrobe ('real' workspace) is private in real mode: reads and writes need the
- * owner token (same value as CLOSER_ADMIN_TOKEN). Visitor, demo and sample-closet copies stay open.
+ * Account-claimed wardrobes require that account's session cookie in both mock and real mode.
+ * Unclaimed 'owner' is private in real mode (needs CLOSER_ADMIN_TOKEN); visitor, demo and sample-closet copies stay open.
  */
 function ownerAllowed(req: IncomingMessage, ws: WorkspaceRow): boolean {
+  const acct = extras.accountForWorkspace(ws.workspaceId);
+  if (acct) {
+    const sess = readAccountSession(req);
+    return Boolean(sess && sess.workspaceId === ws.workspaceId);
+  }
   if (ws.kind !== 'real' || mode === 'mock') return true;
   return tokenMatches(req.headers['x-admin-token'], env.CLOSER_ADMIN_TOKEN);
 }
@@ -193,6 +216,84 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
     }
     return send(res, 200, { workspaceId: wsId, label: `Sample closet · ${closetItems().length} sample items · synthetic wear history (${HISTORY_DAYS} days)` });
   }
+  if (path === '/api/closet/personal' && method === 'POST') {
+    if (limited(req, res, createLimit)) return;
+    await readJson(req);
+    const wsId = `my-${randomUUID().slice(0, 8)}`;
+    const sessionId = `sess-${randomUUID().slice(0, 8)}`;
+    ledger.createWorkspace(
+      { workspaceId: wsId, kind: 'visitor', publicReadOnly: false, seedRef: 'fx-h/personal', createdOn: clock.today() },
+      { items: seedItems(PERSONAL_SEED_ROLES), since: clock.today() },
+      clock.now().toISOString(),
+    );
+    sessions.set(wsId, sessionId);
+    return send(res, 200, { ok: true, workspaceId: wsId, sessionId, seededLabel: sampleWardrobe(PERSONAL_SEED_ROLES.length) });
+  }
+  if (path === '/api/account' && method === 'GET') {
+    const sess = readAccountSession(req);
+    return send(res, 200, { ok: true, signedIn: Boolean(sess), handle: sess?.handle ?? null, workspaceId: sess?.workspaceId ?? null });
+  }
+  if (path === '/api/account/register' && method === 'POST') {
+    if (limited(req, res, createLimit)) return;
+    const body = await readJson(req);
+    const handle = normalizeHandle(body.handle);
+    if (!handle) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'handle must be 2–64 lowercase letters, digits or ._@-' });
+    const pw = validPassword(body.password);
+    if (!pw) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'password must be 8–128 characters' });
+    if (extras.accountByHandle(handle)) return send(res, 409, { ok: false, code: 'STALE_STATE', detail: 'that handle is already registered' });
+    let workspaceId = '';
+    const claim = typeof body.claimWorkspaceId === 'string' ? body.claimWorkspaceId.trim() : '';
+    if (claim && claim !== 'owner' && claim !== 'demo-rc1') {
+      const existing = ledger.getWorkspace(claim);
+      if (existing && existing.seedRef === 'fx-h/personal' && !existing.publicReadOnly && existing.kind !== 'real' && !extras.accountForWorkspace(claim)) {
+        if (ledger.promoteToRealWorkspace(claim)) workspaceId = claim;
+      }
+    }
+    if (!workspaceId) {
+      workspaceId = `acct-${randomUUID().slice(0, 8)}`;
+      ledger.createWorkspace(
+        { workspaceId, kind: 'real', publicReadOnly: false, seedRef: 'fx-h/account', createdOn: clock.today() },
+        { items: seedItems(PERSONAL_SEED_ROLES), since: clock.today() },
+        clock.now().toISOString(),
+      );
+    }
+    const { salt, hash } = await hashPassword(pw);
+    const now = clock.now();
+    const acc = extras.createAccount({
+      accountId: `acc-${randomUUID().slice(0, 10)}`,
+      handle,
+      salt,
+      passwordHash: hash,
+      workspaceId,
+      createdAt: now.toISOString(),
+    });
+    const tok = randomBytes(32).toString('hex');
+    extras.createAccountSession(hashSessionToken(tok), acc.accountId, now.getTime() + SESSION_TTL_MS, now.getTime());
+    setAccountSessionCookie(req, res, tok);
+    return send(res, 200, { ok: true, signedIn: true, handle: acc.handle, workspaceId: acc.workspaceId });
+  }
+  if (path === '/api/account/login' && method === 'POST') {
+    if (limited(req, res, createLimit)) return;
+    const body = await readJson(req);
+    const handle = normalizeHandle(body.handle);
+    const pw = typeof body.password === 'string' ? body.password : '';
+    if (!handle || !pw) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'enter your handle and password' });
+    const acc = extras.accountByHandle(handle);
+    const matched = await verifyPassword(pw, acc?.salt ?? null, acc?.passwordHash ?? null);
+    if (!acc || !matched) return send(res, 401, { ok: false, code: 'SCOPE_DENIED', detail: 'handle or password did not match' });
+    const now = clock.now();
+    const tok = randomBytes(32).toString('hex');
+    extras.createAccountSession(hashSessionToken(tok), acc.accountId, now.getTime() + SESSION_TTL_MS, now.getTime());
+    setAccountSessionCookie(req, res, tok);
+    return send(res, 200, { ok: true, signedIn: true, handle: acc.handle, workspaceId: acc.workspaceId });
+  }
+  if (path === '/api/account/logout' && method === 'POST') {
+    await readJson(req);
+    const tok = readCookie(req.headers.cookie);
+    if (tok) extras.deleteAccountSession(hashSessionToken(tok));
+    setAccountSessionCookie(req, res, null);
+    return send(res, 200, { ok: true, signedIn: false });
+  }
   if (path === '/api/looks') {
     const cat = url.searchParams.get('category') ?? undefined;
     return send(res, 200, { categories: LOOK_CATEGORIES.map((c) => ({ id: c, label: CATEGORY_LABEL[c] })), looks: feat.looks(cat) });
@@ -238,9 +339,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   // back from the persisted call rows. The owner's own wardrobe has no session: it is behind the owner
   // token and under the app total.
   const sessionId = sessions.get(wsId) ?? (isPublicCopy(ws) ? wsId : null);
-  const sample = ws.seedRef === 'sample-closet' ? sampleEvidence(clock.today()) : [];
+  const sample = ws.seedRef === 'sample-closet' ? showcaseSampleEvidence(clock.today()) : [];
   if (method === 'GET' && action === 'review') return send(res, 200, feat.review(wsId, Number(url.searchParams.get('window') ?? 60)));
   if (method === 'GET' && action === 'market' && arg) return send(res, 200, feat.market(wsId, arg, sample));
+  if (method === 'GET' && action === 'pulse') return send(res, 200, feat.marketPulse(wsId, sample));
   if (method === 'GET' && action === 'coverage') return send(res, 200, feat.coverage(wsId, sample));
   if (method === 'GET' && action === 'ledger') return send(res, 200, feat.closetLedger(wsId, sample));
   if (method === 'GET' && action === 'drafts') return send(res, 200, { drafts: feat.drafts(wsId) });
@@ -265,8 +367,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (method !== 'POST') return send(res, 405, { ok: false });
   if (CALL_ACTIONS.has(action) && limited(req, res, callLimit)) return;
   if (action === 'upload') {
-    // Owner wardrobes only (visitors use the sample photos). Two copies from one canvas: JPEG for the models, PNG for pixels.
-    if (ws.kind !== 'real') return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'uploads are for your own wardrobe' });
+    // Personal & owner wardrobes allow photo uploads; sample Try forks use the sample photos.
+    if (!canUploadTo(ws)) return send(res, 403, { ok: false, code: 'SCOPE_DENIED', detail: 'uploads are for your own wardrobe' });
     const u = await readJson(req, 12 * 1024 * 1024);
     try {
       const meta = uploads.save(wsId, Buffer.from(String(u.jpegBase64 ?? ''), 'base64'), Buffer.from(String(u.pngBase64 ?? ''), 'base64'), clock.now().toISOString());
@@ -282,13 +384,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       const photoId = String(b.photoId ?? '');
       // An uploaded photo can be used only in the wardrobe it was uploaded to.
       if (photoId.startsWith('up_') && !uploads.list(wsId).some((p) => p.photoId === photoId)) return send(res, 404, { ok: false, code: 'SCOPE_DENIED', detail: 'no such photo in this wardrobe' });
-      const scan = ws.kind === 'real' && b.scan === true;
+      const scan = canUploadTo(ws) && b.scan === true;
       if (mode === 'mock' && photoId.startsWith('up_')) {
         return send(res, 200, svc.pixelScanPhoto(wsId, { photoId, sessionId, maxPieces: scan ? 16 : 6 }));
       }
       const chip = CHIPS.find((c) => c.chipId === b.chipId);
-      // Visitors: fixed sentence chips only, no free text (RT-13). The owner may write their own sentence or scan a whole closet photo.
-      const free = ws.kind === 'real' && typeof b.sentence === 'string' && b.sentence.trim() ? b.sentence.trim() : null;
+      // Visitors: fixed sentence chips only, no free text (RT-13). Personal/owner wardrobes may write their own sentence or scan a whole closet photo.
+      const free = canUploadTo(ws) && typeof b.sentence === 'string' && b.sentence.trim() ? b.sentence.trim() : null;
       const sentence = free ?? (scan ? 'Register every clearly visible garment in this closet photo.' : chip?.text ?? null);
       if (!sentence) return send(res, 400, { ok: false, code: 'META_REQUEST_REJECTED', detail: 'pick one of the fixed sentences' });
       return send(res, 200, await svc.startPhoto(wsId, { photoId, sentence, scan, sessionId }));
@@ -411,5 +513,7 @@ sweepVisitorWorkspaces();
 setInterval(sweepVisitorWorkspaces, 3600_000).unref();
 
 server.listen(PORT, HOST, () => {
-  console.log(`Closer (${mode} mode) on http://localhost:${PORT}  — screens: / · /app · /w/demo-rc1 · /admin · /version`);
+  const addr = server.address();
+  const bound = typeof addr === 'object' && addr ? addr.port : PORT;
+  console.log(`Closer (${mode} mode) on http://localhost:${bound}  — screens: / · /app · /w/demo-rc1 · /admin · /version`);
 });

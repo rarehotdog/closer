@@ -138,6 +138,57 @@ export class FeatureService {
     return { itemId, today: this.today(), cards: priceCards(itemId, evidence), series: priceSeries(itemId, evidence), note: 'Each platform stands alone. Asking prices are not sales. Nothing is averaged or converted.' };
   }
 
+  /**
+   * Per-piece observed price highlights on a single platform/currency (first vs latest seen row).
+   * Owner-entered rows take priority over sample rows; currencies and platforms are never merged.
+   */
+  marketPulse(ws: string, sample: readonly Evidence[] = []) {
+    const confirmedIds = this.ledger.readState(ws, { fresh: true }).items
+      .filter((i) => i.ownership === 'CONFIRMED')
+      .map((i) => i.itemId);
+    const ownerRows = this.extras.evidence(ws);
+    const allEvidence = [...ownerRows, ...sample];
+    const items = [];
+    for (const itemId of confirmedIds) {
+      const hasOwner = ownerRows.some((e) => e.itemId === itemId);
+      const itemEvidence = allEvidence.filter((e) => e.itemId === itemId && (hasOwner ? e.source === 'owner_entered' : e.source === 'sample'));
+      if (!itemEvidence.length) continue;
+      const seriesList = priceSeries(itemId, itemEvidence).filter((s) => s.count > 0 && s.latest && s.first);
+      if (!seriesList.length) continue;
+      // Pick the series with the most recent observation; tie-break by point count.
+      seriesList.sort((a, b) => (a.latest!.retrievedAt !== b.latest!.retrievedAt
+        ? (a.latest!.retrievedAt > b.latest!.retrievedAt ? -1 : 1)
+        : b.count - a.count));
+      const best = seriesList[0];
+      const firstAmt = best.first!.amount;
+      const latestAmt = best.latest!.amount;
+      const changeAmt = best.count > 1 ? latestAmt - firstAmt : 0;
+      const changePct = best.count > 1 && firstAmt > 0 ? Math.round(((latestAmt - firstAmt) / firstAmt) * 1000) / 10 : null;
+      items.push({
+        itemId,
+        platform: best.platform,
+        platformName: best.name,
+        currency: best.currency,
+        source: best.latest!.source,
+        priceType: best.latest!.priceType,
+        firstAmount: firstAmt,
+        firstDate: best.first!.retrievedAt,
+        latestAmount: latestAmt,
+        latestDate: best.latest!.retrievedAt,
+        count: best.count,
+        changeAmt,
+        changePct,
+      });
+    }
+    items.sort((a, b) => {
+      if (a.source !== b.source) return a.source === 'owner_entered' ? -1 : 1;
+      const da = a.changePct === null ? -1 : Math.abs(a.changePct);
+      const db = b.changePct === null ? -1 : Math.abs(b.changePct);
+      return db - da;
+    });
+    return { items, note: 'Each highlight compares the first and latest price seen on the same platform in one currency.' };
+  }
+
   /** How many confirmed pieces have at least one price row (owner-entered or the sample rows passed in). */
   coverage(ws: string, sample: readonly Evidence[] = []) {
     const ids = this.ledger.readState(ws, { fresh: true }).items.filter((i) => i.ownership === 'CONFIRMED').map((i) => i.itemId);

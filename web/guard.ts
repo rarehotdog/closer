@@ -1,7 +1,7 @@
 // Request guards for web/server.ts: per-address token buckets, constant-time token checks, strict
 // JSON bodies and the security headers every response carries. In-process state only (a restart
 // empties the buckets), which is enough for one server behind one reverse proxy.
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 
 export type Json = Record<string, unknown>;
@@ -131,3 +131,67 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
 };
+
+export const ACCT_COOKIE = 'closer_acct';
+export const SESSION_TTL_MS = 14 * 86_400_000;
+const DUMMY_SALT = '00'.repeat(16);
+const DUMMY_HASH = '00'.repeat(64);
+
+/** Normalizes an account handle (2..64 lowercase ASCII chars, e.g. "tyler" or "member@closer.invalid"). */
+export function normalizeHandle(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const h = raw.trim().toLowerCase();
+  if (h.length < 2 || h.length > 64) return null;
+  return /^[a-z0-9][a-z0-9._@-]*$/.test(h) ? h : null;
+}
+
+/** Validates an account password (8..128 UTF-8 bytes). */
+export function validPassword(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const bytes = Buffer.byteLength(raw, 'utf8');
+  return bytes >= 8 && bytes <= 128 ? raw : null;
+}
+
+function scryptAsync(password: string, saltHex: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, Buffer.from(saltHex, 'hex'), 64, (err, key) => (err ? reject(err) : resolve(key)));
+  });
+}
+
+export async function hashPassword(password: string, saltHex = randomBytes(16).toString('hex')): Promise<{ salt: string; hash: string }> {
+  const key = await scryptAsync(password, saltHex);
+  return { salt: saltHex, hash: key.toString('hex') };
+}
+
+/** Constant-time password verification; runs scrypt against a dummy salt when the account is absent. */
+export async function verifyPassword(password: string, saltHex: string | null, expectedHex: string | null): Promise<boolean> {
+  const derived = await scryptAsync(password, saltHex ?? DUMMY_SALT);
+  const expected = Buffer.from(expectedHex ?? DUMMY_HASH, 'hex');
+  const match = derived.length === expected.length && timingSafeEqual(derived, expected);
+  return Boolean(saltHex && expectedHex && match);
+}
+
+export function hashSessionToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+export function readCookie(cookieHeader: string | string[] | undefined, name = ACCT_COOKIE): string | null {
+  const raw = Array.isArray(cookieHeader) ? cookieHeader.join('; ') : cookieHeader;
+  if (!raw) return null;
+  for (const part of raw.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    if (part.slice(0, eq).trim() === name) {
+      const val = part.slice(eq + 1).trim();
+      return val || null;
+    }
+  }
+  return null;
+}
+
+export function formatAccountCookie(token: string | null, secure = false): string {
+  const maxAge = token ? Math.floor(SESSION_TTL_MS / 1000) : 0;
+  const parts = [`${ACCT_COOKIE}=${token ?? ''}`, 'Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${maxAge}`];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
