@@ -5,7 +5,7 @@
 // (rail.js): the view computes no number of its own. Drag sideways to slide along the rail, tap a piece.
 import * as THREE from './vendor/three.module.min.js';
 import { buildGarment, disposeGarmentCache } from './garments.js';
-import { RAIL, railLayout, tagWords } from './rail.js';
+import { RAIL, railLayout, tagOf, tagWords } from './rail.js';
 
 const WALL_Z = -0.36;
 const SHOE_Z = 0.42;
@@ -203,6 +203,16 @@ export function mountRail3d(host, pieces, opts) {
     tagLayer.append(t);
     return t;
   };
+  const syncTagStagger = () => {
+    let prev = null;
+    for (const e of entries) {
+      if (e.tag) {
+        e.tag.classList.remove('low');
+        if (e.hanging && prev && prev.hanging && prev.tag && !prev.tag.classList.contains('low')) e.tag.classList.add('low');
+      }
+      prev = e;
+    }
+  };
   function place(slot, hanging) {
     const p = byId.get(slot.itemId);
     const holder = new THREE.Group();
@@ -225,7 +235,9 @@ export function mountRail3d(host, pieces, opts) {
     const tag = words || state ? tagEl(words, state) : null;
     if (tag && hanging && prev && prev.hanging && prev.tag && !prev.tag.classList.contains('low')) tag.classList.add('low');
     const e = {
-      itemId: p.itemId, hanging, holder, swing, g, a: 0, v: 0, z: 0, zTo: 0, x0: slot.x, dx: 0, dxTo: 0, turn: hanging ? RACK_TURN : 0, turnTo: hanging ? RACK_TURN : 0,
+      itemId: p.itemId, hanging, holder, swing, g, a: 0, v: 0, z: 0, zTo: 0, x0: slot.x, dx: 0, dxTo: 0,
+      baseTurn: hanging ? RACK_TURN : 0, sidePhoto: false,
+      turn: hanging ? RACK_TURN : 0, turnTo: hanging ? RACK_TURN : 0,
       tag,
       // where the tag's string meets the piece: under the hanger's collar, or above a pair of shoes
       anchor: hanging ? new THREE.Vector3(0, -0.095, 0.035) : new THREE.Vector3(0, 0.2, 0),
@@ -235,12 +247,27 @@ export function mountRail3d(host, pieces, opts) {
         if (!img || disposed) return;
         const w0 = img.width || 1;
         const h0 = img.height || 1;
+        const isSide = !!(img.dataset && img.dataset.side === '1');
         const tex = new THREE.CanvasTexture(img);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = 4;
         made.tex.add(tex);
-        const mat = Mt(new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: 0.35, roughness: 0.92, side: THREE.DoubleSide }));
-        if (hanging) {
+        const mat = Mt(new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: isSide ? 0.18 : 0.35, roughness: 0.9, side: THREE.DoubleSide }));
+        if (hanging && isSide) {
+          // Side-hung 3/4 boutique garment: photographed metal hook apex sits at (w0 / 2, 0) and wraps directly onto the rail.
+          const hgt = p.type === 'coat' ? 1.12 : p.type === 'shorts' ? 0.74 : p.slot === 'bottom' ? 0.98 : p.slot === 'outer' ? 0.96 : 0.91;
+          const planeW = hgt * (w0 / h0);
+          const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(planeW, hgt)), mat);
+          cut.position.set(0, -hgt / 2 + 0.007, 0.014);
+          cut.castShadow = true;
+          cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.25 }));
+          if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
+          e.sidePhoto = true;
+          e.baseTurn = 0;
+          if (e.zTo === 0) { e.turn = 0; e.turnTo = 0; holder.rotation.y = 0; } else { e.turnTo = 0.06; }
+          e.anchor.set(0.01, -0.155, 0.026);
+          swing.add(cut);
+        } else if (hanging) {
           const baseH = p.slot === 'bottom' ? 0.88 : (g && g.size ? g.size.h : 0.8) - 0.10;
           const hgt = Math.min(0.98, Math.max(0.46, baseH));
           const planeW = hgt * Math.max(0.28, w0 / h0);
@@ -253,13 +280,13 @@ export function mountRail3d(host, pieces, opts) {
           hanger.traverse((o) => { if (o.isMesh) { made.geo.add(o.geometry); o.castShadow = true; } });
           swing.add(hanger, cut);
         } else {
-          const shoeW = 0.28;
+          const shoeW = 0.29;
           const shoeH = shoeW * (h0 / w0);
           const cut = new THREE.Mesh(G(new THREE.PlaneGeometry(shoeW, shoeH)), mat);
           cut.position.set(0, shoeH * 0.48, 0.02);
           cut.rotation.x = -0.12;
           cut.castShadow = true;
-          cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.35 }));
+          cut.customDepthMaterial = Mt(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.3 }));
           if (g) { swing.remove(g.object); g.dispose(); e.g = null; }
           swing.add(cut);
         }
@@ -410,9 +437,9 @@ export function mountRail3d(host, pieces, opts) {
     const k = hangingList.findIndex((x) => x.itemId === itemId);
     for (const e of entries) {
       const on = e.itemId === itemId;
-      e.zTo = on ? (e.hanging ? 0.16 : 0.08) : 0;
+      e.zTo = on ? (e.hanging ? 0.18 : 0.08) : 0;
       if (!e.hanging) continue;
-      e.turnTo = on ? 0 : RACK_TURN;
+      e.turnTo = on ? (e.sidePhoto ? 0.06 : 0) : e.baseTurn;
       const i = hangingList.indexOf(e);
       e.dxTo = k < 0 || on ? 0 : Math.sign(i - k) * PART * (Math.abs(i - k) === 1 ? 1 : 0.45);
     }
@@ -422,6 +449,20 @@ export function mountRail3d(host, pieces, opts) {
       aim();
     }
     nudge(e, 0.55);
+    invalidate();
+  }
+
+  function updatePiece(itemId, next = {}) {
+    const e = entries.find((x) => x.itemId === itemId);
+    const p = byId.get(itemId);
+    if (!e || !p) return;
+    if (next.availability) p.availability = next.availability;
+    const words = 'tagRow' in next ? tagWords(tagOf(next.tagRow), opts.money) : null;
+    const state = p.availability && p.availability !== 'AVAILABLE' ? UNAVAILABLE[p.availability] || 'Away' : '';
+    if (e.tag) { e.tag.remove(); e.tag = null; }
+    if (words || state) e.tag = tagEl(words, state);
+    syncTagStagger();
+    placeTags();
     invalidate();
   }
 
@@ -435,9 +476,10 @@ export function mountRail3d(host, pieces, opts) {
 
   return {
     select,
+    updatePiece,
     /** Slide about two thirds of a view along the rail (‹ = -1, › = 1). */
     slide(dir) { if (view.max <= 0) return; view.xTo = Math.max(-view.max, Math.min(view.max, (view.xTo ?? view.x) + dir * view.half * 1.35)); invalidate(); },
-    reset() { view.x = phone() ? -view.max : 0; view.xTo = null; for (const e of entries) { e.zTo = 0; e.dxTo = 0; e.turnTo = e.hanging ? RACK_TURN : 0; } aim(); invalidate(); },
+    reset() { view.x = phone() ? -view.max : 0; view.xTo = null; for (const e of entries) { e.zTo = 0; e.dxTo = 0; e.turnTo = e.hanging ? e.baseTurn : 0; } aim(); invalidate(); },
     state() { return { x: view.x, max: view.max, pieces: entries.length, tags: entries.filter((e) => e.tag).map((e) => e.itemId), selected: entries.filter((e) => e.zTo > 0).map((e) => e.itemId) }; },
     dispose() {
       disposed = true;

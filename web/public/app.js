@@ -805,9 +805,12 @@ async function landingRail(slot, ws) {
   try {
     const { id, view: v } = await ws;
     const [L, mod] = await Promise.all([getJson(`/api/ws/${id}/ledger`), import('/static/rail3d.js')]);
+    const seenType = {};
     const pieces = (v.items || []).map((it) => {
       const rgb = (META.palette && META.palette[it.color]) || null;
-      return { itemId: it.itemId, slot: it.slot, type: it.type, rgb, availability: it.availability || 'AVAILABLE', photo: samplePhoto(it.type, rgb) };
+      const idx = seenType[it.type] || 0;
+      seenType[it.type] = idx + 1;
+      return { itemId: it.itemId, slot: it.slot, type: it.type, rgb, availability: it.availability || 'AVAILABLE', photo: boutiqueRailPhoto(it.type, rgb, idx, null) };
     });
     const rail = mod.mountRail3d(slot, pieces, { tags: L ? L.tags : null, money, onPick: (itemId) => { location.href = `/closet?decide=${encodeURIComponent(itemId)}`; }, label: `This closet on a rail: ${pieces.length} pieces. Tap one for its keep-or-let-go question.` });
     if (!rail) slot.remove();
@@ -1898,32 +1901,201 @@ function assetOverlay(L, overlayRows) {
   return { el, text: `${said.join('; ')}. ${note}.` };
 }
 
-/** Rail · Layers: a reload with or without ?view=layers, keeping ?ws= as it is. */
+/** Rail · Items · Ledger · Walk-in: switches views of the same closet, keeping ?ws= intact. */
 function viewSwitch(mode) {
   const go = (k) => {
     if (k === mode) return;
     const u = new URL(location.href);
-    if (k === 'layers') u.searchParams.set('view', 'layers');
-    else u.searchParams.delete('view');
+    if (k === 'rail') u.searchParams.delete('view');
+    else u.searchParams.set('view', k);
     location.assign(u.pathname + u.search);
   };
   return h('div', { class: 'seg view-seg', role: 'group', 'aria-label': 'View' },
-    [['rail', 'Rail'], ['layers', 'Walk-in']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
+    [['rail', 'Rail'], ['items', 'Items'], ['ledger', 'Ledger'], ['layers', 'Walk-in']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
 }
 
 /* The rail (11/5): every piece hung on one rail, shoes under it, a tag only where the ledger holds a price.
    Few words on screen: the count, one number per currency with its denominator, and the piece you tap. */
-// The sample closet hangs studio photos from the design kit, recoloured to each record's colour with the photo's own
-// light and shade kept (folds, seams). Only sample pieces use them; an owner's piece hangs as its own photo or the model.
 const SAMPLE_PHOTO = {
   coat: 'coat', jacket: 'jacket', track_jacket: 'blouson',
   training_top: 'hoodie', knit: 'knit', dress_shirt: 'shirt', blouse: 'shirt', tee: 'tee',
   trousers: 'trousers', skirt: 'trousers', jeans: 'jeans', chinos: 'chinos', joggers: 'chinos', shorts: 'chinos',
   derby: 'derby', loafers: 'derby', sneakers: 'sneakers', running_shoes: 'sneakers',
 };
-function sampleMediaNode(it) {
-  const rgb = (META && META.palette && META.palette[it.color]) || null;
-  const p = samplePhoto(it.type, rgb);
+const SIDE_VARIANTS = {
+  coat: ['coat', 'overcoat'],
+  jacket: ['blazer', 'work', 'puffer'],
+  track_jacket: ['blouson', 'puffer'],
+  training_top: ['hoodie', 'crew'],
+  knit: ['knit', 'cardigan', 'crew'],
+  dress_shirt: ['shirt'],
+  blouse: ['shirt', 'cardigan'],
+  tee: ['tee', 'crew'],
+  trousers: ['trousers', 'slacks'],
+  skirt: ['slacks', 'trousers'],
+  jeans: ['jeans'],
+  chinos: ['chinos', 'trousers'],
+  joggers: ['joggers'],
+  shorts: ['chinos'],
+};
+const BOTTOM_SIDE_KEYS = new Set(['trousers', 'slacks', 'jeans', 'chinos', 'joggers']);
+
+function pickSideVariant(type, seedIdx = 0, cut = null) {
+  const list = SIDE_VARIANTS[type];
+  if (!list || !list.length) return null;
+  if (type === 'jacket' && cut && cut.mask && cut.mask.w / Math.max(1, cut.mask.h) > 0.29) return 'puffer';
+  return list[Math.abs(seedIdx) % list.length];
+}
+
+/** Measures the actual garment RGB inside the owner's cut-out mask, respecting explicit palette overrides. */
+const cutRgbCache = new Map();
+async function measureCutRgb(cut, paletteRgb) {
+  if (!cut || !cut.url || !cut.mask) return paletteRgb || null;
+  const cacheKey = `${cut.url}|${cut.mask.x},${cut.mask.y},${cut.mask.w},${cut.mask.h}`;
+  let measured = cutRgbCache.get(cacheKey);
+  if (!measured) {
+    try {
+      const cv = await cutCanvasReady(cut);
+      const x = cv.getContext('2d', { willReadFrequently: true });
+      const d = x.getImageData(0, 0, cv.width, cv.height).data;
+      const x0 = Math.floor(cv.width * 0.18), x1 = Math.ceil(cv.width * 0.82);
+      const y0 = Math.floor(cv.height * 0.16), y1 = Math.ceil(cv.height * 0.84);
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      for (let py = y0; py < y1; py += 2) {
+        for (let px = x0; px < x1; px += 2) {
+          const i = (py * cv.width + px) * 4;
+          if (d[i + 3] > 210) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++; }
+        }
+      }
+      if (n >= 8) {
+        measured = [Math.round(sr / n), Math.round(sg / n), Math.round(sb / n)];
+        cutRgbCache.set(cacheKey, measured);
+      }
+    } catch {}
+  }
+  if (!measured) return paletteRgb || null;
+  if (!Array.isArray(paletteRgb) || paletteRgb.length !== 3) return measured;
+  const dist = Math.hypot(measured[0] - paletteRgb[0], measured[1] - paletteRgb[1], measured[2] - paletteRgb[2]);
+  if (dist > 115) return paletteRgb; // owner manually picked a distinct colour in the scan editor
+  return [
+    Math.round(measured[0] * 0.76 + paletteRgb[0] * 0.24),
+    Math.round(measured[1] * 0.76 + paletteRgb[1] * 0.24),
+    Math.round(measured[2] * 0.76 + paletteRgb[2] * 0.24),
+  ];
+}
+
+/** Studio-framed crop of the owner's uploaded closet photo highlighting a single garment in context. */
+function contextCutCanvas(cut) {
+  const padX = Math.max(52, Math.round(cut.mask.w * 0.9));
+  const padY = Math.max(28, Math.round(cut.mask.h * 0.09));
+  const c = h('canvas', { width: cut.mask.w + padX * 2, height: cut.mask.h + padY * 2, 'data-cut': '1', class: 'pp-ctx-canvas' });
+  loadImage(cut.url).then((img) => {
+    const sx = Math.max(0, cut.mask.x - padX);
+    const sy = Math.max(0, cut.mask.y - padY);
+    const ex = Math.min(img.naturalWidth || img.width, cut.mask.x + cut.mask.w + padX);
+    const ey = Math.min(img.naturalHeight || img.height, cut.mask.y + cut.mask.h + padY);
+    const cw = Math.max(1, ex - sx), ch = Math.max(1, ey - sy);
+    c.width = cw;
+    c.height = ch;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, sx, sy, cw, ch, 0, 0, cw, ch);
+    ctx.fillStyle = 'rgba(250, 249, 247, 0.68)';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.save();
+    ctx.translate(-sx, -sy);
+    const mp = maskPath(cut.mask);
+    ctx.clip(mp);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(243, 112, 33, 0.85)';
+    ctx.lineWidth = Math.max(1.5, Math.round(cw / 140));
+    ctx.strokeRect(cut.mask.x - sx + 1, cut.mask.y - sy + 1, Math.max(2, cut.mask.w - 2), Math.max(2, cut.mask.h - 2));
+  }).catch(() => {});
+  return c;
+}
+
+function tintStudioCanvas(img, rgb, isSide, isBottomSide) {
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  if (isSide) c.dataset.side = '1';
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(img, 0, 0);
+  if (!Array.isArray(rgb) || rgb.length !== 3) return c;
+  const d = x.getImageData(0, 0, c.width, c.height);
+  const p = d.data;
+  const W = c.width, H = c.height;
+  const hookCutY = isSide ? Math.round(H * 0.106) : 0;
+  const hangerCutY = isSide ? Math.round(H * (isBottomSide ? 0.305 : 0.215)) : 0;
+  const sampleStartY = isSide ? Math.round(H * 0.33) : 0;
+  let sr = 0, sg = 0, sb = 0, n = 0;
+  for (let py = sampleStartY; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      const i = (py * W + px) * 4;
+      if (p[i + 3] > 205) { sr += p[i]; sg += p[i + 1]; sb += p[i + 2]; n++; }
+    }
+  }
+  if (!n) return c;
+  const mr = sr / n, mg = sg / n, mb = sb / n;
+  const meanSrcLum = Math.max(10, 0.2126 * mr + 0.7152 * mg + 0.0722 * mb);
+  const tgtLum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  const lumDenom = Math.max(40, meanSrcLum);
+  for (let py = 0; py < H; py++) {
+    if (py < hookCutY) continue; // keep chrome hook untouched
+    for (let px = 0; px < W; px++) {
+      const i = (py * W + px) * 4;
+      if (!p[i + 3]) continue;
+      const r = p[i], g = p[i + 1], b = p[i + 2];
+      if (isSide && py < hangerCutY && Math.abs(px - W * 0.5) < W * 0.26) {
+        const warmWood = r > 162 && g > 120 && b > 75 && (r - g) > 16 && (g - b) > 16;
+        const steelHardware = Math.max(r, g, b) - Math.min(r, g, b) < 15 && r > 115;
+        if (warmWood || steelHardware) continue;
+      }
+      const dist = Math.hypot(r - mr, g - mg, b - mb);
+      const w = isSide && py >= hangerCutY
+        ? Math.max(0, Math.min(1, 1 - (dist - 95) / 65))
+        : Math.max(0, Math.min(1, 1 - (dist - 70) / 60));
+      if (w <= 0) continue;
+      const srcLum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const delta = (srcLum - meanSrcLum) / lumDenom;
+      let tr, tg, tb;
+      if (tgtLum < 56) {
+        const sheen = delta * 36;
+        tr = Math.max(0, Math.min(248, rgb[0] * 0.84 + sheen));
+        tg = Math.max(0, Math.min(248, rgb[1] * 0.84 + sheen));
+        tb = Math.max(0, Math.min(248, rgb[2] * 0.84 + sheen));
+      } else {
+        const gain = 1 + delta * 0.56;
+        tr = Math.max(0, Math.min(252, rgb[0] * gain));
+        tg = Math.max(0, Math.min(252, rgb[1] * gain));
+        tb = Math.max(0, Math.min(252, rgb[2] * gain));
+      }
+      p[i] = r + (tr - r) * w;
+      p[i + 1] = g + (tg - g) * w;
+      p[i + 2] = b + (tb - b) * w;
+    }
+  }
+  x.putImageData(d, 0, 0);
+  return c;
+}
+
+/** 3/4 side-draped studio garment (or studio shoe pair) recoloured to `rgbOrPromise`. */
+async function boutiqueRailPhoto(type, rgbOrPromise, seedIdx = 0, cut = null) {
+  const sideKey = pickSideVariant(type, seedIdx, cut);
+  const url = sideKey ? `/static/photos/side-${sideKey}.png` : SAMPLE_PHOTO[type] ? `/static/photos/sample-${SAMPLE_PHOTO[type]}.png` : null;
+  if (!url) return null;
+  try {
+    const [img, rgb] = await Promise.all([loadImage(url), Promise.resolve(rgbOrPromise)]);
+    return tintStudioCanvas(img, rgb, !!sideKey, !!(sideKey && BOTTOM_SIDE_KEYS.has(sideKey)));
+  } catch {
+    return null;
+  }
+}
+
+function sampleMediaNode(it, seedIdx = 0, cut = null) {
+  const paletteRgb = (META && META.palette && META.palette[it.color]) || null;
+  const rgbP = cut ? measureCutRgb(cut, paletteRgb) : paletteRgb;
+  const p = boutiqueRailPhoto(it.type, rgbP, seedIdx, cut);
   if (!p) return placeholder(it.color, it.type || it.slot);
   const wrap = h('div', { class: 'pp-studio' }, placeholder(it.color, it.type || it.slot));
   p.then((cv) => { if (cv) wrap.replaceChildren(cv); });
@@ -1932,136 +2104,266 @@ function sampleMediaNode(it) {
 function samplePhoto(type, rgb) {
   const key = SAMPLE_PHOTO[type];
   if (!key) return null;
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const c = document.createElement('canvas');
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
-        const x = c.getContext('2d', { willReadFrequently: true });
-        x.drawImage(img, 0, 0);
-        if (Array.isArray(rgb) && rgb.length === 3) {
-          const d = x.getImageData(0, 0, c.width, c.height);
-          const p = d.data;
-          let sr = 0, sg = 0, sb = 0, n = 0;
-          for (let i = 0; i < p.length; i += 4) if (p[i + 3] > 200) { sr += p[i]; sg += p[i + 1]; sb += p[i + 2]; n++; }
-          if (n) {
-            const mr = sr / n, mg = sg / n, mb = sb / n;
-            // the studio light lifts a photo on the rail; dark records (navy, black) are set a little deeper to read as themselves
-            const ml = Math.max(1, 0.2126 * mr + 0.7152 * mg + 0.0722 * mb) * (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] < 60 ? 1.4 : 1);
-            for (let i = 0; i < p.length; i += 4) {
-              if (!p[i + 3]) continue;
-              const r = p[i], g = p[i + 1], b = p[i + 2];
-              const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / ml;
-              // hardware far from the cloth's own colour (the wooden hanger, a brass zip) keeps its colour
-              const w = Math.max(0, Math.min(1, 1 - (Math.hypot(r - mr, g - mg, b - mb) - 70) / 60));
-              p[i] = r + (Math.min(255, rgb[0] * l) - r) * w;
-              p[i + 1] = g + (Math.min(255, rgb[1] * l) - g) * w;
-              p[i + 2] = b + (Math.min(255, rgb[2] * l) - b) * w;
-            }
-            x.putImageData(d, 0, 0);
-          }
-        }
-        resolve(c);
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    img.src = `/static/photos/sample-${key}.png`;
-  });
+  return loadImage(`/static/photos/sample-${key}.png`)
+    .then((img) => tintStudioCanvas(img, rgb, false, false))
+    .catch(() => null);
 }
 
 async function railView(view, ctx) {
-  const { wsParam, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher } = ctx;
+  const { id, wsParam, v, A, byId, overlayRows, AVAILABILITY_LABEL, switcher } = ctx;
+  let Lcur = ctx.L;
+  let curRev = v.revision;
   const cells = A.layers.flatMap((l) => l.items);
-  const pieces = cells.map((c) => {
-    const rgb = (META.palette && META.palette[c.color]) || null;
-    const isSamplePiece = !wsParam || !!(byId[c.itemId] && byId[c.itemId].sample);
-    return { itemId: c.itemId, slot: c.slot, type: c.type, rgb, availability: c.availability, photo: cuts[c.itemId] ? cutCanvasReady(cuts[c.itemId]) : isSamplePiece ? samplePhoto(c.type, rgb) : null };
-  });
-  const rows = overlayRows(L);
+  const hasCuts = Object.keys(ctx.cuts).length > 0;
+  let drapeMode = new URLSearchParams(location.search).get('drape') === 'cut' && hasCuts ? 'cut' : 'boutique';
+  let catFilter = 'all';
+
+  function makePieces(mode) {
+    const seenType = {};
+    return cells.map((c) => {
+      const paletteRgb = (META.palette && META.palette[c.color]) || null;
+      const cut = ctx.cuts[c.itemId] || null;
+      const isSamplePiece = !wsParam || !!(byId[c.itemId] && byId[c.itemId].sample);
+      const idx = seenType[c.type] || 0;
+      seenType[c.type] = idx + 1;
+      let photo = null;
+      if (cut && mode === 'cut') photo = cutCanvasReady(cut);
+      else if (cut) photo = boutiqueRailPhoto(c.type, measureCutRgb(cut, paletteRgb), idx, cut);
+      else if (isSamplePiece) photo = boutiqueRailPhoto(c.type, paletteRgb, idx, null);
+      return { itemId: c.itemId, slot: c.slot, type: c.type, rgb: paletteRgb, availability: c.availability, photo };
+    });
+  }
+
   const count = (slots) => cells.filter((c) => slots.includes(c.slot)).length;
-  // One line of counts over the rail, the closet's prices as a plaque over its top-left (the same ledger My closet shows).
   const counts = h('div', { class: 'rail-counts' },
     h('span', null, 'Tops & outerwear ', h('b', null, String(count(['outer', 'top'])))),
     h('span', null, 'Bottoms ', h('b', null, String(count(['bottom'])))),
     h('span', null, 'Shoes ', h('b', null, String(count(['shoes'])))));
-  const plaque = rows.length ? h('div', { class: 'rail-plaque' },
-    h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: wsParam ? `/closet?ws=${encodeURIComponent(wsParam)}` : '/closet' }, 'Full ledger')),
-    rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))) : null;
+
+  const plaqueSlot = h('div', { class: 'rail-plaque-slot' });
+  function paintPlaque() {
+    const rows = overlayRows(Lcur);
+    if (!rows.length) { plaqueSlot.replaceChildren(); return; }
+    plaqueSlot.replaceChildren(h('div', { class: 'rail-plaque' },
+      h('div', { class: 'rp-hd' }, h('span', null, 'Your closet at a glance'), h('a', { href: wsParam ? `/closet?ws=${encodeURIComponent(wsParam)}` : '/closet' }, 'Full ledger')),
+      rows.map((r) => h('div', { class: 'rp-row' }, h('span', { class: 'rp-num' }, money(r.total, r.currency)), h('span', { class: 'rp-of', title: r.seen }, `${r.pieces} of ${r.of} pieces`), r.sample ? h('span', { class: 'chip sample' }, 'Sample') : null))));
+  }
+  paintPlaque();
+
   const host = h('div', { class: 'stage rail-stage' });
-  // Immersive (design handoff): the rail fills the screen; the ledger, the pieces and the panel float over it.
   const RANK0 = { outer: 0, top: 1, bottom: 2, shoes: 3 };
   const ordered = cells.map((c, i) => ({ c, i })).sort((x, y) => RANK0[x.c.slot] - RANK0[y.c.slot] || x.i - y.i).map((x) => x.c);
-  const editorial = h('div', { class: 'rail-editorial', 'aria-hidden': 'true' }, h('span', null, wsParam ? 'Your closet' : 'Sample closet'), h('i', null, '|'), h('span', null, wsParam ? 'Hung like a boutique rail' : 'Sample photos, recoloured to each record'));
+  const editorialSub = h('span', null, wsParam
+    ? (hasCuts ? (drapeMode === 'boutique' ? 'Boutique drape · colours from your photo' : 'Mask cut-outs from your photo') : 'Hung like a boutique rail')
+    : '3/4 studio drape · recoloured to each record');
+  const editorial = h('div', { class: 'rail-editorial', 'aria-hidden': 'true' },
+    h('span', null, wsParam ? 'Your closet' : 'Sample closet'), h('i', null, '|'), editorialSub);
+
   const chipOf = {};
-  const strip = h('div', { class: 'dock-strip', 'aria-label': 'Pieces on the rail' }, ordered.map((c) => {
-    const t = L && L.tags ? L.tags[c.itemId] : null;
+  function renderDockChipInner(b, c) {
+    const t = Lcur && Lcur.tags ? Lcur.tags[c.itemId] : null;
     const rgb = META.palette && META.palette[c.color];
-    const b = h('button', { type: 'button', class: 'dock-chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } },
+    b.replaceChildren(...[
       h('span', { class: 'dot', style: rgb ? `background:rgb(${rgb.join(',')})` : null }),
-      h('b', null, c.itemId), h('span', { class: 'nm' }, itemName(byId[c.itemId])),
+      h('b', null, c.itemId),
+      h('span', { class: 'nm' }, itemName(byId[c.itemId])),
       t ? h('span', { class: 'px' }, money(t.amount, t.currency)) : null,
-      t && t.source === 'sample' ? h('span', { class: 'smp' }, 'Sample') : null);
+      t && t.source === 'sample' ? h('span', { class: 'smp' }, 'Sample') : null,
+    ].filter(Boolean));
+  }
+  const strip = h('div', { class: 'dock-strip', 'aria-label': 'Pieces on the rail' }, ordered.map((c) => {
+    const b = h('button', { type: 'button', class: 'dock-chip', 'data-slot': c.slot, onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } });
+    renderDockChipInner(b, c);
     chipOf[c.itemId] = b;
     return b;
   }));
+
+  const catPills = h('div', { class: 'dock-cats', role: 'group', 'aria-label': 'Category filter' },
+    [['all', 'All'], ['outer', 'Outer'], ['top', 'Tops'], ['bottom', 'Bottoms'], ['shoes', 'Shoes']].map(([k, lbl]) =>
+      h('button', {
+        type: 'button',
+        class: 'cat-pill',
+        'aria-pressed': catFilter === k ? 'true' : 'false',
+        onclick: () => {
+          catFilter = k;
+          for (const btn of catPills.querySelectorAll('button')) btn.setAttribute('aria-pressed', btn.textContent === lbl ? 'true' : 'false');
+          let firstMatch = null;
+          for (const c of ordered) {
+            const match = k === 'all' || c.slot === k;
+            chipOf[c.itemId].hidden = !match;
+            if (match && !firstMatch) firstMatch = c.itemId;
+          }
+          if (k !== 'all' && firstMatch && rail) rail.select(firstMatch);
+          else if (k === 'all' && rail && !current) rail.reset();
+        },
+      }, lbl)));
+
   const prev = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide left' }, '‹');
   const next = h('button', { type: 'button', class: 'pg', 'aria-label': 'Slide right' }, '›');
   const sheet = h('aside', { class: 'piece-panel', id: 'piece', 'aria-live': 'polite', hidden: true });
-  const dock = h('div', { class: 'rail-dock' }, strip, h('div', { class: 'dock-row' }, counts, h('div', { class: 'row pg-row' }, prev, next, switcher)));
-  // The flow starts with one photo: the first action over the rail opens the photo studio (/app).
+  let rail = null;
+  let mod = null;
+
+  const drapeToggle = hasCuts ? h('div', { class: 'seg drape-seg', id: 'drape-toggle', role: 'group', 'aria-label': 'Garment drape' },
+    [['boutique', 'Boutique'], ['cut', 'Photo cut']].map(([m, lbl]) => h('button', {
+      type: 'button',
+      'aria-pressed': drapeMode === m ? 'true' : 'false',
+      onclick: () => {
+        if (drapeMode === m) return;
+        drapeMode = m;
+        for (const btn of drapeToggle.querySelectorAll('button')) btn.setAttribute('aria-pressed', btn.textContent === lbl ? 'true' : 'false');
+        editorialSub.textContent = m === 'boutique' ? 'Boutique drape · colours from your photo' : 'Mask cut-outs from your photo';
+        mountStage();
+      },
+    }, lbl))) : null;
+
+  const dock = h('div', { class: 'rail-dock' },
+    strip,
+    h('div', { class: 'dock-row' },
+      h('div', { class: 'row dock-left' }, catPills, counts),
+      h('div', { class: 'row pg-row' }, drapeToggle, prev, next, switcher)));
   const addPhoto = h('a', { class: 'rail-add', href: '/app', id: 'rail-add' }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), 'Add from a photo');
-  const body = h('div', { class: 'immersive' }, host, plaque, editorial, addPhoto, dock, sheet);
+  const body = h('div', { class: 'immersive' }, host, plaqueSlot, editorial, addPhoto, dock, sheet);
   const list = h('details', { class: 'panel', id: 'layer-list' }, h('summary', null, `List · ${A.counts.total}`),
     h('div', { class: 'chip-row' }, cells.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => { if (rail) rail.select(c.itemId); show(c.itemId); } }, `${c.itemId} · ${itemName(byId[c.itemId])}`))));
   view.append(h('div', { class: 'rail-head rail-head-slim' }, h('h1', { class: 'caps-title' }, 'My closet')), body, h('p', { class: 'muted hint' }, 'Drag or ‹ › to slide · tap a piece · ← → to page'), list);
-  const said = rows.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, latest price seen on ${r.pieces} of ${r.of} pieces`).join('; ');
-  const mod = await import('/static/rail3d.js').catch(() => null);
-  const rail = mod ? mod.mountRail3d(host, pieces, { fill: true, tags: L ? L.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
-  if (!rail) { host.replaceWith(h('p', { class: 'chip warn' }, 'No WebGL here, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
-  prev.onclick = () => rail && rail.slide(-1);
-  next.onclick = () => rail && rail.slide(1);
-  // The rail's own order (outerwear, tops, bottoms, then shoes) is the panel's order for ‹ n / N ›.
+
   const RANK = { outer: 0, top: 1, bottom: 2, shoes: 3 };
   const order = cells.map((c, i) => ({ c, i })).sort((x, y) => RANK[x.c.slot] - RANK[y.c.slot] || x.i - y.i).map((x) => x.c.itemId);
   const LAYER_NAME = { outer: 'Outerwear', top: 'Tops', bottom: 'Bottoms', shoes: 'Shoes' };
   let current = null;
-  const step = (d) => { if (!current) return; const k = order.indexOf(current); const id = order[(k + d + order.length) % order.length]; if (rail) rail.select(id); show(id); };
+  let mediaTab = 'photo';
+  let priceFormOpen = false;
+
+  mod = await import('/static/rail3d.js').catch(() => null);
+  function mountStage() {
+    if (rail) { rail.dispose(); rail = null; }
+    const rows = overlayRows(Lcur);
+    const said = rows.map((r) => `${money(r.total, r.currency)}${r.sample ? ' (sample)' : ''}, latest price seen on ${r.pieces} of ${r.of} pieces`).join('; ');
+    rail = mod ? mod.mountRail3d(host, makePieces(drapeMode), { fill: true, tags: Lcur ? Lcur.tags : null, money, onPick: show, label: `${A.counts.total} pieces on a rail.${said ? ` ${said}.` : ''}` }) : null;
+    if (rail && current) rail.select(current);
+  }
+  mountStage();
+  if (!rail) { host.replaceWith(h('p', { class: 'chip warn' }, 'No WebGL here, so the 3D view is off. The same pieces are in the list below.')); list.open = true; }
+  prev.onclick = () => rail && rail.slide(-1);
+  next.onclick = () => rail && rail.slide(1);
+
+  const step = (d) => { if (!current) return; const k = order.indexOf(current); const nextId = order[(k + d + order.length) % order.length]; if (rail) rail.select(nextId); show(nextId); };
   document.addEventListener('keydown', (e) => {
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     if (e.key === 'ArrowRight') { if (current) step(1); else if (rail) rail.slide(1); }
     else if (e.key === 'ArrowLeft') { if (current) step(-1); else if (rail) rail.slide(-1); }
     else if (e.key === 'Escape' && current) close();
   });
-  function close() { current = null; sheet.hidden = true; body.classList.remove('open'); for (const b of Object.values(chipOf)) b.setAttribute('aria-current', 'false'); if (rail) rail.select(null); }
+  function close() { current = null; priceFormOpen = false; sheet.hidden = true; body.classList.remove('open'); for (const b of Object.values(chipOf)) b.setAttribute('aria-current', 'false'); if (rail) rail.select(null); }
 
-  function show(itemId) {
+  function show(itemId, flashText = '') {
     const it = byId[itemId];
     const c = cells.find((x) => x.itemId === itemId);
     if (!it || !c) return;
+    if (current !== itemId) priceFormOpen = false;
     current = itemId;
     for (const [k, b] of Object.entries(chipOf)) b.setAttribute('aria-current', k === itemId ? 'true' : 'false');
     if (chipOf[itemId]) chipOf[itemId].scrollIntoView({ block: 'nearest', inline: 'center' });
-    const t = L && L.tags ? L.tags[itemId] : null;
+    const t = Lcur && Lcur.tags ? Lcur.tags[itemId] : null;
+    const cut = ctx.cuts[itemId] || null;
     const label = (x) => h('p', { class: 'pp-label' }, x);
     sheet.hidden = false;
     body.classList.add('open');
-    sheet.replaceChildren(
+
+    const mediaBox = h('div', { class: 'pp-media' },
+      cut
+        ? (mediaTab === 'studio' ? sampleMediaNode(it, order.indexOf(itemId), cut) : contextCutCanvas(cut))
+        : (!wsParam || it.sample) ? sampleMediaNode(it, order.indexOf(itemId), null) : placeholder(it.color, it.type || c.slot));
+
+    const mediaTabs = cut ? h('div', { class: 'seg pp-ptabs', role: 'group', 'aria-label': 'Photo preview' },
+      [['photo', 'Your photo'], ['studio', 'Studio drape']].map(([m, lbl]) => h('button', {
+        type: 'button',
+        'aria-pressed': mediaTab === m ? 'true' : 'false',
+        onclick: () => { mediaTab = m; show(itemId); },
+      }, lbl))) : null;
+
+    const writable = id !== 'demo-rc1';
+    const availSeg = writable ? h('div', { class: 'seg pp-avail', role: 'group', 'aria-label': 'Availability' },
+      [['AVAILABLE', 'Available'], ['LAUNDRY', 'Laundry'], ['STORED', 'Stored']].map(([st, lbl]) => h('button', {
+        type: 'button',
+        'aria-pressed': c.availability === st ? 'true' : 'false',
+        onclick: async () => {
+          if (c.availability === st) return;
+          const r = await saveFlow(id, 'availability', { itemId, state: st, eventId: uuid(), expectedRevision: curRev },
+            (vv) => vv.items.some((x) => x.itemId === itemId && x.availability === st), `${itemId} → ${lbl.toLowerCase()}`);
+          if (r.view) curRev = r.view.revision;
+          if (r.ok) {
+            c.availability = st;
+            it.availability = st;
+            if (rail) rail.updatePiece(itemId, { availability: st, tagRow: Lcur && Lcur.tags ? Lcur.tags[itemId] : null });
+            show(itemId, `Marked ${lbl.toLowerCase()}`);
+          }
+        },
+      }, lbl))) : null;
+
+    const platSel = h('select', { id: 'pp-plat', class: 'scan-sel', 'aria-label': 'Platform' },
+      PLATFORM_OPTIONS.map(([v0, l0]) => h('option', { value: v0, selected: (t && t.platform === v0) || (!t && v0 === 'KARROT') ? true : null }, l0)));
+    const ptypeSel = h('select', { id: 'pp-ptype', class: 'scan-sel', 'aria-label': 'Price type' },
+      h('option', { value: 'ASK' }, 'Asking'),
+      h('option', { value: 'TRADE', selected: t && t.priceType === 'TRADE' ? true : null }, 'Traded'));
+    const amtInput = h('input', { id: 'pp-amt', class: 'scan-price', type: 'number', min: '1', step: 'any', placeholder: 'Amount (e.g. 145000)', 'aria-label': 'Amount', value: t && t.source !== 'sample' ? String(t.amount) : '' });
+    const inlinePriceForm = priceFormOpen && writable ? h('div', { class: 'pp-price-form', id: 'pp-price-form' },
+      h('div', { class: 'pp-pf-grid' }, platSel, ptypeSel),
+      h('div', { class: 'pp-pf-row' },
+        amtInput,
+        h('button', {
+          type: 'button',
+          class: 'btn small',
+          id: 'pp-save-price',
+          onclick: async () => {
+            const amt = Number(amtInput.value);
+            if (!(amt > 0)) { amtInput.focus(); return; }
+            const plat = platSel.value;
+            const cur = PLATFORM_CURRENCY[plat] || 'KRW';
+            const pr = await postJson(`/api/ws/${id}/evidence`, {
+              itemId,
+              platform: plat,
+              currency: cur,
+              priceType: ptypeSel.value,
+              amount: amt,
+              retrievedAt: new Date().toISOString().slice(0, 10),
+              matchLevel: 'SAME_ITEM',
+            });
+            if (pr && pr.ok !== false) {
+              Lcur = await closetLedger(id);
+              ctx.L = Lcur;
+              paintPlaque();
+              if (chipOf[itemId]) renderDockChipInner(chipOf[itemId], c);
+              if (rail) rail.updatePiece(itemId, { tagRow: Lcur && Lcur.tags ? Lcur.tags[itemId] : null });
+              priceFormOpen = false;
+              show(itemId, 'Price saved to rail');
+            }
+          },
+        }, 'Save'))) : null;
+
+    sheet.replaceChildren(...[
       h('div', { class: 'pp-top' },
         h('button', { type: 'button', class: 'pg', 'aria-label': 'Previous piece', onclick: () => step(-1) }, '‹'),
         h('span', { class: 'pp-count' }, `${order.indexOf(itemId) + 1} / ${order.length}`),
         h('button', { type: 'button', class: 'pg', 'aria-label': 'Next piece', onclick: () => step(1) }, '›'),
         h('button', { type: 'button', class: 'pp-close', 'aria-label': 'Close', onclick: close }, '×')),
-      h('div', { class: 'chip-row' }, h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot), c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'), cuts[itemId] ? h('span', { class: 'chip' }, cuts[itemId].mine ? 'Your photo' : 'Sample photo') : null),
-      h('div', { class: 'pp-media' }, cuts[itemId] ? cutCanvas(cuts[itemId]) : (!wsParam || it.sample) ? sampleMediaNode(it) : placeholder(it.color, it.type || c.slot)),
+      h('div', { class: 'chip-row' },
+        h('span', { class: 'chip' }, LAYER_NAME[c.slot] || c.slot),
+        c.availability !== 'AVAILABLE' ? h('span', { class: 'chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : h('span', { class: 'chip' }, 'Available'),
+        cut ? h('span', { class: 'chip' }, cut.mine ? 'Your photo' : 'Sample photo') : null),
+      mediaTabs,
+      mediaBox,
       h('h2', { class: 'pp-title' }, itemName(it)),
       h('p', { class: 'muted pp-code' }, itemId),
-      label('Price seen'),
+      availSeg,
+      flashText ? h('div', { class: 'flash', role: 'status' }, h('span', { class: 'chip ok' }, flashText)) : null,
+      h('div', { class: 'pp-label-row' },
+        label('Price seen'),
+        writable ? h('button', { type: 'button', class: 'pp-inline-link', id: 'pp-add-price-btn', onclick: () => { priceFormOpen = !priceFormOpen; show(itemId); } }, priceFormOpen ? 'Cancel' : t ? '+ Update price' : '+ Add price') : null),
       t ? h('p', { class: 'pp-price' }, h('span', { class: 'pp-num' }, money(t.amount, t.currency)), ` ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
         : h('p', { class: 'muted' }, 'No price yet. The price stays blank.'),
+      inlinePriceForm,
       label('Wears'),
       h('p', { class: 'muted' }, c.wearLabel || 'No confirmed wear yet'),
       label('Next step'),
@@ -2070,8 +2372,136 @@ async function railView(view, ctx) {
         h('a', { class: 'pp-step', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${itemId}` }, h('b', null, 'Let it go'), h('span', null, 'Prepare to sell or donate'))),
       h('div', { class: 'row' },
         h('a', { class: 'btn small ghost', href: `/today?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}lock=${itemId}` }, 'Wear today'),
-        h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Walk-in')));
+        h('a', { class: 'btn small ghost', href: `/closet/3d?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}view=layers` }, 'Walk-in')),
+    ].filter(Boolean));
   }
+}
+
+/** Boutique Items gallery (?view=items): filterable visual cards for every piece in the closet. */
+function itemsGalleryView(view, ctx) {
+  const { wsParam, A, byId, L, cuts, AVAILABILITY_LABEL, switcher } = ctx;
+  const cells = A.layers.flatMap((l) => l.items);
+  const LAYER_NAME = { outer: 'Outerwear', top: 'Tops', bottom: 'Bottoms', shoes: 'Shoes' };
+  const hasCuts = Object.keys(cuts).length > 0;
+  let cat = 'all';
+  let q = '';
+  let photoMode = 'boutique';
+  const searchInput = h('input', {
+    type: 'search',
+    class: 'items-search',
+    id: 'items-search',
+    placeholder: 'Search colour, type, ID…',
+    'aria-label': 'Search closet items',
+    oninput: (e) => { q = e.target.value.trim().toLowerCase(); paint(); },
+  });
+  const gridHost = h('div', { class: 'boutique-grid', id: 'items-grid' });
+  const catHost = h('div', { class: 'row items-toolbar-cats' });
+  const modeSeg = hasCuts ? h('div', { class: 'seg drape-seg', role: 'group', 'aria-label': 'Card preview' },
+    [['boutique', 'Boutique'], ['photo', 'Your photo']].map(([m, lbl]) => h('button', {
+      type: 'button',
+      'aria-pressed': photoMode === m ? 'true' : 'false',
+      onclick: () => {
+        photoMode = m;
+        for (const btn of modeSeg.querySelectorAll('button')) btn.setAttribute('aria-pressed', btn.textContent === lbl ? 'true' : 'false');
+        paint();
+      },
+    }, lbl))) : null;
+
+  function paint() {
+    const countsBySlot = { all: cells.length, outer: 0, top: 0, bottom: 0, shoes: 0 };
+    for (const c of cells) countsBySlot[c.slot] = (countsBySlot[c.slot] || 0) + 1;
+    catHost.replaceChildren(...[['all', 'All'], ['outer', 'Outerwear'], ['top', 'Tops'], ['bottom', 'Bottoms'], ['shoes', 'Shoes']].map(([k, lbl]) =>
+      h('button', {
+        type: 'button',
+        class: 'cat-pill',
+        'aria-pressed': cat === k ? 'true' : 'false',
+        onclick: () => { cat = k; paint(); },
+      }, `${lbl} (${countsBySlot[k] || 0})`)));
+
+    const filtered = cells.filter((c) => {
+      if (cat !== 'all' && c.slot !== cat) return false;
+      if (!q) return true;
+      const it = byId[c.itemId];
+      const hay = `${c.itemId} ${it ? itemName(it) : ''} ${c.slot} ${c.availability}`.toLowerCase();
+      return hay.includes(q);
+    });
+
+    if (!filtered.length) {
+      gridHost.replaceChildren(h('p', { class: 'muted' }, 'No pieces match that filter.'));
+      return;
+    }
+
+    const seenType = {};
+    gridHost.replaceChildren(...filtered.map((c) => {
+      const it = byId[c.itemId];
+      const t = L && L.tags ? L.tags[c.itemId] : null;
+      const cut = cuts[c.itemId] || null;
+      const idx = seenType[c.type] || 0;
+      seenType[c.type] = idx + 1;
+      const media = cut
+        ? (photoMode === 'photo' ? contextCutCanvas(cut) : sampleMediaNode(it, idx, cut))
+        : (!wsParam || (it && it.sample)) ? sampleMediaNode(it, idx, null) : placeholder(c.color, c.type || c.slot);
+      return h('article', { class: 'boutique-card', 'data-item': c.itemId },
+        h('div', { class: 'bc-stage' },
+          t ? h('span', { class: 'bc-price' }, money(t.amount, t.currency), t.source === 'sample' ? h('i', null, ' · Sample') : null) : null,
+          c.availability !== 'AVAILABLE' ? h('span', { class: 'bc-avail chip warn' }, AVAILABILITY_LABEL[c.availability] || c.availability) : null,
+          media),
+        h('div', { class: 'bc-body' },
+          h('div', { class: 'bc-eyebrow' }, `${c.itemId} · ${LAYER_NAME[c.slot] || c.slot}`),
+          h('h3', { class: 'bc-title' }, itemName(it)),
+          h('p', { class: 'muted bc-wear' }, c.wearLabel || 'No confirmed wear yet'),
+          h('div', { class: 'row bc-actions' },
+            h('a', { class: 'btn small ghost', href: `/today?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}lock=${c.itemId}` }, 'Wear today'),
+            h('a', { class: 'btn small ghost', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${c.itemId}` }, 'Decide'))));
+    }));
+  }
+
+  paint();
+  view.append(
+    h('div', { class: 'rail-head' },
+      h('div', null, h('h1', { class: 'caps-title' }, 'My closet · Items')),
+      h('div', { class: 'row' }, h('a', { class: 'btn small', href: '/app' }, '+ Add from a photo'), switcher)),
+    L ? assetBoard(L, { sampleCloset: !wsParam }) : null,
+    h('section', { class: 'panel' },
+      h('div', { class: 'items-toolbar' }, catHost, h('div', { class: 'row' }, modeSeg, searchInput)),
+      gridHost));
+}
+
+/** Tabular Closet Ledger (?view=ledger): counted wears and seen prices side-by-side, never averaged. */
+function ledgerTableView(view, ctx) {
+  const { wsParam, A, byId, L, cuts, AVAILABILITY_LABEL, switcher } = ctx;
+  const cells = A.layers.flatMap((l) => l.items);
+  const LAYER_NAME = { outer: 'Outerwear', top: 'Tops', bottom: 'Bottoms', shoes: 'Shoes' };
+  const table = h('div', { class: 'scroll-x' },
+    h('table', { class: 't ledger-t', id: 'closet-ledger-table' },
+      h('thead', null, h('tr', null,
+        ['Piece', 'Layer', 'Status', 'Confirmed wears', 'Latest price seen', 'Next step'].map((col) => h('th', null, col)))),
+      h('tbody', null, cells.map((c) => {
+        const it = byId[c.itemId];
+        const t = L && L.tags ? L.tags[c.itemId] : null;
+        return h('tr', { 'data-item': c.itemId },
+          h('td', null,
+            h('div', { class: 'ledger-piece' },
+              h('div', { class: 'ledger-thumb' }, thumb(it, cuts)),
+              h('div', null, h('b', null, `${c.itemId} · ${itemName(it)}`), h('div', { class: 'muted' }, FORMALITY_LABEL[it.formality] || it.formality)))),
+          h('td', null, LAYER_NAME[c.slot] || c.slot),
+          h('td', null, h('span', { class: `chip${c.availability === 'AVAILABLE' ? '' : ' warn'}` }, AVAILABILITY_LABEL[c.availability] || c.availability)),
+          h('td', null, c.wearLabel || 'No confirmed wear yet'),
+          h('td', null, t
+            ? h('span', null, h('b', { class: 'mono' }, money(t.amount, t.currency)), ` · ${String(t.platformName || t.platform).split(' (')[0]} · ${t.priceType === 'TRADE' ? 'traded' : 'asking'} `, t.source === 'sample' ? h('span', { class: 'chip sample' }, 'Sample') : null)
+            : h('span', { class: 'muted' }, '— (not counted as zero)')),
+          h('td', null,
+            h('div', { class: 'row' },
+              h('a', { class: 'btn small ghost', href: `/closet?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}decide=${c.itemId}` }, 'Keep or let go?'),
+              h('a', { class: 'btn small ghost', href: `/today?${wsParam ? `ws=${encodeURIComponent(wsParam)}&` : ''}lock=${c.itemId}` }, 'Wear today'))));
+      }))));
+
+  view.append(
+    h('div', { class: 'rail-head' },
+      h('div', null, h('h1', { class: 'caps-title' }, 'My closet · Ledger')),
+      h('div', { class: 'row' }, h('a', { class: 'btn small', href: '/app' }, '+ Add from a photo'), switcher)),
+    L ? assetBoard(L, { sampleCloset: !wsParam }) : null,
+    h('section', { class: 'panel' }, table));
 }
 
 async function closet3dScreen(view) {
@@ -2133,10 +2563,14 @@ async function closet3dScreen(view) {
   const A = buildAnatomy(v.items, review.rows);
   const byId = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const C = A.counts;
-  // Two views of the same pieces: the rail (default) and the layers with the exploded view (?view=layers).
-  const mode = new URLSearchParams(location.search).get('view') === 'layers' ? 'layers' : 'rail';
+  // Four views of the same pieces: Rail (default), Items gallery (?view=items), Ledger (?view=ledger), and Walk-in 3D (?view=layers).
+  const rawView = new URLSearchParams(location.search).get('view');
+  const mode = rawView === 'layers' || rawView === 'items' || rawView === 'ledger' ? rawView : 'rail';
   const switcher = viewSwitch(mode);
-  if (mode === 'rail') return railView(view, { wsParam, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher });
+  const sharedCtx = { id, wsParam, v, review, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher };
+  if (mode === 'rail') return railView(view, sharedCtx);
+  if (mode === 'items') return itemsGalleryView(view, sharedCtx);
+  if (mode === 'ledger') return ledgerTableView(view, sharedCtx);
   const overlay = assetOverlay(L, overlayRows);
   const host = h('div', { class: 'stage stage-luxe' }, overlay ? overlay.el : null);
   const panel = h('section', { class: 'panel', id: 'piece', 'aria-live': 'polite' }, h('p', { class: 'muted' }, 'Tap a piece, or pick one from the list, to see what Closer records about it.'));

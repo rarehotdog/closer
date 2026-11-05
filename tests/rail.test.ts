@@ -4,10 +4,13 @@
 import './helpers.ts';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 // @ts-expect-error plain browser module without type declarations; the same file the rail screen imports
 import * as railJs from '../web/public/rail.js';
 import { closetLedger } from '../engine/ledger.ts';
 import { closetItems, sampleEvidence } from '../fixtures/closet.ts';
+import { ROOT } from './helpers.ts';
 
 type Tag = { amount: number; currency: string; sample: boolean; traded: boolean; platform: string };
 type Spot = { itemId: string; slot: string; type: string; x: number; tag: Tag | null };
@@ -75,5 +78,23 @@ describe('R rail: placement and tags', () => {
       assert.equal(x.tag.sample, row.source === 'sample');
     }
     assert.ok(tagged.length < items.length, 'pieces without a price stay untagged');
+  });
+
+  it('R-05 all 17 side-hung 3/4 boutique garment studio PNGs exist, are portrait, and carry no EXIF', () => {
+    const keys = [
+      'coat', 'overcoat', 'blazer', 'puffer', 'blouson', 'work',
+      'knit', 'cardigan', 'crew', 'shirt', 'tee', 'hoodie',
+      'trousers', 'slacks', 'jeans', 'chinos', 'joggers',
+    ];
+    for (const k of keys) {
+      const p = join(ROOT, 'web/public/photos', `side-${k}.png`);
+      const buf = readFileSync(p);
+      assert.equal(buf.subarray(0, 4).toString('hex'), '89504e47', `side-${k}.png is a valid PNG`);
+      const w = buf.readUInt32BE(16);
+      const h = buf.readUInt32BE(20);
+      assert.ok(w >= 40 && h >= 350 && w < h * 0.65, `side-${k}.png has portrait side-profile dimensions (${w}x${h})`);
+      assert.equal(buf.includes(Buffer.from('eXIf')), false, `side-${k}.png carries no eXIf chunk`);
+      assert.equal(buf.includes(Buffer.from('Exif\0\0')), false, `side-${k}.png carries no Exif marker`);
+    }
   });
 });
