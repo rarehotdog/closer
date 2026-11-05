@@ -187,9 +187,19 @@ function cutMap(view) {
   }
   return m;
 }
-function thumb(item, cuts) {
+function wsHref(path, wsId, extraParams = null) {
+  const u = new URL(path, location.origin);
+  if (wsId) u.searchParams.set('ws', wsId);
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) {
+      if (v !== null && v !== undefined && v !== '') u.searchParams.set(k, String(v));
+    }
+  }
+  return u.pathname + u.search;
+}
+function thumb(item, cuts, opts = {}) {
   if (!item) return h('div', { class: 'muted' }, '—');
-  return cuts[item.itemId] ? cutCanvas(cuts[item.itemId]) : placeholder(item.color, item.type || item.slot);
+  return studioThumb(item, cuts, opts);
 }
 
 // ---------- chrome ----------
@@ -397,8 +407,11 @@ function decisionUI(root, cfg) {
       const id = outfit[s];
       const it = id ? items[id] : null;
       return h('div', { class: `cell${changed.includes(s) ? ' changed' : ''}${id ? '' : ' empty'}` },
-        id ? thumb(it, cuts) : null,
-        h('div', { class: 'lbl' }, id ? `${id} · ${it ? it.type.replace('_', ' ') : ''}` : `no ${s}`));
+        h('div', { class: 'cell-hd' },
+          h('span', { class: 'cell-slot' }, s),
+          changed.includes(s) ? h('span', { class: 'cell-pill' }, 'swap') : id && cuts && cuts[id] ? h('span', { class: 'cell-dot', title: 'Colour from your photo' }) : null),
+        id ? thumb(it, cuts, { flatlay: true }) : h('span', { class: 'muted' }, '—'),
+        h('div', { class: 'lbl' }, id ? `${id} · ${it ? itemName(it) : ''}` : `no ${s}`));
     }));
   }
 
@@ -699,7 +712,7 @@ function decisionUI(root, cfg) {
     if ((op.state === 'PROPOSED' || op.state === 'LOCKED') && op.options.length && op.context) {
       const plan = S.view.plans.find((p) => p.planId === op.planId);
       const base = op.kind === 'replan' && plan ? plan.slots : op.context.baseline;
-      parts.push(h('div', { class: 'options', id: 'options' },
+      parts.push(h('div', { class: `options cols-${Math.min(3, 1 + op.options.length)}`, id: 'options' },
         h('div', { class: 'option base' }, h('h3', null, op.kind === 'replan' ? 'Locked before' : 'Now'), flatlay(base, [], cuts, items)),
         op.options.map((o, i) => h('div', { class: 'option' },
           h('h3', null, `${o.label}${o.source === 'code' && op.kind !== 'replan' ? ' · code' : ''}`),
@@ -1122,7 +1135,15 @@ async function closetWs() {
   }
   if (wantOwner && wantOwner !== 'owner') {
     const r = await fetch(`/api/ws/${encodeURIComponent(wantOwner)}/view`, { headers: authHeaders() });
-    if (r.ok) return { id: wantOwner, view: await r.json(), owner: true };
+    if (r.ok) {
+      const own = await getJson(`/api/ws/${encodeURIComponent(wantOwner)}/photos`).catch(() => ({ photos: [] }));
+      for (const p of own.photos || []) {
+        if (META.photos.some((q) => q.photoId === p.photoId)) continue;
+        const b = await fetch(`/api/ws/${encodeURIComponent(wantOwner)}/photo/${p.photoId}`, { headers: authHeaders() });
+        if (b.ok) META.photos.unshift({ photoId: p.photoId, title: 'Your photo', url: URL.createObjectURL(await b.blob()), w: p.w, h: p.h, count: 0, mine: true });
+      }
+      return { id: wantOwner, view: await r.json(), owner: true };
+    }
   }
   if (location.pathname !== '/' && ownerCount > 0) {
     chrome([...sampleChips(), closetSwitchChip(false, ownerCount)].filter(Boolean));
@@ -1202,12 +1223,19 @@ function sampleChips() {
 }
 
 function tile(it, opts = {}) {
-  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` }, it ? (opts.cuts ? thumb(it, opts.cuts) : placeholder(it.color, it.type || it.slot)) : h('span', { class: 'muted' }, '—'), h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : opts.label || 'none'), opts.badge ? h('span', { class: 'chip accent' }, opts.badge) : null);
+  const hasCut = !!(it && opts.cuts && opts.cuts[it.itemId]);
+  return h('div', { class: `cell${opts.changed ? ' changed' : ''}${opts.empty ? ' empty' : ''}` },
+    h('div', { class: 'cell-hd' },
+      h('span', { class: 'cell-slot' }, opts.label || (it && it.slot) || ''),
+      opts.badge ? h('span', { class: 'cell-pill' }, opts.badge) : hasCut ? h('span', { class: 'cell-dot', title: 'Colour from your photo' }) : null),
+    it ? thumb(it, opts.cuts || null, { flatlay: true }) : h('span', { class: 'muted' }, '—'),
+    h('span', { class: 'lbl' }, it ? `${it.itemId} · ${itemName(it)}` : `no ${opts.label || 'piece'}`));
 }
 
 async function todayScreen(view) {
   chrome(sampleChips());
-  const { id, view: v } = await closetWs();
+  const { id, view: v, owner } = await closetWs();
+  const wsParam = owner ? id : null;
   const params = new URLSearchParams(location.search);
   const known = new Set(v.items.map((i) => i.itemId));
   // ?lock=J1,B2 comes from Discover, My closet, the keep-or-let-go question and the 3D tray: only pieces of this closet count.
@@ -1215,8 +1243,13 @@ async function todayScreen(view) {
   const S = { locks: new Set(wanted), direction: 'none', rain: false, op: null, msg: null, saved: null, picked: null, gridOpen: false, view: v };
   const byId = () => Object.fromEntries(S.view.items.map((i) => [i.itemId, i]));
   const root = h('div');
-  view.append(h('h1', null, 'What do you want to wear today?'),
-    h('p', { class: 'lede' }, wanted.length ? `Keeping ${wanted.join(' + ')}, as you picked; Closer completes the rest from what you own and have available.` : 'Keep the piece you want; Closer completes the rest from what you own and have available.'), root);
+  view.append(
+    h('div', { class: 'rail-head' },
+      h('div', null, h('h1', null, 'What do you want to wear today?')),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn small ghost', href: wsHref('/closet/3d', wsParam) }, '3D Boutique Rail →'),
+        h('a', { class: 'btn small ghost', href: wsHref('/discover', wsParam) }, 'Match looks'))),
+    h('p', { class: 'lede' }, wanted.length ? `Keeping ${wanted.join(' + ')}; Closer completes the rest from available pieces.` : 'Anchor one or more pieces; Closer completes the outfit from your closet.'), root);
 
   /** Brings the answer on screen: the options, or the question Closer asks back. */
   function reveal() {
@@ -1307,9 +1340,10 @@ async function todayScreen(view) {
     const SERVER_LABEL = { 'Sentence read by keyword rules (mock)': 'Mock mode: read with keyword rules, not the model', 'Reason by code': 'reasons written by code' };
     const labelLine = (op) => (op.labels || []).map((l) => SERVER_LABEL[l] || l).join(' · ');
     const sayPanel = h('section', { class: 'panel' }, h('h2', null, 'Tell Closer what you want today'),
-      h('p', { class: 'muted' }, 'Examples in English or Korean. Tap one to try it:'),
       h('div', { class: 'chip-row' }, examples.map((c) => h('button', { type: 'button', class: 'chip', onclick: () => say(c) }, c))),
-      box, h('button', { class: 'btn small', type: 'button', id: 'say-go', onclick: () => box.value.trim() && say(box.value) }, 'Go'),
+      h('div', { class: 'say-bar' },
+        box,
+        h('button', { class: 'btn', type: 'button', id: 'say-go', onclick: () => box.value.trim() && say(box.value) }, 'Go')),
       S.op && S.op.intent ? h('div', { class: 'row' }, h('span', { class: 'chip accent' }, `Understood: keep ${S.op.intent.anchors.map((x) => `${x} · ${itemName(items[x])}`).join(' + ')}${DIR_WORD[S.op.intent.direction] ? ` · ${DIR_WORD[S.op.intent.direction]}` : ''}${S.op.intent.rain ? ' · rain' : ''}`)) : null,
       S.op && (S.op.callLines || []).length ? h('div', { class: 'chip-row', id: 'say-calls' }, callChips(S.op)) : null,
       S.op && (S.op.callLines || []).length ? h('ul', { class: 'calls' }, S.op.callLines.map((l) => h('li', null, l))) : null,
@@ -1326,7 +1360,7 @@ async function todayScreen(view) {
           // Every answer the server offers is a button that does what it says.
           h('div', { class: 'row' }, (q ? q.choices : []).map((c) => {
             const b = (label, fn) => h('button', { class: 'btn small ghost', type: 'button', onclick: fn }, label);
-            if (c === 'discover') return h('a', { class: 'btn ghost', href: '/discover' }, 'Open Discover');
+            if (c === 'discover') return h('a', { class: 'btn ghost', href: wsHref('/discover', wsParam) }, 'Open Discover');
             if (items[c]) return b(`${c} · ${itemName(items[c])}`, () => { S.locks = new Set([c]); run(); });
             if (c === 'relax') return b('Drop the direction', () => { S.direction = 'none'; run(); });
             if (c === 'keep' && S.rain) return b('Keep it anyway', () => { S.rain = false; run(); });
@@ -1337,7 +1371,7 @@ async function todayScreen(view) {
       } else {
         parts.push(h('section', { class: 'panel' }, h('h2', null, `${op.options.length === 1 ? 'One outfit' : 'Two outfits'} with what you kept`),
           flashAt('top'),
-          h('div', { class: 'options' }, op.options.map((o, i) => h('div', { class: `option${S.picked === i ? ' picked' : ''}` }, h('h3', null, o.label),
+          h('div', { class: `options cols-${Math.min(3, op.options.length)}` }, op.options.map((o, i) => h('div', { class: `option${S.picked === i ? ' picked' : ''}` }, h('h3', null, o.label),
             h('div', { class: 'flatlay' }, SLOTS.map((s) => tile(items[o.outfit[s]], { label: s, empty: !o.outfit[s], badge: S.locks.has(o.outfit[s]) ? 'kept' : null, cuts }))),
             h('ul', { class: 'reasons' }, o.reasonLines.map((l) => h('li', null, l))),
             S.picked === i ? h('span', { class: 'chip ok' }, 'Your pick for today') : h('button', { class: 'btn', type: 'button', onclick: () => pick(i) }, 'Wear this'),
@@ -1355,7 +1389,7 @@ async function todayScreen(view) {
       parts.push(h('section', { class: 'panel' }, h('h2', null, 'Something changed?'),
         h('div', { class: 'row' }, loose.map((x) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => laundry(x) }, `${x} is in the laundry`)))));
     }
-    if (S.worn) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Recorded'), h('p', null, 'This outfit now counts as worn today.'), h('a', { class: 'btn ghost', href: '/closet' }, 'See My closet')));
+    if (S.worn) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Recorded'), h('p', null, 'This outfit now counts as worn today.'), h('a', { class: 'btn ghost', href: wsHref('/closet', wsParam) }, 'See My closet')));
     parts.push(h('details', { class: 'panel', id: 'pieces', open: !S.op || S.gridOpen ? true : null, ontoggle: (e) => { S.gridOpen = e.target.open; } },
       h('summary', null, `Or tap what you want to keep (${S.view.items.length} pieces)`), grid,
       h('h2', { style: 'margin-top:14px' }, 'Anything else?'), h('div', { class: 'row' }, dir), rain, h('div', { class: 'spacer' }),
@@ -1369,18 +1403,25 @@ async function todayScreen(view) {
 async function closetScreen(view) {
   chrome(sampleChips());
   const { id, view: v, owner } = await closetWs();
+  const wsParam = owner ? id : null;
   const cuts = cutMap(v);
-  const S = { window: 60, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
+  const S = { window: 60, candFilter: 'all', ledger: null, review: null, open: null, market: null, draft: null, msg: null, coverage: null, chartRange: {}, chartPick: null, items: Object.fromEntries(v.items.map((i) => [i.itemId, i])) };
   const root = h('div');
   const boardSlot = h('div', { id: 'asset-slot' });
-  view.append(h('h1', null, 'My closet'),
-    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in the window you choose; days without a record count as unknown.'),
+  view.append(
+    h('div', { class: 'rail-head' },
+      h('div', null, h('h1', null, 'My closet')),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn small', href: '/app' }, '+ Add from a photo'),
+        viewSwitch('tidy', wsParam))),
+    h('p', { class: 'lede' }, 'Pieces with no confirmed wear in your chosen window · days without a record stay unknown.'),
     boardSlot, root);
   /** The asset board above the review window, read again after every load, saved price and saved position. */
   async function paintBoard() {
     let L = null;
     try { L = await getJson(`/api/ws/${id}/ledger`); } catch { L = null; }
-    boardSlot.replaceChildren(...[assetBoard(L), h('p', { class: 'asset-after' }, h('a', { class: 'btn small ghost', href: owner ? `/closet/3d?ws=${encodeURIComponent(id)}` : '/closet/3d', id: 'see-3d' }, 'See it in 3D'))].filter(Boolean));
+    S.ledger = L;
+    boardSlot.replaceChildren(...[assetBoard(L), h('p', { class: 'asset-after' }, h('a', { class: 'btn small ghost', href: wsHref('/closet/3d', wsParam), id: 'see-3d' }, 'See it in 3D'))].filter(Boolean));
   }
 
   async function load() { [S.review, S.coverage] = await Promise.all([getJson(`/api/ws/${id}/review?window=${S.window}`), getJson(`/api/ws/${id}/coverage`), paintBoard()]); render(); }
@@ -1393,7 +1434,7 @@ async function closetScreen(view) {
   async function act(itemId, action) {
     const r = await postJson(`/api/ws/${id}/reviewchoice`, { itemId, action });
     S.msg = r.ok === false ? errChip(r) : null;
-    if (action === 'restyle') { location.href = `/today?lock=${itemId}`; return; }
+    if (action === 'restyle') { location.href = wsHref('/today', wsParam, { lock: itemId }); return; }
     S.open = { itemId, action };
     S.draft = null;
     if (action === 'sell_review') { S.market = await getJson(`/api/ws/${id}/market/${itemId}`); S.calc = null; }
@@ -1603,7 +1644,7 @@ async function closetScreen(view) {
     if (r.ok === false) { S.msg = errChip(r); render(); return; }
     D.last = { same, key };
     D.key = uuid();
-    if (choice === 'WEAR_ONCE') { location.href = `/today?lock=${D.itemId}`; return; }
+    if (choice === 'WEAR_ONCE') { location.href = wsHref('/today', wsParam, { lock: D.itemId }); return; }
     if (choice === 'SELL_PREPARE') {
       await act(D.itemId, 'sell_review');
       S.calc = { platform: D.platform, price: D.price, fees: D.fees.map((f) => ({ ...f })), result: D.net && D.net.ok !== false ? D.net : null };
@@ -1618,6 +1659,21 @@ async function closetScreen(view) {
     const V = D.view;
     const K = V.keep;
     const cur = PLATFORM_CURRENCY[D.platform];
+    const it = S.items[D.itemId];
+    const cut = cuts[D.itemId] || null;
+    const tag = S.ledger && S.ledger.tags ? S.ledger.tags[D.itemId] : null;
+    const hero = it ? h('div', { class: 'decide-hero' },
+      h('div', { class: 'decide-frames' },
+        cut ? h('div', { class: 'decide-frame' }, contextCutCanvas(cut), h('span', null, 'Your photo')) : null,
+        h('div', { class: 'decide-frame' }, sampleMediaNode(it, 0, cut), h('span', null, 'Studio drape'))),
+      h('div', { class: 'decide-meta' },
+        h('div', { class: 'chip-row', style: 'margin:0' },
+          h('span', { class: 'chip' }, `${it.slot} · ${FORMALITY_LABEL[it.formality] || it.formality}`),
+          h('span', { class: `chip${it.availability === 'AVAILABLE' ? '' : ' warn'}` }, (it.availability || 'AVAILABLE').toLowerCase()),
+          tag ? h('span', { class: 'chip accent' }, `${money(tag.amount, tag.currency)}${tag.source === 'sample' ? ' · sample' : ''}`) : null),
+        h('div', { class: 'row' },
+          h('a', { class: 'btn small ghost', href: wsHref('/today', wsParam, { lock: D.itemId }) }, 'Wear today →'),
+          h('a', { class: 'btn small ghost', href: wsHref('/closet/3d', wsParam) }, 'View on 3D rail')))) : null;
     const hz = h('div', { class: 'seg', role: 'group', 'aria-label': 'Horizon' }, V.horizons.map((d) => h('button', { type: 'button', 'aria-pressed': D.horizon === d ? 'true' : 'false', onclick: () => { D.horizon = d; loadDecide(); } }, `${d} days`)));
     // Keep side: counts only. The outlook stays "not computed" because there is no counted basis for a forward number.
     const useForm = h('div', { class: 'row' },
@@ -1684,7 +1740,8 @@ async function closetScreen(view) {
         // Counted facts that moved since this snapshot (its own horizon and platform); nothing is shown when none did.
         d.recheck && d.recheck.needed ? [h('br'), h('span', { class: 'chip warn', 'data-recheck': d.decisionId }, `Facts moved: ${d.recheck.changed.join(' · ')}`)] : null)))) : null;
     return h('section', { class: 'panel decide', id: 'decide' },
-      h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Keep or let go? · ${D.itemId} · ${itemName(S.items[D.itemId])}`), h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.decide = null; render(); } }, 'Close')),
+      h('div', { class: 'row', style: 'justify-content:space-between' }, h('h2', { style: 'margin:0' }, `Keep or let go? · ${D.itemId} · ${itemName(S.items[D.itemId])}`), h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.decide = null; render(); } }, 'Close')),
+      hero,
       h('p', { class: 'ask' }, K.question), hz,
       // The market view of this piece, full width like an exchange chart: prices seen over time in the sell side's currency.
       chart ? h('div', { class: 'decide-chart' }, h('p', { class: 'lbl' }, `Prices seen over time · ${cur} · ${platformName(D.platform)} highlighted`), chart) : null,
@@ -1739,32 +1796,67 @@ async function closetScreen(view) {
     const r = S.review;
     if (!r) { root.replaceChildren(h('p', { class: 'muted' }, 'Loading…')); return; }
     const win = h('div', { class: 'seg', role: 'group', 'aria-label': 'Window' }, [30, 60, 90].map((d) => h('button', { type: 'button', 'aria-pressed': S.window === d ? 'true' : 'false', onclick: () => { S.window = d; load(); } }, `${d} days`)));
-    const cands = r.rows.filter((x) => x.status === 'CANDIDATE');
+    const allCands = r.rows.filter((x) => x.status === 'CANDIDATE');
+    const tags = (S.ledger && S.ledger.tags) || {};
+    const filterDefs = [
+      ['all', `All (${allCands.length})`],
+      ...(allCands.some((x) => x.seasonHint) ? [['season', 'Season hint']] : []),
+      ...(allCands.some((x) => tags[x.itemId]) ? [['priced', 'With price']] : []),
+      ...(allCands.some((x) => x.lastChoice) ? [['reviewed', 'Reviewed']] : []),
+    ];
+    const cands = allCands.filter((x) => {
+      if (S.candFilter === 'season') return !!x.seasonHint;
+      if (S.candFilter === 'priced') return !!tags[x.itemId];
+      if (S.candFilter === 'reviewed') return !!x.lastChoice;
+      return true;
+    });
     const others = r.rows.filter((x) => x.status !== 'CANDIDATE');
     const actions = [['restyle', 'Wear it again'], ['keep', 'Keep it'], ['repair_check', 'Check repair'], ['sell_review', 'Look at selling'], ['donate_review', 'Look at donating']];
     const parts = [
-      h('section', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, 'Review window'), win),
+      h('section', { class: 'panel' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('h2', { style: 'margin:0' }, 'Review window'), win),
         h('p', { class: 'muted' }, r.note),
         h('div', { class: 'row' }, Object.entries(r.counts).map(([k, n]) => h('span', { class: 'chip' }, k === 'CANDIDATE' ? `No confirmed wear in ${S.window} days: ${n}` : k === 'RECENT_WEAR' ? `Worn recently: ${n}` : `${k.toLowerCase().replace(/_/g, ' ')}: ${n}`)), coverageChips())),
-      h('section', { class: 'panel' }, h('h2', null, `To look at (${cands.length})`),
-        cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this window.') : null,
-        h('div', { class: 'grid' }, cands.map((x) => h('div', { class: `item wide${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
-          h('div', { class: 'thumb' }, thumb(S.items[x.itemId], cuts)),
-          h('div', { class: 'meta' }, h('b', null, `${x.itemId} · ${itemName(S.items[x.itemId])}`), h('span', null, x.line),
-            h('span', { class: 'muted' }, `Tracked since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays} days without any record`),
-            x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
-            x.lastChoice ? h('span', { class: 'chip' }, `Last choice: ${x.lastChoice.action.replace('_', ' ')}`) : null,
-            h('div', { class: 'row' },
-              h('button', { class: 'btn small', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'),
-              actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))))))),
+      h('section', { class: 'panel' },
+        h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:10px' },
+          h('h2', { style: 'margin:0' }, `To look at (${cands.length})`),
+          filterDefs.length > 1 ? h('div', { class: 'dock-cats', role: 'group', 'aria-label': 'Filter candidates' }, filterDefs.map(([k, lbl]) =>
+            h('button', { type: 'button', class: 'cat-pill', 'aria-pressed': S.candFilter === k ? 'true' : 'false', onclick: () => { S.candFilter = k; render(); } }, lbl))) : null),
+        cands.length === 0 ? h('p', { class: 'muted' }, 'Nothing to look at in this view.') : null,
+        h('div', { class: 'grid' }, cands.map((x) => {
+          const it = S.items[x.itemId];
+          const tg = tags[x.itemId];
+          return h('div', { class: `item wide cand-card${S.open && S.open.itemId === x.itemId ? ' locked' : ''}` },
+            h('div', { class: 'thumb' }, thumb(it, cuts)),
+            h('div', { class: 'meta' },
+              h('div', { class: 'cand-hd' },
+                h('b', null, `${x.itemId} · ${itemName(it)}`),
+                tg ? h('span', { class: 'cand-price' }, money(tg.amount, tg.currency), tg.source === 'sample' ? h('i', null, ' Sample') : null) : null),
+              h('span', null, x.line),
+              h('div', { class: 'row', style: 'margin-top:2px' },
+                h('span', { class: 'muted' }, `Since ${fmtDate(x.trackedSince)} · ${x.unrecordedDays}d unknown`),
+                x.seasonHint ? h('span', { class: 'chip warn' }, x.seasonHint) : null,
+                x.lastChoice ? h('span', { class: 'chip' }, `Last: ${x.lastChoice.action.replace('_', ' ')}`) : null),
+              h('div', { class: 'row' },
+                h('button', { class: 'btn small', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'),
+                actions.map(([a, l]) => h('button', { class: 'btn small ghost', type: 'button', onclick: () => (a === 'keep' ? keep(x.itemId) : act(x.itemId, a)) }, l)))));
+        }))),
     ];
     parts.push(decidePanel());
     if (S.open && S.open.action === 'sell_review') parts.push(h('section', { class: 'panel', id: 'selling' }, h('h2', null, `Prices you saw for ${S.open.itemId}`), h('p', { class: 'muted' }, S.market ? S.market.note : ''), sellCharts(), evidenceForm(), calcPanel(), priceCards()));
     if (S.open && S.open.action === 'repair_check') parts.push(h('section', { class: 'panel' }, h('h2', null, `Repair check for ${S.open.itemId}`), h('p', { class: 'muted' }, 'Note what is wrong (fit, a broken zip, a stain) and ask a repair shop. Closer only keeps your note.')));
     parts.push(draftPanel());
-    parts.push(h('details', { class: 'panel' }, h('summary', null, `Everything else (${others.length})`),
-      h('table', { class: 't' }, h('tbody', null, others.map((x) => h('tr', null, h('td', { class: 'mono' }, x.itemId), h('td', null, x.status.toLowerCase().replace('_', ' ')), h('td', null, x.line),
-        h('td', null, h('button', { class: 'btn small ghost', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?'))))))));
+    parts.push(h('details', { class: 'panel', open: allCands.length === 0 ? true : null }, h('summary', null, `Everything else (${others.length})`),
+      h('table', { class: 't ledger-t' }, h('tbody', null, others.map((x) => {
+        const it = S.items[x.itemId];
+        const tg = tags[x.itemId];
+        return h('tr', null,
+          h('td', null, h('div', { class: 'ledger-piece' },
+            h('div', { class: 'ledger-thumb' }, thumb(it, cuts)),
+            h('div', null, h('b', { class: 'mono' }, x.itemId), h('div', { class: 'muted' }, itemName(it))))),
+          h('td', null, h('span', { class: 'chip' }, x.status.toLowerCase().replace(/_/g, ' '))),
+          h('td', null, x.line, tg ? h('div', { class: 'muted mono' }, `${money(tg.amount, tg.currency)}${tg.source === 'sample' ? ' · sample' : ''}`) : null),
+          h('td', null, h('button', { class: 'btn small ghost', type: 'button', onclick: () => openDecide(x.itemId) }, 'Keep or let go?')));
+      })))));
     if (S.msg && !S.msg.dataset.at) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
     keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
@@ -1775,20 +1867,35 @@ async function closetScreen(view) {
 
 async function discoverScreen(view) {
   chrome(sampleChips());
-  const { id, view: v } = await closetWs();
+  const { id, view: v, owner } = await closetWs();
+  const wsParam = owner ? id : null;
+  const cuts = cutMap(v);
   const items = Object.fromEntries(v.items.map((i) => [i.itemId, i]));
   const L = await getJson('/api/looks');
-  const S = { cat: 'wedding_guest', look: null, match: null, col: null, msg: null, hidden: new Set() };
+  const S = { cat: 'wedding_guest', look: null, match: null, matches: {}, stageMode: 'mine', altPicks: {}, col: null, msg: null, hidden: new Set() };
   const root = h('div');
-  view.append(h('h1', null, 'Discover looks'),
-    h('p', { class: 'lede' }, 'Pick the looks you want; Closer counts how much of them your closet already covers.'), root);
+  view.append(
+    h('div', { class: 'rail-head' },
+      h('div', null, h('h1', null, 'Discover looks')),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn small ghost', href: wsHref('/closet/3d', wsParam) }, '3D Boutique Rail →'),
+        h('a', { class: 'btn small ghost', href: wsHref('/today', wsParam) }, 'Wear today'))),
+    h('p', { class: 'lede' }, 'Pick a target look · Closer counts piece-by-piece what your closet already covers.'), root);
   const lv = { SAME: ['ok', 'same'], SIMILAR: ['warn', 'similar'], NONE: ['bad', 'missing'] };
   const bx = { FILLED: ['filled', 'have it'], PARTIAL: ['partial', 'similar'], EMPTY: ['empty', 'missing'] };
 
   async function loadCollection() { S.col = await getJson(`/api/ws/${id}/collection`); }
+  async function preloadMatches() {
+    const res = await Promise.all((L.looks || []).map((l) => getJson(`/api/ws/${id}/look/${l.lookId}`).catch(() => null)));
+    for (const m of res) {
+      if (m && m.lookId) S.matches[m.lookId] = m;
+    }
+  }
   async function open(lookId) {
     S.look = lookId;
-    S.match = await getJson(`/api/ws/${id}/look/${lookId}`);
+    S.altPicks = {};
+    S.match = S.matches[lookId] || await getJson(`/api/ws/${id}/look/${lookId}`);
+    if (S.match && S.match.lookId) S.matches[lookId] = S.match;
     render();
   }
   async function toggleTarget(lookId, on) {
@@ -1801,8 +1908,10 @@ async function discoverScreen(view) {
     const c = S.col;
     if (!c) return null;
     if (c.targets.length === 0) {
-      return h('section', { class: 'panel' }, h('h2', null, 'My style targets'),
-        h('p', { class: 'muted' }, 'No targets yet. Tap "Add as target" on a look below. The match is a count on your closet, piece by piece; nothing is estimated.'));
+      return h('section', { class: 'panel targets-slim' },
+        h('div', { class: 'row', style: 'justify-content:space-between' },
+          h('h2', { style: 'margin:0' }, 'My style targets'),
+          h('span', { class: 'muted' }, 'Tap “Add as target” on any look to pin it to your item box.')));
     }
     const pctLabel = `${c.matched} of ${c.total} pieces · ${c.pct}%`;
     return h('section', { class: 'panel' }, h('h2', null, 'My style targets'),
@@ -1811,57 +1920,139 @@ async function discoverScreen(view) {
       h('p', null, h('b', null, pctLabel), ` · ${c.complete} of ${c.looks.length} target looks complete`),
       h('p', { class: 'muted' }, c.basis),
       h('h3', null, 'Item box'),
-      h('div', { class: 'box' }, c.box.map((e) => h('div', { class: `box-cell ${bx[e.state][0]}` },
-        placeholder(e.color, e.label), h('b', null, e.label),
-        h('span', { class: `chip ${e.state === 'FILLED' ? 'ok' : e.state === 'PARTIAL' ? 'warn' : 'bad'}` }, e.itemId ? `${bx[e.state][1]} · ${e.itemId}` : bx[e.state][1]),
-        h('span', { class: 'muted' }, `in ${e.lookIds.length} target look${e.lookIds.length === 1 ? '' : 's'}${e.state === 'EMPTY' && e.outfitsAdded !== null ? ` · adds ${e.outfitsAdded} complete outfits` : ''}`)))),
-      c.nextUp.length ? h('p', { class: 'muted' }, `Fills the most target looks next: ${c.nextUp.map((e) => `${e.label} (${e.lookIds.length} look${e.lookIds.length === 1 ? '' : 's'})`).join(', ')}. Use a similar piece you own, or register a new one from a photo; the count moves only when the closet does.`) : null);
+      h('div', { class: 'box' }, c.box.map((e) => {
+        const matchedIt = e.itemId && items[e.itemId] ? items[e.itemId] : { type: e.type, color: e.color, slot: e.slot };
+        return h('div', { class: `box-cell ${bx[e.state][0]}` },
+          studioThumb(matchedIt, e.itemId ? cuts : null),
+          h('b', null, e.label),
+          h('span', { class: `chip ${e.state === 'FILLED' ? 'ok' : e.state === 'PARTIAL' ? 'warn' : 'bad'}` }, e.itemId ? `${bx[e.state][1]} · ${e.itemId}` : bx[e.state][1]),
+          h('span', { class: 'muted' }, `in ${e.lookIds.length} look${e.lookIds.length === 1 ? '' : 's'}${e.state === 'EMPTY' && e.outfitsAdded !== null ? ` · +${e.outfitsAdded} outfits` : ''}`));
+      })),
+      c.nextUp.length ? h('p', { class: 'muted' }, `Next highest impact: ${c.nextUp.map((e) => `${e.label} (${e.lookIds.length} look${e.lookIds.length === 1 ? '' : 's'})`).join(', ')}.`) : null);
   }
   function render() {
-    const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Occasion' }, L.categories.map((c) => h('button', { type: 'button', 'aria-pressed': S.cat === c.id ? 'true' : 'false', onclick: () => { S.cat = c.id; S.match = null; render(); } }, c.label)));
+    const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Occasion' }, L.categories.map((c) => h('button', { type: 'button', 'aria-pressed': S.cat === c.id ? 'true' : 'false', onclick: () => {
+      S.cat = c.id;
+      const first = L.looks.find((x) => x.category === c.id);
+      if (first) open(first.lookId);
+      else { S.look = null; S.match = null; render(); }
+    } }, c.label)));
     const looks = L.looks.filter((l) => l.category === S.cat);
-    const covOf = (lookId) => (S.col ? S.col.looks.find((x) => x.lookId === lookId) : null);
+    const covOf = (lookId) => {
+      const fromCol = S.col ? S.col.looks.find((x) => x.lookId === lookId) : null;
+      if (fromCol) return fromCol.coverage;
+      const pm = S.matches[lookId];
+      if (!pm || !pm.pieces) return null;
+      const total = pm.pieces.length;
+      const matched = pm.reused || 0;
+      return { matched, total, missing: total - matched, pct: total ? Math.round((100 * matched) / total) : 0 };
+    };
     const isTarget = (lookId) => !!(S.col && S.col.targets.includes(lookId));
-    const parts = [targetsPanel(), h('section', { class: 'panel' }, h('div', { class: 'row' }, tabs), h('div', { class: 'spacer' }),
-      h('div', { class: 'cards' }, looks.map((l) => {
+    const parts = [targetsPanel(), h('section', { class: 'panel' },
+      h('div', { class: 'row', style: 'justify-content:space-between' }, tabs, h('span', { class: 'muted' }, 'Tap a look to inspect your closet match')),
+      h('div', { class: 'spacer' }),
+      h('div', { class: 'look-cards' }, looks.map((l) => {
         const cov = covOf(l.lookId);
+        const collageEntries = l.pieces.map((p) => ({ slot: p.slot, type: p.type, color: p.color, label: p.label }));
         return h('div', { class: `card look${S.look === l.lookId ? ' pinned' : ''}` },
           h('button', { type: 'button', class: 'look-select', onclick: () => open(l.lookId) },
-            h('div', { class: 'row' }, l.pieces.map((p) => placeholder(p.color, p.label))),
-            h('div', { class: 'hd' }, l.title), h('div', { class: 'muted' }, `${l.credit} · ${l.note}`)),
+            outfitCollageNode(collageEntries, { compact: true }),
+            h('div', { class: 'hd' }, l.title),
+            h('div', { class: 'muted' }, l.note),
+            cov ? h('div', { class: 'look-meter' },
+              h('div', { class: 'look-meter-top' },
+                h('span', null, `${cov.matched}/${cov.total} in closet`),
+                h('b', null, `${cov.pct}%`)),
+              h('div', { class: 'progress', style: 'margin:4px 0 0' }, h('div', { class: 'progress-fill', style: `width:${cov.pct}%` }))) : null),
           h('div', { class: 'row actions' },
-            cov ? h('span', { class: `chip ${cov.coverage.missing === 0 ? 'ok' : 'accent'}` }, `${cov.coverage.matched}/${cov.coverage.total} · ${cov.coverage.pct}%`) : null,
             h('button', { type: 'button', class: `btn small${isTarget(l.lookId) ? '' : ' ghost'}`, 'aria-pressed': isTarget(l.lookId) ? 'true' : 'false', onclick: () => toggleTarget(l.lookId, !isTarget(l.lookId)) }, isTarget(l.lookId) ? 'Target · remove' : 'Add as target')));
       })))];
     const m = S.match;
     if (m && m.ok !== false) {
-      const own = Object.values(m.ownOutfit);
-      const pct = m.pieces.length ? Math.round((100 * m.reused) / m.pieces.length) : 0;
-      parts.push(h('section', { class: 'panel' }, h('h2', null, `${m.title}: ${m.reused} of ${m.pieces.length} from your closet (${pct}%)`),
-        h('table', { class: 't look' }, h('tbody', null, m.pieces.map((p) => h('tr', null,
-          h('td', null, p.piece.label), h('td', null, h('span', { class: `chip ${lv[p.level][0]}` }, lv[p.level][1])),
-          h('td', null, p.itemId ? `${p.itemId} · ${itemName(items[p.itemId])}` : '—'), h('td', { class: 'muted' }, p.why))))),
-        h('div', { class: 'spacer' }),
-        own.length ? h('a', { class: 'btn', href: `/today?lock=${own.join(',')}`, role: 'button' }, `Wear it with mine (${own.join(' + ')})`) : null));
-      const gaps = m.gaps.filter((g) => !S.hidden.has(g.piece.label));
-      if (gaps.length) parts.push(h('section', { class: 'panel' }, h('h2', null, 'Pieces you do not have'),
-        h('div', { class: 'grid' }, gaps.map((g) => h('div', { class: 'card' },
-          h('div', { class: 'hd' }, g.piece.label, placeholder(g.piece.color, g.piece.label)),
-          h('p', null, g.outfitsAdded > 0 ? `Adding it gives ${g.outfitsAdded} more complete outfits from this closet.` : 'It adds no new complete outfits to this closet.'),
-          h('p', { class: 'muted' }, m.basis),
-          h('div', { class: 'row' },
-            g.alternatives.length ? h('a', { class: 'btn small ghost', href: `/today?lock=${[...own, g.alternatives[0]].join(',')}` }, `Use my ${g.alternatives[0]}`) : null,
-            h('button', { class: 'btn small ghost', type: 'button', onclick: () => { S.hidden.add(g.piece.label); S.msg = h('span', { class: 'chip' }, 'Hidden for this visit · nothing saved'); render(); } }, 'Hide for now'),
-            h('button', { class: 'btn small', type: 'button', disabled: g.piece.shop.url ? null : true }, g.piece.shop.url ? 'Open product page' : 'No checked product link yet')))))));
-      parts.push(h('details', { class: 'panel' }, h('summary', null, 'Buy the whole look instead'),
-        h('ul', { class: 'reasons' }, m.fullLook.map((p) => h('li', null, `${p.label} · ${p.shop.url ? `${p.shop.match === 'SAME_ITEM' ? 'same item' : 'similar item'} · ${p.shop.price || 'price not checked'}` : 'no checked product link yet'}`))),
-        h('p', { class: 'muted' }, 'Links open the shop. Closer does not fill a cart, pay, or check stock.')));
+      const gapBySlot = Object.fromEntries((m.gaps || []).map((g) => [g.piece.slot, g]));
+      const activeIds = [];
+      const stageEntries = m.pieces.map((p) => {
+        const slot = p.piece.slot;
+        const altId = S.altPicks[slot];
+        const chosenId = p.itemId || altId || null;
+        if (chosenId) activeIds.push(chosenId);
+        if (S.stageMode === 'target') {
+          return { slot, type: p.piece.type, color: p.piece.color, label: p.piece.label };
+        }
+        if (chosenId && items[chosenId]) {
+          const it = items[chosenId];
+          return { slot, type: it.type, color: it.color, cut: cuts[chosenId] || null, label: `${chosenId}` };
+        }
+        return { slot, type: p.piece.type, color: p.piece.color, missing: true, label: p.piece.label };
+      });
+      const activeCount = activeIds.length;
+      const pct = m.pieces.length ? Math.round((100 * activeCount) / m.pieces.length) : 0;
+      const stageToggle = h('div', { class: 'seg ibox-seg', role: 'group', 'aria-label': 'Preview mode' },
+        [['mine', `Your closet (${activeCount}/${m.pieces.length})`], ['target', 'Target look']].map(([k, lbl]) =>
+          h('button', { type: 'button', 'aria-pressed': S.stageMode === k ? 'true' : 'false', onclick: () => { S.stageMode = k; render(); } }, lbl)));
+
+      parts.push(h('section', { class: 'panel ibox-panel', id: 'look-item-box' },
+        h('div', { class: 'ibox' },
+          h('div', { class: 'ibox-stage' },
+            stageToggle,
+            outfitCollageNode(stageEntries, { compact: false }),
+            activeIds.length
+              ? h('a', { class: 'btn ibox-cta', href: wsHref('/today', wsParam, { lock: activeIds.join(',') }), role: 'button' }, `Wear it with mine (${activeIds.join(' + ')})`)
+              : h('p', { class: 'muted' }, 'No matching pieces in this closet yet.')),
+          h('div', { class: 'ibox-body' },
+            h('div', { class: 'row', style: 'justify-content:space-between' },
+              h('h2', { style: 'margin:0' }, m.title),
+              h('span', { class: `chip ${activeCount === m.pieces.length ? 'ok' : 'accent'}` }, `${activeCount} of ${m.pieces.length} · ${pct}%`)),
+            h('div', { class: 'progress' }, h('div', { class: 'progress-fill', style: `width:${pct}%` })),
+            h('p', { class: 'muted', style: 'margin:0 0 10px' }, m.basis),
+            h('div', { class: 'ibox-rows' }, m.pieces.filter((p) => !S.hidden.has(p.piece.label)).map((p) => {
+              const slot = p.piece.slot;
+              const gap = gapBySlot[slot];
+              const altId = S.altPicks[slot];
+              const chosenId = p.itemId || altId || null;
+              const chosenIt = chosenId ? items[chosenId] : null;
+              const chipCls = p.itemId ? lv[p.level][0] : altId ? 'accent' : 'bad';
+              const chipTxt = p.itemId ? lv[p.level][1] : altId ? `using ${altId}` : 'missing';
+              return h('div', { class: `ibox-row${chosenIt ? '' : ' is-gap'}` },
+                h('div', { class: 'ibox-pair' },
+                  h('div', { class: 'ibox-thumb', title: `Target: ${p.piece.label}` }, studioThumb({ type: p.piece.type, color: p.piece.color, slot }, null)),
+                  h('span', { class: 'ibox-arr', 'aria-hidden': 'true' }, '→'),
+                  chosenIt
+                    ? h('div', { class: 'ibox-thumb is-mine', title: `Yours: ${chosenId} · ${itemName(chosenIt)}` }, studioThumb(chosenIt, cuts))
+                    : h('div', { class: 'ibox-thumb is-empty', title: 'Not in your closet' }, '?')),
+                h('div', { class: 'ibox-info' },
+                  h('div', { class: 'ibox-hd' },
+                    h('b', null, p.piece.label),
+                    h('span', { class: `chip ${chipCls}` }, chipTxt)),
+                  h('div', { class: 'muted' }, chosenIt
+                    ? `${chosenId} · ${itemName(chosenIt)} · ${altId ? 'swapped from your closet' : p.why}`
+                    : `${p.why}${gap && gap.outfitsAdded > 0 ? ` · +${gap.outfitsAdded} complete outfits if filled` : ''}`),
+                  !p.itemId && gap ? h('div', { class: 'row', style: 'margin-top:6px' },
+                    gap.alternatives.map((aid) => h('button', {
+                      type: 'button',
+                      class: `btn small${altId === aid ? '' : ' ghost'}`,
+                      'aria-pressed': altId === aid ? 'true' : 'false',
+                      onclick: () => {
+                        if (S.altPicks[slot] === aid) delete S.altPicks[slot];
+                        else S.altPicks[slot] = aid;
+                        S.stageMode = 'mine';
+                        render();
+                      },
+                    }, `Use my ${aid}`)),
+                    h('button', { type: 'button', class: 'btn small ghost', onclick: () => { S.hidden.add(p.piece.label); S.msg = h('span', { class: 'chip' }, 'Hidden for this visit · nothing saved'); render(); } }, 'Hide')) : null));
+            })),
+            h('details', { class: 'sub', style: 'margin-top:10px' },
+              h('summary', null, 'Buy the whole look or check missing links'),
+              h('ul', { class: 'reasons' }, m.fullLook.map((p) => h('li', null, `${p.label} · ${p.shop.url ? `${p.shop.match === 'SAME_ITEM' ? 'same item' : 'similar item'} · ${p.shop.price || 'price not checked'}` : 'no checked product link yet'}`))),
+              h('p', { class: 'muted' }, 'Links open the shop. Closer does not fill a cart, pay, or check stock.'))))));
     }
     if (S.msg) parts.push(h('div', { class: 'flash', role: 'status', 'aria-live': 'polite' }, S.msg));
     keepFocus(root, () => root.replaceChildren(...parts.filter(Boolean)));
   }
-  await loadCollection();
-  render();
+  await Promise.all([loadCollection(), preloadMatches()]);
+  const firstLook = L.looks.find((x) => x.category === S.cat);
+  if (firstLook) await open(firstLook.lookId);
+  else render();
 }
 
 // The closet by layer in 3D. Same pieces and states as My closet (anatomy.js); the prices on it come from the closet ledger, as on My closet.
@@ -1901,17 +2092,19 @@ function assetOverlay(L, overlayRows) {
   return { el, text: `${said.join('; ')}. ${note}.` };
 }
 
-/** Rail · Items · Ledger · Walk-in: switches views of the same closet, keeping ?ws= intact. */
-function viewSwitch(mode) {
+/** Rail · Items · Ledger · Tidy up · Walk-in: switches views of the same closet, keeping ?ws= intact. */
+function viewSwitch(mode, explicitWs) {
+  const curWs = explicitWs !== undefined ? explicitWs : new URLSearchParams(location.search).get('ws');
   const go = (k) => {
     if (k === mode) return;
-    const u = new URL(location.href);
-    if (k === 'rail') u.searchParams.delete('view');
-    else u.searchParams.set('view', k);
-    location.assign(u.pathname + u.search);
+    if (k === 'tidy') {
+      location.assign(wsHref('/closet', curWs));
+      return;
+    }
+    location.assign(wsHref('/closet/3d', curWs, k === 'rail' ? null : { view: k }));
   };
   return h('div', { class: 'seg view-seg', role: 'group', 'aria-label': 'View' },
-    [['rail', 'Rail'], ['items', 'Items'], ['ledger', 'Ledger'], ['layers', 'Walk-in']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
+    [['rail', 'Rail'], ['items', 'Items'], ['ledger', 'Ledger'], ['tidy', 'Tidy up'], ['layers', 'Walk-in']].map(([k, l]) => h('button', { type: 'button', 'aria-pressed': mode === k ? 'true' : 'false', onclick: () => go(k) }, l)));
 }
 
 /* The rail (11/5): every piece hung on one rail, shoes under it, a tag only where the ledger holds a price.
@@ -2026,8 +2219,8 @@ function tintStudioCanvas(img, rgb, isSide, isBottomSide) {
   const p = d.data;
   const W = c.width, H = c.height;
   const hookCutY = isSide ? Math.round(H * 0.106) : 0;
-  const hangerCutY = isSide ? Math.round(H * (isBottomSide ? 0.305 : 0.215)) : 0;
-  const sampleStartY = isSide ? Math.round(H * 0.33) : 0;
+  const hangerCutY = isSide ? Math.round(H * (isBottomSide ? 0.305 : 0.215)) : Math.round(H * 0.125);
+  const sampleStartY = isSide ? Math.round(H * 0.33) : Math.round(H * 0.13);
   let sr = 0, sg = 0, sb = 0, n = 0;
   for (let py = sampleStartY; py < H; py++) {
     for (let px = 0; px < W; px++) {
@@ -2039,36 +2232,49 @@ function tintStudioCanvas(img, rgb, isSide, isBottomSide) {
   const mr = sr / n, mg = sg / n, mb = sb / n;
   const meanSrcLum = Math.max(10, 0.2126 * mr + 0.7152 * mg + 0.0722 * mb);
   const tgtLum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-  const lumDenom = Math.max(40, meanSrcLum);
+  const peak = Math.max(rgb[0], rgb[1], rgb[2]);
+  const lumDenom = Math.max(42, meanSrcLum);
+  const baseR = tgtLum > 228 ? rgb[0] - 4 : rgb[0];
+  const baseG = tgtLum > 228 ? rgb[1] - 4 : rgb[1];
+  const baseB = tgtLum > 228 ? rgb[2] - 4 : rgb[2];
+  const basePeak = Math.max(baseR, baseG, baseB);
   for (let py = 0; py < H; py++) {
     if (py < hookCutY) continue; // keep chrome hook untouched
     for (let px = 0; px < W; px++) {
       const i = (py * W + px) * 4;
       if (!p[i + 3]) continue;
       const r = p[i], g = p[i + 1], b = p[i + 2];
+      let w = 1;
       if (isSide && py < hangerCutY && Math.abs(px - W * 0.5) < W * 0.26) {
-        const warmWood = r > 162 && g > 120 && b > 75 && (r - g) > 16 && (g - b) > 16;
+        const warmWood = r > 158 && g > 115 && b > 70 && (r - g) > 15 && (g - b) > 14;
         const steelHardware = Math.max(r, g, b) - Math.min(r, g, b) < 15 && r > 115;
         if (warmWood || steelHardware) continue;
+        const dist = Math.hypot(r - mr, g - mg, b - mb);
+        w = Math.max(0, Math.min(1, 1 - (dist - 85) / 55));
+      } else if (!isSide && meanSrcLum < 95 && py < hangerCutY && Math.abs(px - W * 0.5) < W * 0.20) {
+        const warmWood = r > 120 && g > 80 && b > 45 && (r - g) > 16 && (g - b) > 14;
+        if (warmWood) continue;
       }
-      const dist = Math.hypot(r - mr, g - mg, b - mb);
-      const w = isSide && py >= hangerCutY
-        ? Math.max(0, Math.min(1, 1 - (dist - 95) / 65))
-        : Math.max(0, Math.min(1, 1 - (dist - 70) / 60));
       if (w <= 0) continue;
       const srcLum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       const delta = (srcLum - meanSrcLum) / lumDenom;
+      const s = Math.tanh(delta * 1.15);
       let tr, tg, tb;
       if (tgtLum < 56) {
-        const sheen = delta * 36;
-        tr = Math.max(0, Math.min(248, rgb[0] * 0.84 + sheen));
-        tg = Math.max(0, Math.min(248, rgb[1] * 0.84 + sheen));
-        tb = Math.max(0, Math.min(248, rgb[2] * 0.84 + sheen));
+        const sheen = s * 28;
+        tr = Math.max(0, Math.min(248, baseR * 0.88 + sheen));
+        tg = Math.max(0, Math.min(248, baseG * 0.88 + sheen));
+        tb = Math.max(0, Math.min(248, baseB * 0.88 + sheen));
+      } else if (peak > 195 || tgtLum > 175) {
+        const lift = s >= 0 ? s * Math.max(6, 249 - basePeak) : s * 34;
+        tr = Math.max(0, Math.min(250, baseR + lift));
+        tg = Math.max(0, Math.min(250, baseG + lift));
+        tb = Math.max(0, Math.min(250, baseB + lift));
       } else {
-        const gain = 1 + delta * 0.56;
-        tr = Math.max(0, Math.min(252, rgb[0] * gain));
-        tg = Math.max(0, Math.min(252, rgb[1] * gain));
-        tb = Math.max(0, Math.min(252, rgb[2] * gain));
+        const gain = 1 + s * 0.38;
+        tr = Math.max(0, Math.min(250, baseR * gain));
+        tg = Math.max(0, Math.min(250, baseG * gain));
+        tb = Math.max(0, Math.min(250, baseB * gain));
       }
       p[i] = r + (tr - r) * w;
       p[i + 1] = g + (tg - g) * w;
@@ -2079,14 +2285,34 @@ function tintStudioCanvas(img, rgb, isSide, isBottomSide) {
   return c;
 }
 
+const studioCanvasCache = new Map();
+function cloneCanvas(src) {
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  if (src.dataset && src.dataset.side) c.dataset.side = src.dataset.side;
+  c.getContext('2d').drawImage(src, 0, 0);
+  return c;
+}
+async function cachedTintStudio(url, rgbOrPromise, isSide, isBottomSide) {
+  const rgb = await Promise.resolve(rgbOrPromise);
+  const key = `${url}|${Array.isArray(rgb) ? rgb.join(',') : 'raw'}|${isSide ? 1 : 0}|${isBottomSide ? 1 : 0}`;
+  let baseP = studioCanvasCache.get(key);
+  if (!baseP) {
+    baseP = loadImage(url).then((img) => tintStudioCanvas(img, rgb, isSide, isBottomSide));
+    studioCanvasCache.set(key, baseP);
+  }
+  const base = await baseP;
+  return base ? cloneCanvas(base) : null;
+}
+
 /** 3/4 side-draped studio garment (or studio shoe pair) recoloured to `rgbOrPromise`. */
 async function boutiqueRailPhoto(type, rgbOrPromise, seedIdx = 0, cut = null) {
   const sideKey = pickSideVariant(type, seedIdx, cut);
   const url = sideKey ? `/static/photos/side-${sideKey}.png` : SAMPLE_PHOTO[type] ? `/static/photos/sample-${SAMPLE_PHOTO[type]}.png` : null;
   if (!url) return null;
   try {
-    const [img, rgb] = await Promise.all([loadImage(url), Promise.resolve(rgbOrPromise)]);
-    return tintStudioCanvas(img, rgb, !!sideKey, !!(sideKey && BOTTOM_SIDE_KEYS.has(sideKey)));
+    return await cachedTintStudio(url, rgbOrPromise, !!sideKey, !!(sideKey && BOTTOM_SIDE_KEYS.has(sideKey)));
   } catch {
     return null;
   }
@@ -2101,12 +2327,120 @@ function sampleMediaNode(it, seedIdx = 0, cut = null) {
   p.then((cv) => { if (cv) wrap.replaceChildren(cv); });
   return wrap;
 }
-function samplePhoto(type, rgb) {
+function samplePhoto(type, rgbOrPromise) {
   const key = SAMPLE_PHOTO[type];
   if (!key) return null;
-  return loadImage(`/static/photos/sample-${key}.png`)
-    .then((img) => tintStudioCanvas(img, rgb, false, false))
-    .catch(() => null);
+  return cachedTintStudio(`/static/photos/sample-${key}.png`, rgbOrPromise, false, false).catch(() => null);
+}
+
+/** Crisp front-draped studio garment thumbnail recoloured from the owner's cut-out RGB (or palette), with instant SVG fallback. */
+function studioThumb(item, cuts = null, opts = {}) {
+  if (!item) return h('span', { class: 'muted' }, '—');
+  const cut = item.itemId && cuts ? cuts[item.itemId] : null;
+  if (opts.preferCut && cut) return cutCanvas(cut);
+  const paletteRgb = (META && META.palette && META.palette[item.color]) || null;
+  const rgbP = cut ? measureCutRgb(cut, paletteRgb) : paletteRgb;
+  const p = samplePhoto(item.type, rgbP);
+  const fallback = placeholder(item.color, item.type || item.slot);
+  if (!p) return cut ? cutCanvas(cut) : fallback;
+  const wrap = h('span', { class: 'st-thumb', 'data-from-photo': cut ? '1' : null }, fallback);
+  p.then((cv) => { if (cv) wrap.replaceChildren(cv); });
+  return wrap;
+}
+
+/** Editorial studio lookbook collage for a 3–4 piece outfit (`entries`: `{ slot, type, color, cut?, missing?, label? }[]`). */
+function outfitCollageNode(entries, opts = {}) {
+  const W = opts.compact ? 300 : 380;
+  const H = opts.compact ? 330 : 420;
+  const c = h('canvas', { width: W, height: H, class: `look-collage${opts.compact ? ' is-compact' : ''}` });
+  const ctx = c.getContext('2d');
+  const paintBg = () => {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#faf9f6');
+    g.addColorStop(1, '#f0ede6');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(21, 20, 19, 0.06)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+  };
+  paintBg();
+  const hasOuter = entries.some((e) => e.slot === 'outer');
+  const layout = hasOuter
+    ? { bottom: [0.38, 0.69, 0.43, 0.48], top: [0.34, 0.30, 0.42, 0.42], outer: [0.65, 0.34, 0.46, 0.50], shoes: [0.71, 0.80, 0.36, 0.22] }
+    : { bottom: [0.42, 0.68, 0.47, 0.50], top: [0.46, 0.28, 0.48, 0.44], shoes: [0.73, 0.80, 0.36, 0.22] };
+  const order = ['bottom', 'top', 'outer', 'shoes'];
+  const sorted = [...entries].sort((a, b) => order.indexOf(a.slot) - order.indexOf(b.slot));
+  Promise.all(sorted.map(async (e) => {
+    const paletteRgb = (META && META.palette && META.palette[e.color]) || null;
+    const rgbP = e.cut ? measureCutRgb(e.cut, paletteRgb) : paletteRgb;
+    const cv = await samplePhoto(e.type, rgbP);
+    return { e, cv };
+  })).then((loaded) => {
+    paintBg();
+    for (const { e, cv } of loaded) {
+      const box = layout[e.slot] || [0.5, 0.5, 0.4, 0.4];
+      const cx = box[0] * W, cy = box[1] * H, mw = box[2] * W, mh = box[3] * H;
+      if (cv) {
+        const s = Math.min(mw / cv.width, mh / cv.height);
+        const dw = cv.width * s, dh = cv.height * s;
+        ctx.save();
+        if (e.missing) {
+          ctx.globalAlpha = 0.36;
+          ctx.shadowColor = 'rgba(21, 20, 19, 0.16)';
+          ctx.shadowBlur = opts.compact ? 6 : 9;
+          ctx.shadowOffsetY = 2;
+          ctx.drawImage(cv, cx - dw / 2, cy - dh / 2, dw, dh);
+        } else {
+          ctx.shadowColor = 'rgba(21, 20, 19, 0.14)';
+          ctx.shadowBlur = opts.compact ? 10 : 15;
+          ctx.shadowOffsetY = opts.compact ? 4 : 6;
+          ctx.drawImage(cv, cx - dw / 2, cy - dh / 2, dw, dh);
+        }
+        ctx.restore();
+      }
+      if (e.missing) {
+        const tag = '? missing';
+        ctx.save();
+        ctx.font = `600 ${opts.compact ? 11 : 12}px system-ui, -apple-system, sans-serif`;
+        const tw = ctx.measureText(tag).width + 16;
+        const th = opts.compact ? 22 : 24;
+        ctx.fillStyle = 'rgba(255, 253, 249, 0.94)';
+        ctx.strokeStyle = '#c88a1a';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.fillRect(cx - tw / 2, cy - th / 2, tw, th);
+        ctx.strokeRect(cx - tw / 2, cy - th / 2, tw, th);
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#84540f';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(tag, cx, cy + 0.5);
+        ctx.restore();
+      } else if (!opts.compact && e.label && /^[A-Z]\d+$/.test(e.label)) {
+        ctx.save();
+        ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+        const tw = ctx.measureText(e.label).width + 18;
+        const th = 20;
+        const tx = cx + mw * 0.14 - tw / 2, ty = cy + mh * 0.24 - th / 2;
+        ctx.fillStyle = 'rgba(255, 253, 249, 0.95)';
+        ctx.strokeStyle = 'rgba(21, 20, 19, 0.16)';
+        ctx.lineWidth = 1;
+        ctx.fillRect(tx, ty, tw, th);
+        ctx.strokeRect(tx, ty, tw, th);
+        ctx.fillStyle = '#f37021';
+        ctx.beginPath();
+        ctx.arc(tx + 6, ty + th / 2, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#151413';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(e.label, tx + 11, ty + th / 2 + 0.5);
+        ctx.restore();
+      }
+    }
+  });
+  return c;
 }
 
 async function railView(view, ctx) {
@@ -2566,7 +2900,7 @@ async function closet3dScreen(view) {
   // Four views of the same pieces: Rail (default), Items gallery (?view=items), Ledger (?view=ledger), and Walk-in 3D (?view=layers).
   const rawView = new URLSearchParams(location.search).get('view');
   const mode = rawView === 'layers' || rawView === 'items' || rawView === 'ledger' ? rawView : 'rail';
-  const switcher = viewSwitch(mode);
+  const switcher = viewSwitch(mode, wsParam);
   const sharedCtx = { id, wsParam, v, review, A, byId, L, cuts, overlayRows, AVAILABILITY_LABEL, switcher };
   if (mode === 'rail') return railView(view, sharedCtx);
   if (mode === 'items') return itemsGalleryView(view, sharedCtx);
@@ -2598,7 +2932,7 @@ async function closet3dScreen(view) {
     tray.replaceChildren(...[h('h2', null, 'Outfit you are putting together'),
       ids.length ? h('div', { class: 'chip-row' }, ids.map((x) => h('button', { type: 'button', class: 'chip accent', onclick: () => show(x) }, `${x} · ${itemName(byId[x])}`))) : h('p', { class: 'muted' }, 'Tap a piece, then "Add to outfit". Any piece, one per layer.'),
       ids.length ? h('div', { class: 'row' },
-        wsParam ? h('span', { class: 'muted' }, `Picked: ${ids.join(' + ')}. Use them as locks on My wardrobe.`) : h('a', { class: 'btn small', href: `/today?lock=${ids.join(',')}` }, `Wear these today (${ids.join(' + ')})`),
+        h('a', { class: 'btn small', href: wsHref('/today', wsParam, { lock: ids.join(',') }) }, `Wear these today (${ids.join(' + ')})`),
         h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const k of Object.keys(outfit)) delete outfit[k]; paintTray(); } }, 'Clear')) : null].filter(Boolean));
   }
   view.append(h('div', { class: 'rail-head' }, h('h1', null, 'Closet in 3D'), switcher),
@@ -2630,9 +2964,9 @@ async function closet3dScreen(view) {
     panel.replaceChildren(h('h2', null, `${itemId} · ${itemName(it)}`), facts, h('h3', null, 'Price evidence'), evidence,
       h('div', { class: 'row' },
         h('button', { type: 'button', class: `btn small${inOutfit ? ' ghost' : ''}`, onclick: () => { if (inOutfit) delete outfit[cell.slot]; else outfit[cell.slot] = itemId; paintTray(); show(itemId); } }, inOutfit ? 'Remove from outfit' : 'Add to outfit'),
-        wsParam ? null : h('a', { class: 'btn small ghost', href: `/today?lock=${itemId}` }, 'Wear it today'),
-        wsParam ? null : h('a', { class: 'btn small ghost', href: `/closet?decide=${itemId}` }, 'Keep or let go?'),
-        wsParam ? null : h('a', { class: 'btn small ghost', href: '/closet' }, 'Review in My closet')));
+        h('a', { class: 'btn small ghost', href: wsHref('/today', wsParam, { lock: itemId }) }, 'Wear it today'),
+        h('a', { class: 'btn small ghost', href: wsHref('/closet', wsParam, { decide: itemId }) }, 'Keep or let go?'),
+        h('a', { class: 'btn small ghost', href: wsHref('/closet', wsParam) }, 'Review in My closet')));
     panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     const m = await getJson(`/api/ws/${id}/market/${itemId}`);
     const cards = (m && m.cards ? m.cards : []).filter((c) => c.entries.length);
