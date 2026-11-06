@@ -7,6 +7,11 @@ import { join } from 'node:path';
 import { scanPhoto, type ScanDeps } from './scan.ts';
 import { createFakeMetaTransport, FAKE_CLOSET_ANSWER, FAKE_SPARK_ANSWER } from './fakeMeta.ts';
 import type { Transport } from './closer/adapters/transport.ts';
+import { GARMENT_TYPES as ROOT_GARMENT_TYPES } from '../../../shared/wardrobe.ts';
+import { GARMENT_TYPES } from './closer/shared/wardrobe.ts';
+import { SPARK1_SCHEMA } from './closer/adapters/spark1.ts';
+import { CLOSET_SCHEMA, validateCloset } from './closetSpark.ts';
+import { validateSpark1 } from './closer/engine/validate.ts';
 import { decodePng, encodePng } from './closer/engine/png.ts';
 
 const dir = join(import.meta.dirname, 'test', 'fixtures');
@@ -179,4 +184,39 @@ test('SC-09 closet mode: Spark saying more garments exist adds a note; a bad mod
   const b = await scanPhoto({ jpegBase64, pngBase64, sentence: '', mode: 'wardrobe' }, deps(createFakeMetaTransport()));
   assert.equal(b.ok, false);
   if (!b.ok) assert.equal(b.status, 400);
+});
+
+
+test('both live scan schemas and runtime validators accept the complete canonical garment vocabulary', () => {
+  assert.deepEqual(GARMENT_TYPES, ROOT_GARMENT_TYPES);
+  for (const schema of [SPARK1_SCHEMA, CLOSET_SCHEMA]) {
+    assert.deepEqual(schema.properties.garments.items.properties.type.enum, Object.keys(ROOT_GARMENT_TYPES));
+  }
+  for (const type of Object.keys(ROOT_GARMENT_TYPES)) {
+    const garment = {...FAKE_SPARK_ANSWER.garments[0], type};
+    const outfit = {...structuredClone(FAKE_SPARK_ANSWER), garments: [garment], pin: [], offenders: []};
+    assert.equal(validateSpark1(outfit).ok, true, `outfit must accept ${type}`);
+    assert.equal(validateCloset({garments: [garment], more_not_listed: false}).ok, true, `closet must accept ${type}`);
+  }
+});
+
+test('hoodie survives both scan pipelines as a top with a usable cutout', async () => {
+  for (const mode of ['outfit', 'closet'] as const) {
+    const fake = createFakeMetaTransport();
+    const transport: Transport = async (req) => {
+      if ((req.body as {model?: string}).model !== 'muse-spark-1.3') return fake(req);
+      const garment = {...FAKE_SPARK_ANSWER.garments[0], type: 'hoodie'};
+      const answer = mode === 'closet'
+        ? {garments: [garment], more_not_listed: false}
+        : {...structuredClone(FAKE_SPARK_ANSWER), garments: [garment], pin: [], offenders: []};
+      return {status: 200, headers: {}, json: {output: [{type: 'message', content: [{type: 'output_text', text: JSON.stringify(answer)}]}]}};
+    };
+    const scan = await scanPhoto({jpegBase64, pngBase64, sentence: '', mode}, deps(transport));
+    assert.equal(scan.ok, true);
+    if (!scan.ok) continue;
+    assert.equal(scan.cards.length, 1);
+    assert.equal(scan.cards[0].type, 'hoodie');
+    assert.equal(scan.cards[0].slot, 'top');
+    assert.match(scan.cards[0].cutout, /^data:image\/png;base64,/);
+  }
 });

@@ -57,10 +57,15 @@ export const NAMED_HEX: Record<string, string> = {
 const SLOT_PREFIX: Record<string, string> = { outer: 'J', top: 'T', bottom: 'B', shoes: 'S' };
 export const SHAPE: Record<string, [GarmentSilhouette, GarmentCategory]> = {
   jacket: ['blazer', 'blazer'], coat: ['overcoat', 'outerwear'], track_jacket: ['blouson', 'outerwear'],
-  knit: ['knit', 'knitwear'], training_top: ['hoodie', 'hoodie'], tee: ['tee', 'shirt'], dress_shirt: ['tee', 'shirt'], blouse: ['tee', 'shirt'],
+  knit: ['knit', 'knitwear'], hoodie: ['hoodie', 'hoodie'], training_top: ['hoodie', 'hoodie'], tee: ['tee', 'shirt'], dress_shirt: ['tee', 'shirt'], blouse: ['tee', 'shirt'],
   trousers: ['trousers', 'trousers'], jeans: ['trousers', 'trousers'], chinos: ['trousers', 'trousers'], joggers: ['trousers', 'trousers'], shorts: ['trousers', 'trousers'], skirt: ['trousers', 'trousers'],
   sneakers: ['sneaker-box', 'footwear'], running_shoes: ['sneaker-box', 'footwear'], derby: ['sneaker-box', 'footwear'], loafers: ['sneaker-box', 'footwear'], boots: ['sneaker-box', 'footwear'], heels: ['sneaker-box', 'footwear'], sandals: ['sneaker-box', 'footwear'],
 };
+/** Every scanned piece starts selected, including footwear displayed on the glass fixtures. */
+export function defaultCardSelection(cards: ScanCard[]): Record<number, boolean> {
+  return Object.fromEntries(cards.map((card) => [card.cardId, true]));
+}
+
 const WHY: Record<string, string> = { too_formal: 'feels too formal', too_casual: 'feels too casual', color_clash: 'colour clashes', weather: 'wrong for the weather' };
 const DIRECTION: Record<string, string> = { less_formal: 'less formal', more_formal: 'more formal', warmer: 'warmer', cooler: 'cooler', none: 'no change asked' };
 const label = (t: string) => t.replace(/_/g, ' ');
@@ -201,9 +206,11 @@ interface ScanPhotoModalProps {
   garments: GarmentPiece[];
   onHang: (pieces: GarmentPiece[]) => void;
   workspaceId?: string | null;
+  hasAccount?: boolean;
+  onOpenAccount?: () => void;
 }
 
-export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose, garments, onHang, workspaceId = null }) => {
+export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose, garments, onHang, workspaceId = null, hasAccount = false, onOpenAccount }) => {
   const [mode, setMode] = useState<ScanMode | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [fromSample, setFromSample] = useState(false);
@@ -272,7 +279,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
       if (!j) setFailure({ ok: false, code: 'NO_ANSWER', detail: `the server answered ${res.status} without a body` });
       else if (j.ok) {
         setResult({ ...j, cards: receiptCards(j) });
-        setKeep(Object.fromEntries(j.cards.filter((c) => c.slot !== 'shoes').map((c) => [c.cardId, true])));
+        setKeep(defaultCardSelection(j.cards));
         if (j.mode) setMode(j.mode);
       } else {
         setFailure(j);
@@ -323,7 +330,7 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
       const stay = result.cards.filter((c) => kept.some((k) => k.first && k.card === c));
       const added = kept.filter((k) => !k.first).map((k) => ({ ...k.card, cardId: next++ }));
       notes.push(`Scanned the photo again in ${tiles.length} overlapping parts: ${added.length} more piece${added.length === 1 ? '' : 's'} found${failed ? `; ${failed} part${failed === 1 ? '' : 's'} could not be scanned` : ''}.`);
-      setKeep((s) => ({ ...s, ...Object.fromEntries(added.filter((c) => c.slot !== 'shoes').map((c) => [c.cardId, true])) }));
+      setKeep((s) => ({ ...s, ...defaultCardSelection(added) }));
       setResult({ ...result, cards: [...stay, ...added], calls, notes });
       setPartsDone(true);
     } catch (e) {
@@ -366,11 +373,16 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
 
         <div className="px-6 py-5 grid gap-5 md:grid-cols-[220px_1fr]">
           <div className="flex flex-col gap-3">
-            {live && !workspaceId && <p className="text-xs text-[#B8460F]" role="status">Sign in to scan with Meta and save the results to your wardrobe. You can still explore the sample closet.</p>}
+            {!workspaceId && (
+              <div className="space-y-2 text-xs text-[#B8460F]">
+                <p role="status">{hasAccount ? 'You are viewing the sample closet. Return to your wardrobe from Account to scan and save your own pieces.' : 'Sign in to scan with Meta and save the results to your wardrobe. You can still explore the sample closet.'}</p>
+                {onOpenAccount && <button type="button" onClick={onOpenAccount} className="min-h-9 px-3 py-1.5 rounded-lg border border-[#F37021] font-semibold">{hasAccount ? 'Open my wardrobe' : 'Sign in to scan & save'}</button>}
+              </div>
+            )}
             <button type="button" onClick={() => inputRef.current?.click()} className="aspect-[3/4] w-full rounded-xl border-2 border-dashed border-[#D9D3C9] bg-[#FAF8F4] flex flex-col items-center justify-center gap-2 overflow-hidden hover:border-[#F37021]" data-testid="scan-pick">
               {preview ? <img src={preview} alt="Chosen photo" className="w-full h-full object-cover" /> : (<><Camera className="w-6 h-6 text-[#B8460F]" /><span className="text-sm font-semibold text-[#141413]">Take or choose a photo</span><span className="text-[11px] text-[#6B665E]">one outfit, front on</span></>)}
             </button>
-            <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden" data-testid="scan-file" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
+            <input ref={inputRef} type="file" aria-label="Choose a closet or outfit photo" accept="image/*" capture="environment" className="hidden" data-testid="scan-file" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
             <button
               type="button"
               data-testid="scan-sample"
@@ -423,7 +435,6 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {result.cards.map((c) => {
-                    const shoes = c.slot === 'shoes';
                     // While Spark and the pixels disagree, the title names no colour until the owner picks one.
                     const color = chosen[c.cardId] ?? (c.colorChoices ? 'unknown' : c.maskColor ?? c.sparkColor);
                     return (
@@ -449,14 +460,10 @@ export const ScanPhotoModal: React.FC<ScanPhotoModalProps> = ({ isOpen, onClose,
                             </div>
                           </div>
                         )}
-                        {shoes ? (
-                          <span className="text-[10px] text-[#6B665E]">Shoes are not hung on the rail yet.</span>
-                        ) : (
                           <label className="flex items-center gap-1.5 text-[11px] text-[#141413] cursor-pointer">
                             <input type="checkbox" checked={!!keep[c.cardId]} onChange={(e) => setKeep((s) => ({ ...s, [c.cardId]: e.target.checked }))} />
-                            Hang this piece
+                            {c.slot === 'shoes' ? 'Display this pair' : 'Hang this piece'}
                           </label>
-                        )}
                       </div>
                     );
                   })}

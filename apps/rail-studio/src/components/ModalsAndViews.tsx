@@ -1267,6 +1267,8 @@ interface AddGarmentModalProps {
   nextIndex: number;
   workspaceId?: string | null;
   onScanCloset?: () => void;
+  hasAccount?: boolean;
+  onOpenAccount?: () => void;
 }
 
 // Studio shots from the design kit, for trying the photo scan without a photo of your own.
@@ -1354,6 +1356,8 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
   nextIndex,
   workspaceId = null,
   onScanCloset,
+  hasAccount = false,
+  onOpenAccount,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scanToken = useRef(0);
@@ -1467,7 +1471,7 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
     }
 
     if (!workspaceId && serverMode !== 'fake') {
-      setPhoto({ state: 'kept', plainUrl, fromSample, line: 'Photo kept as is · sign in to scan with Meta and save to your wardrobe.' });
+      setPhoto({ state: 'kept', plainUrl, fromSample, line: hasAccount ? 'Photo kept as is · return to your wardrobe to scan with Meta and save.' : 'Photo kept as is · sign in to scan with Meta and save to your wardrobe.' });
       return;
     }
 
@@ -1767,6 +1771,13 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
           </button>
         </div>
 
+        {!workspaceId && onOpenAccount && (
+          <div className="mt-3 space-y-1 text-xs text-[#B8460F]">
+            <p>{hasAccount ? 'You are viewing the sample closet. Return to your wardrobe from Account to scan and save your own pieces.' : 'Sign in to scan with Meta and save pieces to your account.'} Choose your photo again after switching wardrobes.</p>
+            <button type="button" onClick={onOpenAccount} className="min-h-9 px-3 py-1.5 rounded-lg border border-[#F37021] font-semibold">{hasAccount ? 'Open my wardrobe' : 'Sign in to scan & save'}</button>
+          </div>
+        )}
+
         {workspaceId && onScanCloset && (
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <button
@@ -1792,7 +1803,7 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
               className="text-[10px] font-mono-num text-[#F37021] font-semibold"
               data-testid="upload-scan-server-mode"
             >
-              {serverMode === 'live' && !workspaceId ? 'Sign in for Meta scanning · manual photo entry is available' : modeLine(serverMode)}
+              {serverMode === 'live' && !workspaceId ? (hasAccount ? 'Sample closet · open your wardrobe for Meta scanning' : 'Sign in for Meta scanning · manual photo entry is available') : modeLine(serverMode)}
             </span>
           </div>
 
@@ -1800,6 +1811,7 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
             <input
               ref={fileInputRef}
               id="garment-photo-upload-input"
+              aria-label="Choose a garment photo"
               data-testid="garment-photo-upload-input"
               type="file"
               accept="image/*"

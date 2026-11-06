@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cardsToPieces, receiptCards, modeLine, scanAttempted, samplePreviewOnly, cutoutSummary, type ScanOk } from './ScanPhotoModal.tsx';
+import { SHAPE, defaultCardSelection, cardsToPieces, receiptCards, modeLine, scanAttempted, samplePreviewOnly, cutoutSummary, type ScanOk } from './ScanPhotoModal.tsx';
 import { validateWardrobe } from '../../server/wardrobeSchema.ts';
 import { encodePng } from '../../server/closer/engine/png.ts';
 import { GARMENT_TYPES } from '../../../../shared/wardrobe.ts';
@@ -77,4 +77,49 @@ test('multipart cut-out summary reports all retained cards including mixed crop 
   assert.equal(cutoutSummary([{cutoutKind:'mask'}]),'1 SAM mask');
   assert.equal(cutoutSummary([{cutoutKind:'box_crop'}]),'1 box crop (no masks)');
   assert.equal(cutoutSummary([]),'No garment cut-outs');
+});
+
+
+test('every canonical garment is selected for display and keeps its receipt through wardrobe conversion', () => {
+  const scan = result('receipt-all-types');
+  const template = scan.cards[0];
+  scan.cards = Object.entries(GARMENT_TYPES).map(([type, slot], index) => ({
+    ...template, cardId: index + 1, type, slot,
+  }));
+  const cards = receiptCards(scan);
+  const selected = defaultCardSelection(cards);
+  const pieces = cardsToPieces(cards.filter(card => selected[card.cardId]), {}, 'live', [], 1234);
+  assert.equal(pieces.length, Object.keys(GARMENT_TYPES).length);
+  for (const [index, card] of cards.entries()) {
+    assert.ok(Object.hasOwn(SHAPE, card.type), `${card.type} needs an explicit fixture mapping`);
+    assert.equal(selected[card.cardId], true, `${card.type} must be available by default`);
+    assert.equal(pieces[index].scanCardId, String(card.cardId));
+    assert.equal(pieces[index].scanReceiptId, 'receipt-all-types');
+    assert.equal(pieces[index].imageUrl, cutout);
+    if (card.slot === 'shoes') {
+      assert.equal(pieces[index].silhouette, 'sneaker-box');
+      assert.equal(pieces[index].category, 'footwear');
+    }
+    if (card.type === 'hoodie') {
+      assert.equal(pieces[index].silhouette, 'hoodie');
+      assert.equal(pieces[index].category, 'hoodie');
+    }
+  }
+  assert.deepEqual(validateWardrobe(pieces), pieces);
+});
+
+test('new tile footwear starts selected without restoring previously deselected pieces', () => {
+  const first = receiptCards(result('receipt-first'));
+  const scan = result('receipt-shoes');
+  scan.cards[0] = {...scan.cards[0], type: 'sneakers', slot: 'shoes'};
+  const added = receiptCards(scan).map(card => ({...card, cardId: 8}));
+  const selection: Record<number, boolean> = {...defaultCardSelection(first), 1: false, ...defaultCardSelection(added)};
+  const cards = [...first, ...added];
+  const pieces = cardsToPieces(cards.filter(card => selection[card.cardId]), {}, 'live', [], 1234);
+  assert.equal(pieces.length, 1);
+  assert.equal(pieces[0].category, 'footwear');
+  assert.equal(pieces[0].scanReceiptId, 'receipt-shoes');
+  assert.equal(pieces[0].scanCardId, '1');
+  selection[8] = false;
+  assert.equal(cards.filter(card => selection[card.cardId]).length, 0);
 });

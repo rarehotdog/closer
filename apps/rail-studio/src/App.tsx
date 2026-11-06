@@ -414,6 +414,13 @@ export default function App() {
       if (controller.getSnapshot().epoch === renderEpoch) controller.reportError(error instanceof Error ? error.message : 'Could not prepare the photo.');
     }
   };
+  const openAccountFromPhoto = () => {
+    // Closing resets pending photos and receipts; Account owns the explicit wardrobe switch.
+    setScanOpen(false);
+    setAddModalOpen(false);
+    setAccountOpen(true);
+  };
+
   const handleAddGarment = (piece: GarmentPiece) => { void handleHangScanned([piece]); };
   const handleUpdateGarmentPhoto = async (garmentId: string, dataUrl: string) => {
     try {
@@ -967,7 +974,7 @@ export default function App() {
         )}
       </main>
 
-      <ScanPhotoModal key={`scan-${wardrobe.epoch}`} isOpen={scanOpen} onClose={() => setScanOpen(false)} garments={garments} onHang={handleHangScanned} workspaceId={privateView ? wardrobe.account?.workspaceId : null} />
+      <ScanPhotoModal key={`scan-${wardrobe.epoch}`} isOpen={scanOpen} onClose={() => setScanOpen(false)} garments={garments} onHang={handleHangScanned} hasAccount={!!wardrobe.account} onOpenAccount={openAccountFromPhoto} workspaceId={privateView ? wardrobe.account?.workspaceId : null} />
 
       {/* Modals for Full Asset Ledger, Target Looks, Hang New Piece, and Share link / GitHub command (copy only) */}
       <LedgerModal
@@ -993,6 +1000,8 @@ export default function App() {
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onAddGarment={handleAddGarment}
+        hasAccount={!!wardrobe.account}
+        onOpenAccount={openAccountFromPhoto}
         onScanCloset={() => { setAddModalOpen(false); setScanOpen(true); }}
         nextIndex={nextHangIndex}
         workspaceId={privateView ? wardrobe.account?.workspaceId : null}
