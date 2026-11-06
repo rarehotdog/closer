@@ -25,7 +25,7 @@ export function MarketPulse({ garments, onSelect, demo = false }: {
   const difference = sameSeries.length > 1 ? latest.price - first.price : null;
   const sample = demo || !isPersonalPiece(piece) || latest.isSample;
   return (
-    <aside aria-label="Market Pulse" className="hidden lg:block absolute top-24 right-6 z-10 w-[274px] rounded-2xl border border-[#E7E2DA] bg-white/95 p-4 shadow-sm backdrop-blur-sm">
+    <aside aria-label="Market Pulse" className="hidden lg:block absolute top-24 right-6 z-20 w-[274px] rounded-2xl border border-[#E7E2DA] bg-white/95 p-4 shadow-sm backdrop-blur-sm">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-[11px] font-semibold tracking-widest uppercase text-[#57534E]">Market Pulse</h2>
         {records.length > 1 && <button type="button" aria-label="Next price record" onClick={() => setIndex(value => (value + 1) % records.length)} className="min-h-9 inline-flex items-center gap-1 text-xs text-[#57534E] hover:text-[#B8460F]">

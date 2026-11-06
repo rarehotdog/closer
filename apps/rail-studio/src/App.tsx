@@ -829,6 +829,7 @@ export default function App() {
                     <button
                       key={tab.id}
                       type="button"
+                      data-testid={`rail-filter-${tab.id}`}
                       onClick={() => {
                         setFilterTab(tab.id);
                         setRailOffset(0);
