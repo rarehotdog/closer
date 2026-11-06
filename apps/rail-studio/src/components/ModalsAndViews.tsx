@@ -941,6 +941,51 @@ export const GitHubShareModal: React.FC<GitHubShareModalProps> = ({
             </a>
           </div>
         </div>
+
+        {/* 4. Concise Help Guide: How to Commit Changes to GitHub from AI Studio */}
+        <div
+          data-testid="github-commit-help-section"
+          className="p-3.5 rounded-xl bg-[#FAF8F5] border border-[#E7E2DA] space-y-2"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-[#141413] flex items-center gap-1.5">
+              <GitBranch className="w-3.5 h-3.5 text-[#F37021]" />
+              <span>How to Save &amp; Commit Changes to GitHub from AI Studio</span>
+            </span>
+            <span className="text-[10px] font-mono-num px-1.5 py-0.5 rounded bg-white border border-[#E7E2DA] text-[#57534E]">
+              3-Step Guide
+            </span>
+          </div>
+          <ol className="text-[11px] text-[#57534E] space-y-1.5 list-decimal list-inside leading-relaxed">
+            <li>
+              <strong className="text-[#141413]">Save in AI Studio:</strong> Click{' '}
+              <span className="font-mono-num font-semibold text-[#141413]">Save</span> (or press{' '}
+              <kbd className="px-1 py-0.5 text-[10px] bg-white border border-[#E7E2DA] rounded font-mono-num">
+                Ctrl+S
+              </kbd>{' '}
+              /{' '}
+              <kbd className="px-1 py-0.5 text-[10px] bg-white border border-[#E7E2DA] rounded font-mono-num">
+                Cmd+S
+              </kbd>
+              ) in the top-right AI Studio toolbar so your project is pinned to{' '}
+              <span className="font-semibold text-[#141413]">My Library / Saved Apps</span>.
+            </li>
+            <li>
+              <strong className="text-[#141413]">Direct GitHub Export or ZIP:</strong> Click the{' '}
+              <span className="font-semibold text-[#141413]">GitHub (Export to GitHub)</span> icon in
+              the AI Studio top toolbar to push directly, or click{' '}
+              <span className="font-semibold text-[#141413]">Download App (ZIP)</span> +{' '}
+              <span className="font-semibold text-[#141413]">Download Closet JSON</span> above.
+            </li>
+            <li>
+              <strong className="text-[#141413]">Commit &amp; Push to Branch:</strong> Click{' '}
+              <span className="font-semibold text-[#F37021]">Copy Push Command</span> above and run it
+              in your local repository terminal to create branch{' '}
+              <code className="font-mono-num text-[#141413]">{branchName}</code>, commit your wardrobe
+              ledger &amp; 3D changes, and push to <code className="font-mono-num text-[#141413]">{repoSlug}</code>.
+            </li>
+          </ol>
+        </div>
       </div>
     </div>
   );
@@ -1300,6 +1345,8 @@ const SILHOUETTE_LABEL: Record<GarmentSilhouette, string> = {
   blouson: 'Leather Blouson',
   knit: 'Cashmere Knit',
   tee: 'Heavyweight Tee',
+  trousers: 'Savile Row Trouser Clamp',
+  'sneaker-box': '2-Tier Glossy Glass Box',
 };
 
 const DEFAULT_SILHOUETTE: GarmentSilhouette = 'hoodie';
@@ -2007,6 +2054,8 @@ export const AddGarmentModal: React.FC<AddGarmentModalProps> = ({
                 <option value="blouson">Leather Blouson</option>
                 <option value="knit">Cashmere Knit</option>
                 <option value="tee">Heavyweight Tee</option>
+                <option value="trousers">Tailored Pleated Trousers</option>
+                <option value="sneaker-box">Glossy Glass Shoe Vitrine</option>
               </select>
             </div>
           </div>

@@ -15,7 +15,8 @@ export const scopedId = (kind: string, workspaceId: string, ...ids: string[]) =>
 export type TrustedScanItem = Pick<Item, 'type' | 'color' | 'formality'>;
 export type ScanItemResolver = (workspaceId:string,piece:GarmentPiece)=>TrustedScanItem|null;
 export function canonicalItem(piece: GarmentPiece, trusted:TrustedScanItem|null=null): Item {
-  const type: GarmentType = trusted?.type ?? (piece.category === 'trousers' ? 'trousers' : piece.category === 'hoodie' ? 'hoodie'
+  const type: GarmentType = trusted?.type ?? (piece.category === 'footwear' || piece.silhouette === 'sneaker-box' ? 'sneakers'
+    : piece.category === 'trousers' || piece.silhouette === 'trousers' ? 'trousers' : piece.category === 'hoodie' ? 'hoodie'
     : piece.category === 'knitwear' ? 'knit' : piece.category === 'blazer' ? 'jacket'
     : piece.category === 'outerwear' ? piece.silhouette === 'overcoat' ? 'coat' : 'jacket'
     : piece.silhouette === 'tee' ? 'tee' : 'dress_shirt');

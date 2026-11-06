@@ -41,7 +41,7 @@ import { MarketPulse } from './components/MarketPulse';
 import { isPersonalPiece } from './utils/accountWardrobe';
 import { preparePiecePhotos, preparePhotoUrl } from './utils/photoUpload';
 
-type FilterTab = 'all' | 'KRW' | 'USD' | 'sell' | 'today';
+type FilterTab = 'all' | 'pants-shoes' | 'KRW' | 'USD' | 'sell' | 'today';
 
 function todayDate() {
   const now = new Date();
@@ -145,6 +145,14 @@ export default function App() {
   // Filtered garments displayed on the 3D rail
   const visibleGarments = useMemo(() => {
     return garments.filter((g) => {
+      if (filterTab === 'pants-shoes') {
+        return (
+          g.category === 'trousers' ||
+          g.category === 'footwear' ||
+          g.silhouette === 'trousers' ||
+          g.silhouette === 'sneaker-box'
+        );
+      }
       if (filterTab === 'KRW') return g.currency === 'KRW';
       if (filterTab === 'USD') return g.currency === 'USD';
       if (filterTab === 'sell') return g.lastDecision?.choice === 'sell';
@@ -271,7 +279,7 @@ export default function App() {
     setSelectedId(id);
     const idx = visibleGarments.findIndex((g) => g.id === id);
     if (idx !== -1) {
-      const spacing = 0.56;
+      const spacing = visibleGarments.length <= 5 ? 0.86 : 0.58;
       const totalWidth = (visibleGarments.length - 1) * spacing;
       const targetBaseX = -totalWidth / 2 + idx * spacing;
       animateRailOffsetTo(targetBaseX);
@@ -800,6 +808,18 @@ export default function App() {
                   {(
                     [
                       { id: 'all', label: `All (${garments.length})` },
+                      {
+                        id: 'pants-shoes',
+                        label: `Pants & Glass Shoes (${
+                          garments.filter(
+                            (g) =>
+                              g.category === 'trousers' ||
+                              g.category === 'footwear' ||
+                              g.silhouette === 'trousers' ||
+                              g.silhouette === 'sneaker-box',
+                          ).length
+                        })`,
+                      },
                       { id: 'KRW', label: 'KRW ₩' },
                       { id: 'USD', label: 'USD $' },
                       { id: 'sell', label: `Sell (${ledgerSummary.sellCount})` },

@@ -27,6 +27,7 @@ import {
   isKeptAfterReload,
   NEUTRAL_DECISION_BADGE,
   parseQuickOrderLine,
+  resolve3DDisplayVariant,
   summarizeKeepSellEvidence,
 } from './ledgerLogic';
 import { FeeStructure, GarmentPiece } from '../types/closet';
@@ -250,10 +251,10 @@ test('computeLedgerSummary separates KRW and USD and never adds Sample prices to
 
 test('seed closet: decision counts expose the undecided piece and its denominator', () => {
   const summary = computeLedgerSummary(INITIAL_GARMENTS);
-  assert.equal(summary.keepCount, 6);
+  assert.equal(summary.keepCount, 10);
   assert.equal(summary.sellCount, 2);
   assert.equal(summary.undecidedCount, 1);
-  assert.equal(summary.totalOwnedPieces, 9);
+  assert.equal(summary.totalOwnedPieces, 13);
   assert.equal(
     summary.keepCount + summary.sellCount + summary.undecidedCount,
     summary.totalOwnedPieces,
@@ -466,11 +467,11 @@ test('rotation heat tiers come from logged wears; no wear log is "no log", never
   assert.equal(computeGarmentRotationHeat(seed('S1')).tier, 'no-log');
 });
 
-test('rotation heatmap legend counts add up to the non-sample pieces (seed: 6 Hot, 0 Warm, 2 Cold, 1 no log, of 9)', () => {
+test('rotation heatmap legend counts add up to the non-sample pieces (seed: 9 Hot, 1 Warm, 2 Cold, 1 no log, of 13)', () => {
   const c = countRotationTiers(INITIAL_GARMENTS);
-  assert.equal(c.total, 9);
-  assert.equal(c.hot, 6);
-  assert.equal(c.warm, 0);
+  assert.equal(c.total, 13);
+  assert.equal(c.hot, 9);
+  assert.equal(c.warm, 1);
   assert.equal(c.cool, 2);
   assert.equal(c.noLog, 1);
   assert.equal(c.hot + c.warm + c.cool + c.noLog, c.total);
@@ -521,15 +522,23 @@ test('compute30DayRotationTrend counts Keep vs Sell DECISIONS within 30 days', (
   }
 });
 
-test('seed closet: 30-day decisions are 5 Keep and 2 Sell of 9 pieces; Sell value $409 at latest price seen', () => {
+test('seed closet: 30-day decisions are 9 Keep and 2 Sell of 13 pieces; Sell value $409 at latest price seen', () => {
   const trend = compute30DayRotationTrend(INITIAL_GARMENTS);
-  assert.equal(trend.keptLast30d, 5);
+  assert.equal(trend.keptLast30d, 9);
   assert.equal(trend.sellDecidedLast30d, 2);
-  assert.equal(trend.totalDecided30d, 7);
-  assert.equal(trend.ownedPieces, 9);
+  assert.equal(trend.totalDecided30d, 11);
+  assert.equal(trend.ownedPieces, 13);
   assert.equal(trend.sellDecidedValuationUSD, 409);
-  assert.equal(trend.keptPricedCount, 5);
+  assert.equal(trend.keptPricedCount, 9);
   assert.equal(trend.sellDecidedPricedCount, 2);
+});
+
+test('resolve3DDisplayVariant maps footwear to glossy-glass-box, trousers to trouser-clamp, and tops/outerwear to sartorial-hanger', () => {
+  assert.equal(resolve3DDisplayVariant(seed('F1')).variant, 'glossy-glass-box');
+  assert.equal(resolve3DDisplayVariant(seed('F2')).variant, 'glossy-glass-box');
+  assert.equal(resolve3DDisplayVariant(seed('P1')).variant, 'trouser-clamp');
+  assert.equal(resolve3DDisplayVariant(seed('P2')).variant, 'trouser-clamp');
+  assert.equal(resolve3DDisplayVariant(seed('J1')).variant, 'sartorial-hanger');
 });
 
 test('a decided piece with no price on record is counted as a decision but not summed (no snapshot fallback)', () => {

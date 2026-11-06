@@ -57,8 +57,9 @@ export const NAMED_HEX: Record<string, string> = {
 const SLOT_PREFIX: Record<string, string> = { outer: 'J', top: 'T', bottom: 'B', shoes: 'S' };
 export const SHAPE: Record<string, [GarmentSilhouette, GarmentCategory]> = {
   jacket: ['blazer', 'blazer'], coat: ['overcoat', 'outerwear'], track_jacket: ['blouson', 'outerwear'],
-  knit: ['knit', 'knitwear'], training_top: ['hoodie', 'hoodie'], tee: ['tee', 'shirt'], dress_shirt: ['tee', 'shirt'], blouse: ['tee', 'shirt'],
-  trousers: ['tee', 'trousers'], jeans: ['tee', 'trousers'], chinos: ['tee', 'trousers'], joggers: ['tee', 'trousers'], shorts: ['tee', 'trousers'], skirt: ['tee', 'trousers'],
+  knit: ['knit', 'knitwear'], hoodie: ['hoodie', 'hoodie'], training_top: ['hoodie', 'hoodie'], tee: ['tee', 'shirt'], dress_shirt: ['tee', 'shirt'], blouse: ['tee', 'shirt'],
+  trousers: ['trousers', 'trousers'], jeans: ['trousers', 'trousers'], chinos: ['trousers', 'trousers'], joggers: ['trousers', 'trousers'], shorts: ['trousers', 'trousers'], skirt: ['trousers', 'trousers'],
+  sneakers: ['sneaker-box', 'footwear'], derby: ['sneaker-box', 'footwear'], running_shoes: ['sneaker-box', 'footwear'], loafers: ['sneaker-box', 'footwear'],
 };
 const WHY: Record<string, string> = { too_formal: 'feels too formal', too_casual: 'feels too casual', color_clash: 'colour clashes', weather: 'wrong for the weather' };
 const DIRECTION: Record<string, string> = { less_formal: 'less formal', more_formal: 'more formal', warmer: 'warmer', cooler: 'cooler', none: 'no change asked' };

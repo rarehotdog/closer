@@ -36,6 +36,54 @@ export function platformsForCurrency(
   return RESALE_PLATFORMS.filter((p) => p.region === region);
 }
 
+function createTrousersStudioSvg(
+  primaryHex: string,
+  secondaryHex: string,
+  code: string,
+): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 280" fill="none">
+    <rect width="240" height="280" rx="18" fill="#FAF8F5"/>
+    <line x1="70" y1="26" x2="170" y2="26" stroke="#C5A572" stroke-width="5" stroke-linecap="round"/>
+    <rect x="86" y="20" width="12" height="16" rx="2" fill="#D4D4D8"/>
+    <rect x="142" y="20" width="12" height="16" rx="2" fill="#D4D4D8"/>
+    <rect x="68" y="34" width="104" height="20" rx="4" fill="${secondaryHex}"/>
+    <rect x="114" y="34" width="14" height="20" rx="2" fill="#C5A572"/>
+    <path d="M70 52 L117 52 L114 252 L66 252 Z" fill="${primaryHex}"/>
+    <path d="M123 52 L170 52 L174 252 L126 252 Z" fill="${primaryHex}"/>
+    <line x1="92" y1="56" x2="90" y2="248" stroke="${secondaryHex}" stroke-width="2.5" stroke-opacity="0.7"/>
+    <line x1="148" y1="56" x2="150" y2="248" stroke="${secondaryHex}" stroke-width="2.5" stroke-opacity="0.7"/>
+    <rect x="65" y="244" width="50" height="10" rx="2" fill="${secondaryHex}"/>
+    <rect x="125" y="244" width="50" height="10" rx="2" fill="${secondaryHex}"/>
+    <text x="120" y="272" text-anchor="middle" font-family="monospace" font-size="11" font-weight="700" fill="#57534E">${code} · TAILORED TROUSERS</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function createGlassSneakerVitrineSvg(
+  upperHex: string,
+  accentHex: string,
+  soleHex: string,
+  code: string,
+): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 260" fill="none">
+    <rect width="260" height="260" rx="18" fill="#FAF8F5"/>
+    <rect x="24" y="36" width="212" height="164" rx="8" fill="#FFFFFF" fill-opacity="0.72" stroke="#C5A572" stroke-width="3"/>
+    <rect x="38" y="42" width="184" height="5" rx="2.5" fill="#FFFBEB"/>
+    <path d="M36 184 L126 46 L148 46 L58 184 Z" fill="#FFFFFF" fill-opacity="0.55"/>
+    <path d="M138 184 L216 64 L226 64 L148 184 Z" fill="#FFFFFF" fill-opacity="0.35"/>
+    <g transform="translate(46, 108)">
+      <rect x="0" y="54" width="168" height="14" rx="5" fill="${soleHex}"/>
+      <path d="M8 14 H66 L82 32 L156 36 C164 37 168 43 168 54 H0 V24 C0 18 4 14 8 14 Z" fill="${upperHex}" stroke="#E7E2DA" stroke-width="1.5"/>
+      <path d="M34 36 L112 28 L98 46 L30 44 Z" fill="${accentHex}"/>
+      <rect x="58" y="6" width="24" height="18" rx="4" fill="${accentHex}"/>
+    </g>
+    <rect x="20" y="196" width="220" height="20" rx="4" fill="#18181A"/>
+    <rect x="86" y="201" width="88" height="10" rx="2" fill="#C5A572"/>
+    <text x="130" y="238" text-anchor="middle" font-family="monospace" font-size="11" font-weight="700" fill="#141413">${code} · GLOSSY GLASS VITRINE</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 export const INITIAL_GARMENTS: GarmentPiece[] = [
   {
     id: 'piece-j1',
@@ -700,6 +748,272 @@ export const INITIAL_GARMENTS: GarmentPiece[] = [
       confirmed: false,
     },
   },
+  {
+    id: 'piece-p1',
+    code: 'P1',
+    name: 'Twisted Belted Wide Pleated Wool Trousers',
+    brand: 'LEMAIRE',
+    category: 'trousers',
+    silhouette: 'trousers',
+    currency: 'KRW',
+    purchasePrice: 740000,
+    isSample: false,
+    colorHex: '#2C2A29',
+    secondaryColorHex: '#3F3C3A',
+    fabricLabel: 'Dry Virgin Wool Twill',
+    hangerType: 'walnut-brass',
+    wearsLast60Days: 10,
+    wearLogStatus: 'verified',
+    lastWornDate: '2026-11-02',
+    conditionGrade: 'Excellent (A+)',
+    upcomingOccasions: [
+      'Matches Collector Glass Vault & Tailored Trousers Look',
+      'Hannam Studio Architecture Critique',
+    ],
+    lockedForToday: false,
+    imageUrl: createTrousersStudioSvg('#2C2A29', '#3F3C3A', 'P1'),
+    frontImageUrl: createTrousersStudioSvg('#2C2A29', '#3F3C3A', 'P1'),
+    observations: [
+      {
+        id: 'obs-p1-1',
+        date: '2026-10-08',
+        platform: 'KREAM',
+        price: 640000,
+        currency: 'KRW',
+        kind: 'traded',
+      },
+      {
+        id: 'obs-p1-2',
+        date: '2026-10-21',
+        platform: 'Musinsa Used',
+        price: 665000,
+        currency: 'KRW',
+        kind: 'listed',
+      },
+      {
+        id: 'obs-p1-3',
+        date: '2026-11-03',
+        platform: 'KREAM',
+        price: 690000,
+        currency: 'KRW',
+        kind: 'traded',
+      },
+    ],
+    feeConfig: {
+      platform: 'KREAM',
+      feeRatePct: 5.5,
+      shippingCost: 3500,
+      feeRateConfirmed: false,
+      shippingConfirmed: false,
+      confirmed: false,
+    },
+    lastDecision: {
+      id: 'd_901p',
+      choice: 'keep',
+      savedAt: '2026-10-25',
+      snapshotPrice: 690000,
+      snapshotCurrency: 'KRW',
+      snapshotPlatform: 'KREAM',
+    },
+  },
+  {
+    id: 'piece-p2',
+    code: 'P2',
+    name: '1981M Loose-Fit Raw Selvedge Denim Trousers',
+    brand: 'ACNE STUDIOS',
+    category: 'trousers',
+    silhouette: 'trousers',
+    currency: 'USD',
+    purchasePrice: 650,
+    isSample: false,
+    colorHex: '#2B3A4A',
+    secondaryColorHex: '#43586E',
+    fabricLabel: '14oz Japanese Indigo Selvedge',
+    hangerType: 'brushed-brass',
+    wearsLast60Days: 6,
+    wearLogStatus: 'verified',
+    lastWornDate: '2026-10-29',
+    conditionGrade: 'Mint (S)',
+    upcomingOccasions: ['Weekend Studio Archive'],
+    lockedForToday: false,
+    imageUrl: createTrousersStudioSvg('#2B3A4A', '#43586E', 'P2'),
+    frontImageUrl: createTrousersStudioSvg('#2B3A4A', '#43586E', 'P2'),
+    observations: [
+      {
+        id: 'obs-p2-1',
+        date: '2026-10-05',
+        platform: 'Grailed',
+        price: 560,
+        currency: 'USD',
+        kind: 'traded',
+      },
+      {
+        id: 'obs-p2-2',
+        date: '2026-10-19',
+        platform: 'eBay',
+        price: 590,
+        currency: 'USD',
+        kind: 'listed',
+      },
+      {
+        id: 'obs-p2-3',
+        date: '2026-11-02',
+        platform: 'Grailed',
+        price: 620,
+        currency: 'USD',
+        kind: 'traded',
+      },
+    ],
+    feeConfig: {
+      platform: 'Grailed',
+      feeRatePct: 9.0,
+      shippingCost: 18,
+      feeRateConfirmed: false,
+      shippingConfirmed: false,
+      confirmed: false,
+    },
+    lastDecision: {
+      id: 'd_902p',
+      choice: 'keep',
+      savedAt: '2026-10-28',
+      snapshotPrice: 620,
+      snapshotCurrency: 'USD',
+      snapshotPlatform: 'Grailed',
+    },
+  },
+  {
+    id: 'piece-f1',
+    code: 'F1',
+    name: 'Replica Painter GAT Limited Glass-Box Edition',
+    brand: 'MAISON MARGIELA',
+    category: 'footwear',
+    silhouette: 'sneaker-box',
+    currency: 'KRW',
+    purchasePrice: 890000,
+    isSample: false,
+    colorHex: '#EFECE6',
+    secondaryColorHex: '#C5A572',
+    fabricLabel: 'Hand-Painted Calfskin & Gum Sole · Glossy Glass Vitrine',
+    hangerType: 'brushed-brass',
+    wearsLast60Days: 8,
+    wearLogStatus: 'verified',
+    lastWornDate: '2026-11-01',
+    conditionGrade: 'Mint (S)',
+    upcomingOccasions: [
+      'Matches Collector Glass Vault & Tailored Trousers Look',
+      'Cheongdam Flagship Exhibition',
+    ],
+    lockedForToday: true,
+    imageUrl: createGlassSneakerVitrineSvg('#EFECE6', '#C5A572', '#C89D66', 'F1'),
+    frontImageUrl: createGlassSneakerVitrineSvg('#EFECE6', '#C5A572', '#C89D66', 'F1'),
+    observations: [
+      {
+        id: 'obs-f1-1',
+        date: '2026-10-06',
+        platform: 'KREAM',
+        price: 860000,
+        currency: 'KRW',
+        kind: 'traded',
+      },
+      {
+        id: 'obs-f1-2',
+        date: '2026-10-20',
+        platform: 'KREAM',
+        price: 910000,
+        currency: 'KRW',
+        kind: 'traded',
+      },
+      {
+        id: 'obs-f1-3',
+        date: '2026-11-04',
+        platform: 'KREAM',
+        price: 965000,
+        currency: 'KRW',
+        kind: 'traded',
+      },
+    ],
+    feeConfig: {
+      platform: 'KREAM',
+      feeRatePct: 5.5,
+      shippingCost: 3500,
+      feeRateConfirmed: false,
+      shippingConfirmed: false,
+      confirmed: false,
+    },
+    lastDecision: {
+      id: 'd_903f',
+      choice: 'keep',
+      savedAt: '2026-10-22',
+      snapshotPrice: 910000,
+      snapshotCurrency: 'KRW',
+      snapshotPlatform: 'KREAM',
+    },
+  },
+  {
+    id: 'piece-f2',
+    code: 'F2',
+    name: "Travis Scott × Jordan 1 Low OG 'Reverse Mocha' (Glass Vault)",
+    brand: 'NIKE × CACTUS JACK',
+    category: 'footwear',
+    silhouette: 'sneaker-box',
+    currency: 'USD',
+    purchasePrice: 1180,
+    isSample: false,
+    colorHex: '#6E5442',
+    secondaryColorHex: '#F3EFE6',
+    fabricLabel: 'Deadstock Nubuck & Sail Swooshes · Glossy Acrylic Case',
+    hangerType: 'walnut-brass',
+    wearsLast60Days: 4,
+    wearLogStatus: 'verified',
+    lastWornDate: '2026-10-18',
+    conditionGrade: 'Mint (S)',
+    upcomingOccasions: ['Collector Showcase · Glass Vitrine #02'],
+    lockedForToday: false,
+    imageUrl: createGlassSneakerVitrineSvg('#6E5442', '#F3EFE6', '#EAE3D2', 'F2'),
+    frontImageUrl: createGlassSneakerVitrineSvg('#6E5442', '#F3EFE6', '#EAE3D2', 'F2'),
+    observations: [
+      {
+        id: 'obs-f2-1',
+        date: '2026-10-04',
+        platform: 'StockX',
+        price: 1290,
+        currency: 'USD',
+        kind: 'traded',
+      },
+      {
+        id: 'obs-f2-2',
+        date: '2026-10-19',
+        platform: 'Grailed',
+        price: 1360,
+        currency: 'USD',
+        kind: 'traded',
+      },
+      {
+        id: 'obs-f2-3',
+        date: '2026-11-04',
+        platform: 'StockX',
+        price: 1440,
+        currency: 'USD',
+        kind: 'traded',
+      },
+    ],
+    feeConfig: {
+      platform: 'StockX',
+      feeRatePct: 9.5,
+      shippingCost: 14,
+      feeRateConfirmed: false,
+      shippingConfirmed: false,
+      confirmed: false,
+    },
+    lastDecision: {
+      id: 'd_904f',
+      choice: 'keep',
+      savedAt: '2026-10-25',
+      snapshotPrice: 1360,
+      snapshotCurrency: 'USD',
+      snapshotPlatform: 'StockX',
+    },
+  },
 ];
 
 export const TARGET_LOOKS: TargetLook[] = [
@@ -720,5 +1034,11 @@ export const TARGET_LOOKS: TargetLook[] = [
     title: 'Weekend Studio Archive',
     occasion: 'Supple Leather & Heavyweight Fleece',
     pieceIds: ['J4', 'T2', 'B1'],
+  },
+  {
+    id: 'look-4',
+    title: 'Collector Glass Vault & Tailored Trousers',
+    occasion: 'Pleated Wool Trousers & Limited Glass-Box Footwear',
+    pieceIds: ['P1', 'P2', 'F1', 'F2'],
   },
 ];
